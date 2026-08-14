@@ -1,0 +1,8 @@
+{"id": "smoke-instr-1", "prompt": "Describe what an inference server is in fewer than 30 words.", "constraints": [{"kind": "word_count_max", "value": 30}], "max_tokens": 120}
+{"id": "smoke-instr-2", "prompt": "Reply only with a JSON object having the keys \"name\" and \"year\". No additional text.", "constraints": [{"kind": "json_output", "root": "object"}], "max_tokens": 120}
+{"id": "smoke-instr-3", "prompt": "List exactly three advantages of deploying a model on-premise. Use one dash bullet for each and nothing else.", "constraints": [{"kind": "bullet_count", "value": 3}], "max_tokens": 200}
+{"id": "smoke-instr-4", "prompt": "Write one sentence about model quantization. Write it entirely in lowercase and without using any comma.", "constraints": [{"kind": "all_lowercase"}, {"kind": "no_commas"}], "max_tokens": 120}
+{"id": "smoke-instr-5", "prompt": "Explain what TTFT latency is. Start your answer exactly with the word \"TTFT\".", "constraints": [{"kind": "starts_with", "value": "TTFT", "ignore_case": false}], "max_tokens": 150}
+{"id": "smoke-instr-6", "prompt": "Write at least 60 words about why measuring a model's energy consumption matters.", "constraints": [{"kind": "word_count_min", "value": 60}], "max_tokens": 400}
+{"id": "smoke-instr-7", "prompt": "Mention the word \"VRAM\" when discussing hardware requirements, and do not mention any commercial GPU brand.", "constraints": [{"kind": "must_contain", "value": "VRAM"}, {"kind": "must_not_contain", "value": "NVIDIA"}], "max_tokens": 200}
+{"id": "smoke-instr-8", "prompt": "Summarize in at most two lines what a performance benchmark does.", "constraints": [{"kind": "line_count_max", "value": 2}], "max_tokens": 150}

@@ -1,0 +1,8 @@
+{"id": "smoke-reason-1", "question": "If a train covers 120 km in 2 hours at constant speed, what is its speed?", "choices": ["40 km/h", "60 km/h", "120 km/h", "240 km/h"], "answer": "B"}
+{"id": "smoke-reason-2", "question": "What is 17 x 4?", "choices": ["58", "64", "68", "74"], "answer": "C"}
+{"id": "smoke-reason-3", "question": "All squares are rectangles. All rectangles are parallelograms. What necessarily follows?", "choices": ["All parallelograms are squares", "All squares are parallelograms", "No rectangle is a square", "Some parallelograms are not rectangles"], "answer": "B"}
+{"id": "smoke-reason-4", "question": "A shirt costs 40 euros and has a 25% discount. What is the final price?", "choices": ["10 euros", "25 euros", "30 euros", "35 euros"], "answer": "C"}
+{"id": "smoke-reason-5", "question": "In the sequence 2, 6, 12, 20, 30, what is the next number?", "choices": ["36", "40", "42", "46"], "answer": "C"}
+{"id": "smoke-reason-6", "question": "If today is Wednesday, what day will it be in 10 days?", "choices": ["Friday", "Saturday", "Sunday", "Monday"], "answer": "B"}
+{"id": "smoke-reason-7", "question": "A tank fills at 5 litres per minute and holds 150 litres. How long does it take to fill from empty?", "choices": ["15 minutes", "25 minutes", "30 minutes", "50 minutes"], "answer": "C"}
+{"id": "smoke-reason-8", "question": "What is the result of (8 + 4) / 3?", "choices": ["2", "3", "4", "6"], "answer": "C"}

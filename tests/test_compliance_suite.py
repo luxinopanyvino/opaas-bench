@@ -1,0 +1,159 @@
+import json
+
+import pytest
+
+from opaas_bench.declaration import (
+    DECLARED_REQUIREMENTS,
+    DeclarationError,
+    load_declaration,
+    template,
+)
+from opaas_bench.suites.compliance import ComplianceSuite
+from opaas_bench.telemetry.network import EXTERNAL, LOOPBACK, PRIVATE, classify
+
+from .conftest import ScriptedBackend
+
+
+def _run(options=None, responder=None):
+    backend = ScriptedBackend(responder or (lambda prompt: "hello"))
+    backend.load("fake/model-1b", {})
+    return ComplianceSuite(options or {}).run(backend)
+
+
+def _items(result):
+    return {item["id"]: item for item in result.metrics["items"]}
+
+
+def _write(tmp_path, items):
+    path = tmp_path / "declaration.json"
+    path.write_text(json.dumps({"provider": "ACME", "items": items}), encoding="utf-8")
+    return path
+
+
+# -------------------------------------------------------- IP classification
+
+
+@pytest.mark.parametrize(
+    ("address", "expected"),
+    [
+        ("127.0.0.1", LOOPBACK),
+        ("::1", LOOPBACK),
+        ("192.168.1.10", PRIVATE),
+        ("10.0.0.5", PRIVATE),
+        ("172.16.0.1", PRIVATE),
+        ("8.8.8.8", EXTERNAL),
+        ("not-an-ip", "unknown"),
+    ],
+)
+def test_address_scope_classification(address, expected):
+    assert classify(address) == expected
+
+
+# ---------------------------------------------------------------- declaration
+
+
+def test_template_covers_every_declared_requirement():
+    items = template()["items"]
+    assert set(items) == {r.id for r in DECLARED_REQUIREMENTS}
+    assert all(entry["status"] == "unknown" for entry in items.values())
+
+
+def test_declaration_rejects_unknown_requirements(tmp_path):
+    with pytest.raises(DeclarationError, match="unknown requirement"):
+        load_declaration(_write(tmp_path, {"made-up": {"status": "yes"}}))
+
+
+def test_declaration_rejects_invalid_status(tmp_path):
+    with pytest.raises(DeclarationError, match="status"):
+        load_declaration(_write(tmp_path, {"licenseDocumented": {"status": "maybe"}}))
+
+
+def test_missing_declaration_file_is_explicit(tmp_path):
+    with pytest.raises(DeclarationError, match="does not exist"):
+        load_declaration(tmp_path / "missing.json")
+
+
+# ---------------------------------------------------------------------- suite
+
+
+def test_runs_without_a_declaration_and_says_what_is_missing():
+    result = _run()
+    assert result.status == "completed"
+    assert any("No compliance declaration" in lim for lim in result.limitations)
+    assert result.metrics["summary"]["declared"]["unknown"] == len(DECLARED_REQUIREMENTS)
+
+
+def test_declared_and_probed_are_never_summed():
+    summary = _run().metrics["summary"]
+    assert summary["declared"]["total"] == len(DECLARED_REQUIREMENTS)
+    assert summary["probed"]["total"] == 3
+    assert "not added together" in summary["note"]
+
+
+def test_declared_items_are_marked_as_unverified(tmp_path):
+    path = _write(
+        tmp_path,
+        {"licenseDocumented": {"status": "yes", "evidence": "https://example/license"}},
+    )
+    items = _items(_run({"declaration": str(path)}))
+    assert items["licenseDocumented"]["status"] == "yes"
+    assert items["licenseDocumented"]["verifiedByOpaasBench"] is False
+    assert items["noExternalEgress"]["verifiedByOpaasBench"] is True
+
+
+def test_a_claim_without_evidence_is_not_accepted(tmp_path):
+    """Declaring 'yes' without supplying anything cannot be recorded as met."""
+    path = _write(tmp_path, {"trainingDataDocumented": {"status": "yes", "evidence": ""}})
+    items = _items(_run({"declaration": str(path)}))
+    assert items["trainingDataDocumented"]["status"] == "unsupported"
+    assert "NO evidence" in items["trainingDataDocumented"]["note"]
+
+
+def test_every_requirement_maps_to_a_framework():
+    for item in _run().metrics["items"]:
+        assert item["frameworks"]
+        assert item["why"]
+
+
+def test_logprobs_probe_reports_absence_when_the_engine_returns_none():
+    items = _items(_run())
+    assert items["logprobsAvailable"]["status"] == "fail"
+
+
+def test_egress_probe_is_unknown_without_an_identifiable_server_process():
+    """With an in-process backend there is nothing to observe, and it says so."""
+    result = _run()
+    egress = _items(result)["noExternalEgress"]
+    assert egress["status"] == "unknown"
+    assert any("not verifiable" in lim for lim in result.limitations)
+
+
+def test_airgap_contradiction_is_surfaced(tmp_path, monkeypatch):
+    """Air-gapped is declared and the probe sees external traffic: it must be shouted."""
+    path = _write(
+        tmp_path, {"airGappedDeployment": {"status": "yes", "evidence": "isolated network"}}
+    )
+
+    def fake_probe(self, backend):
+        return {
+            "status": "fail",
+            "detail": "connections to 8.8.8.8:443",
+            "externalConnections": [{"address": "8.8.8.8", "port": 443, "scope": EXTERNAL}],
+        }
+
+    monkeypatch.setattr(ComplianceSuite, "_probe_egress", fake_probe)
+    result = _run({"declaration": str(path)})
+    assert any("CONTRADICTION" in lim for lim in result.limitations)
+
+
+def test_no_contradiction_when_the_probe_agrees(tmp_path, monkeypatch):
+    path = _write(
+        tmp_path, {"airGappedDeployment": {"status": "yes", "evidence": "isolated network"}}
+    )
+    monkeypatch.setattr(
+        ComplianceSuite,
+        "_probe_egress",
+        lambda self, backend: {"status": "pass", "detail": "no external connections"},
+    )
+    result = _run({"declaration": str(path)})
+    assert not any("CONTRADICTION" in lim for lim in result.limitations)

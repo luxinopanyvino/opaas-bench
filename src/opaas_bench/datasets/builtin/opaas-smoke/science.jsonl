@@ -1,0 +1,8 @@
+{"id": "smoke-sci-1", "question": "What is the chemical symbol for sodium?", "choices": ["So", "Na", "S", "Sd"], "answer": "B"}
+{"id": "smoke-sci-2", "question": "Which cell organelle produces most of the ATP in eukaryotic cells?", "choices": ["Ribosome", "Nucleus", "Mitochondrion", "Golgi apparatus"], "answer": "C"}
+{"id": "smoke-sci-3", "question": "What is the International System unit for force?", "choices": ["Joule", "Watt", "Pascal", "Newton"], "answer": "D"}
+{"id": "smoke-sci-4", "question": "Approximately how fast does light travel in a vacuum?", "choices": ["300 km/s", "3,000 km/s", "300,000 km/s", "3,000,000 km/s"], "answer": "C"}
+{"id": "smoke-sci-5", "question": "Which gas do plants absorb during photosynthesis?", "choices": ["Oxygen", "Carbon dioxide", "Nitrogen", "Hydrogen"], "answer": "B"}
+{"id": "smoke-sci-6", "question": "How many protons does a carbon atom have?", "choices": ["4", "6", "8", "12"], "answer": "B"}
+{"id": "smoke-sci-7", "question": "Which physical law relates force, mass and acceleration?", "choices": ["Newton's first law", "Newton's second law", "Hooke's law", "Ohm's law"], "answer": "B"}
+{"id": "smoke-sci-8", "question": "Which state of matter has a definite volume but a variable shape?", "choices": ["Solid", "Liquid", "Gas", "Plasma"], "answer": "B"}

@@ -1,0 +1,65 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "opaas-bench"
+version = "0.1.0"
+description = "OPAAS-Bench — On-Prem AI Audit Suite: evaluation and digital credential for on-prem LLM models"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "onpremIALabs" }]
+keywords = ["llm", "benchmark", "on-prem", "evaluation", "verifiable-credentials"]
+
+dependencies = [
+    "httpx>=0.27",
+    "typer>=0.12",
+    "pydantic>=2.7",
+    "rich>=13.7",
+    "cryptography>=42.0",
+    # System and server-process RAM. For GPU, nvidia-smi is enough, but for
+    # memory there is no universal CLI and doing it per-OS by hand is more fragile.
+    "psutil>=5.9",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=5.0",
+    "ruff>=0.5",
+    # Only to read the mascot PNG: they regenerate the sprite and check that the
+    # committed one is still that image. The tool itself does not use them.
+    "pillow>=10.0",
+    "numpy>=1.24",
+]
+# Pinned block D classifiers (faithfulness and toxicity). Optional on purpose:
+# torch weighs more than everything else combined, and without it OPAAS-Bench
+# works just the same, declaring that it did not measure those dimensions.
+classifiers = [
+    "torch>=2.2",
+    "transformers>=4.40",
+]
+
+[project.scripts]
+opaas-bench = "opaas_bench.cli.main:app"
+
+[project.urls]
+Homepage = "https://onpremialabs.com"
+# The repository is still called opas-bench. If it is renamed, GitHub redirects.
+Repository = "https://github.com/luxinopanyvino/opas-bench"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/opaas_bench"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]

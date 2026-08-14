@@ -1,0 +1,14 @@
+# Datasets are hashed: their content has to be identical on any platform.
+# Without this, a clone on Windows receives them with CRLF and produces a
+# different hash from Linux for the same dataset.
+*.jsonl text eol=lf
+*.json text eol=lf
+
+# Code and documentation, also in LF so diffs do not depend on the OS.
+*.py text eol=lf
+*.md text eol=lf
+*.toml text eol=lf
+*.yml text eol=lf
+
+# Keys and certificates: never touch.
+*.pem binary

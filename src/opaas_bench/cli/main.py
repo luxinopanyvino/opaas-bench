@@ -1,0 +1,1373 @@
+"""`opaas-bench` entry point."""
+
+from __future__ import annotations
+
+import getpass
+import json
+import os
+import sys
+from pathlib import Path
+from typing import Annotated, Any
+
+import typer
+from rich.console import Console
+from rich.table import Table
+
+from opaas_bench.adapters import available_backends, get_backend
+from opaas_bench.adapters.base import DEFAULT_PROMPT_MODE, PROMPT_MODES, BackendError
+from opaas_bench.cli.banner import print_banner
+from opaas_bench.cli.menu import MenuItem, is_interactive, present
+from opaas_bench.compare import ComparisonError, compare, load_reports
+from opaas_bench.credential import (
+    CredentialError,
+    TrustAnchorError,
+    build_credential,
+    fingerprint,
+    generate_root_keypair,
+    load_private_key,
+    load_public_key,
+    public_identifier,
+    resolve_public_key,
+    sign_credential,
+    verify_credential,
+)
+from opaas_bench.credential.vc import DEFAULT_VALIDITY_DAYS
+from opaas_bench.datasets import (
+    DEFAULT_DATASET,
+    CacheError,
+    DatasetError,
+    available_sources,
+    builtin_datasets,
+    cache_dir,
+    describe_cache,
+    ensure_dataset,
+    is_cached,
+    load_dataset,
+)
+from opaas_bench.datasets.importers import ImporterError, import_dataset
+from opaas_bench.declaration import template as declaration_template
+from opaas_bench.hashing import canonical_json, file_digest, short_hash
+from opaas_bench.report import REPORT_FILENAME
+from opaas_bench.runner import RunRequest, execute
+from opaas_bench.scoring import ScoringError, prompt_template_hash
+from opaas_bench.suites import PLANNED_SUITES, available_suites, get_suite, planned_suite_hint
+from opaas_bench.transparency import (
+    TransparencyError,
+    append_entry,
+    inclusion_check,
+    load_log,
+    verify_log,
+)
+from opaas_bench.web import SiteError, build_site, load_entry
+
+app = typer.Typer(
+    name="opaas-bench",
+    help="OPAAS-Bench — evaluation and digital credential for on-prem LLM models (onpremIALabs).",
+    add_completion=False,
+)
+console = Console()
+err_console = Console(stderr=True)
+
+
+def _menu_items() -> list[MenuItem]:
+    """Read-only ones are executed; the rest show their command."""
+    return [
+        MenuItem(
+            "▶",
+            "Evaluate a model",
+            command="opaas-bench run --model <id> --backend ollama --suite all",
+        ),
+        MenuItem("◈", "View evaluation blocks", action=suites_command),
+        MenuItem("▤", "View datasets and cache", action=datasets_command),
+        MenuItem("⚙", "View inference engines", action=backends_command),
+        MenuItem(
+            "✎",
+            "Sign a report",
+            command="opaas-bench sign --input <report> --key <key.pem> --out cert.json",
+        ),
+        MenuItem(
+            "◱",
+            "Publish certificates",
+            command="opaas-bench publish --report <report> --credential <cert> "
+            "--did-document did.json",
+        ),
+        MenuItem(
+            "✓",
+            "Verify a credential",
+            command="opaas-bench verify --credential <cert> --report <report>",
+        ),
+        MenuItem("✕", "Exit", quit=True),
+    ]
+
+
+@app.callback(invoke_without_command=True)
+def main(ctx: typer.Context) -> None:
+    """Cover page and menu. Only with no subcommand and an interactive terminal:
+    command output gets piped to files and to `jq`, and a menu there would get
+    in the way."""
+    if ctx.invoked_subcommand is not None:
+        return
+    print_banner(console)
+    if is_interactive():
+        present(console, _menu_items())
+    else:
+        console.print(ctx.get_help())
+
+
+def _parse_int_list(raw: str, flag: str) -> list[int]:
+    try:
+        values = [int(part) for part in raw.split(",") if part.strip()]
+    except ValueError:
+        raise typer.BadParameter(
+            f"{flag} expects comma-separated integers, received: {raw!r}"
+        ) from None
+    if not values or any(v <= 0 for v in values):
+        raise typer.BadParameter(f"{flag} must contain positive integers, received: {raw!r}")
+    return values
+
+
+Model = Annotated[
+    str, typer.Option("--model", "-m", help="Model id exactly as the backend serves it.")
+]
+Backend = Annotated[
+    str, typer.Option("--backend", "-b", help="Inference engine adapter.")
+]
+Suites = Annotated[
+    list[str] | None, typer.Option("--suite", "-s", help="Suite to run. Repeatable, or 'all'.")
+]
+BaseUrl = Annotated[
+    str | None,
+    typer.Option("--base-url", help="Server endpoint; defaults to the adapter's."),
+]
+PromptMode = Annotated[
+    str,
+    typer.Option(
+        "--prompt-mode",
+        help="'chat' applies the model's template (default); 'raw' skips it and measures "
+        "text completion, not instruction following.",
+    ),
+]
+ApiKey = Annotated[
+    str | None,
+    typer.Option(
+        "--api-key", envvar="OPAAS_API_KEY", help="Bearer token if the server requires one."
+    ),
+]
+Timeout = Annotated[
+    float, typer.Option("--timeout", help="Per-request timeout, in seconds.")
+]
+Concurrency = Annotated[
+    str, typer.Option("--concurrency", help="Block A concurrency levels.")
+]
+PromptWords = Annotated[
+    str, typer.Option("--prompt-words", help="Prompt lengths to sweep, in words.")
+]
+MaxTokens = Annotated[
+    int, typer.Option("--max-tokens", help="Tokens to generate per request.")
+]
+Requests = Annotated[
+    int | None,
+    typer.Option("--requests", help="Requests per scenario; defaults to 3x the concurrency."),
+]
+Warmup = Annotated[
+    int, typer.Option("--warmup", help="Warmup generations that get discarded.")
+]
+IdleSeconds = Annotated[
+    float,
+    typer.Option("--idle-seconds", help="Idle window measured after warmup."),
+]
+Temperature = Annotated[
+    float, typer.Option("--temperature", help="Sampling temperature.")
+]
+Seed = Annotated[
+    int | None, typer.Option("--seed", help="Fixed seed for reproducibility.")
+]
+Quantization = Annotated[
+    str | None, typer.Option("--quantization", help="Declared quantization, e.g. 'GGUF Q4_K_M'.")
+]
+Source = Annotated[
+    str | None, typer.Option("--source", help="Model provenance in the source repository.")
+]
+WeightsPath = Annotated[
+    Path | None,
+    typer.Option("--weights-path", help="Local path to the weights, to hash the artifact."),
+]
+OutputFile = Annotated[
+    Path | None,
+    typer.Option(
+        "--output", "-o", help="Report file; defaults to runs/<run-id>/report.json."
+    ),
+]
+RunId = Annotated[
+    str | None, typer.Option("--run-id", help="Explicit run id; defaults to YYYYMMDD-NNN.")
+]
+ReferenceType = Annotated[
+    str,
+    typer.Option(
+        "--reference-type",
+        help="'on-prem' (your own deployment) or 'cloud-baseline' (quality reference).",
+    ),
+]
+DatasetRef = Annotated[
+    str,
+    typer.Option(
+        "--dataset",
+        help="Comma-separated sources, local paths, or 'opaas-smoke' for a quick test.",
+    ),
+]
+ItemLimit = Annotated[
+    int | None,
+    typer.Option("--limit", help="Items per block B task; defaults to all of them."),
+]
+Offline = Annotated[
+    bool,
+    typer.Option(
+        "--offline",
+        help="Forbids the network: cached datasets only. Fails saying what is missing.",
+    ),
+]
+DeclarationFile = Annotated[
+    Path | None,
+    typer.Option("--declaration", help="Block E compliance declaration (JSON)."),
+]
+ContextWords = Annotated[
+    str,
+    typer.Option("--context-words", help="Lengths for the block C context probe."),
+]
+AnswerStyle = Annotated[
+    str,
+    typer.Option(
+        "--answer-style",
+        help="'cot' reasons before answering; 'direct' demands the bare letter. Not comparable.",
+    ),
+]
+FaithfulnessModel = Annotated[
+    Path | None,
+    typer.Option("--faithfulness-model", help="Local weights of the faithfulness classifier."),
+]
+FaithfulnessProfile = Annotated[
+    str, typer.Option("--faithfulness-profile", help="Profile: 'nli' or 'hhem'.")
+]
+ToxicityModel = Annotated[
+    Path | None,
+    typer.Option("--toxicity-model", help="Local weights of the toxicity classifier."),
+]
+ClassifierThreshold = Annotated[
+    float | None,
+    typer.Option("--classifier-threshold", help="Threshold for both classifiers, in [0, 1]."),
+]
+AllowRemoteCode = Annotated[
+    bool,
+    typer.Option(
+        "--allow-remote-code",
+        help="Allows running code from the model's repository (HHEM requires it).",
+    ),
+]
+
+
+@app.command()
+def run(
+    model: Model,
+    backend: Backend = "vllm",
+    suite: Suites = None,
+    base_url: BaseUrl = None,
+    prompt_mode: PromptMode = DEFAULT_PROMPT_MODE,
+    api_key: ApiKey = None,
+    timeout_s: Timeout = 300.0,
+    concurrency: Concurrency = "1,4,16",
+    prompt_words: PromptWords = "128,1024",
+    max_tokens: MaxTokens = 256,
+    requests: Requests = None,
+    warmup: Warmup = 2,
+    idle_seconds: IdleSeconds = 3.0,
+    temperature: Temperature = 0.0,
+    seed: Seed = 1234,
+    quantization: Quantization = None,
+    source: Source = None,
+    weights_path: WeightsPath = None,
+    output: OutputFile = None,
+    run_id: RunId = None,
+    reference_type: ReferenceType = "on-prem",
+    dataset: DatasetRef = DEFAULT_DATASET,
+    limit: ItemLimit = None,
+    offline: Offline = False,
+    answer_style: AnswerStyle = "cot",
+    declaration: DeclarationFile = None,
+    context_words: ContextWords = "256,1024,4096",
+    faithfulness_model: FaithfulnessModel = None,
+    faithfulness_profile: FaithfulnessProfile = "nli",
+    toxicity_model: ToxicityModel = None,
+    classifier_threshold: ClassifierThreshold = None,
+    allow_remote_code: AllowRemoteCode = False,
+) -> None:
+    """Runs an evaluation and writes the structured report."""
+    requested = suite or ["performance"]
+    explicit_all = "all" in requested
+    if explicit_all:
+        requested = available_suites()
+
+    unknown = [s for s in requested if s not in available_suites()]
+    if unknown:
+        for name in unknown:
+            hint = planned_suite_hint(name) if name in PLANNED_SUITES else None
+            err_console.print(
+                f"[red]Suite '{name}' not available.[/red] "
+                + (hint or f"Available: {', '.join(available_suites())}")
+            )
+        raise typer.Exit(code=2)
+
+    if explicit_all and PLANNED_SUITES:
+        err_console.print(
+            "[yellow]Warning:[/yellow] '--suite all' runs the implemented suites "
+            f"({', '.join(available_suites())}), not the five design blocks. "
+            f"Not implemented: {', '.join(sorted(PLANNED_SUITES))}. "
+            "The report and the credential will declare it a partial evaluation."
+        )
+
+    if prompt_mode not in PROMPT_MODES:
+        err_console.print(
+            f"[red]Unknown --prompt-mode: {prompt_mode!r}.[/red] "
+            f"Valid ones: {', '.join(PROMPT_MODES)}"
+        )
+        raise typer.Exit(code=2)
+
+    if declaration is not None and not declaration.exists():
+        err_console.print(f"[red]The declaration does not exist:[/red] {declaration}")
+        raise typer.Exit(code=2)
+
+    if {"capability", "safety"} & set(requested):
+        # Resolved before loading the model: downloading the dataset or finding
+        # out the reference is wrong must not happen after 40 GB of VRAM have
+        # already been taken.
+        try:
+            if not offline and dataset in available_sources() and not is_cached(dataset):
+                console.print(f"[dim]Downloading dataset '{dataset}' (first time only)…[/dim]")
+            load_dataset(dataset, limit=limit, offline=offline)
+            prompt_template_hash(answer_style)
+        except (DatasetError, ScoringError) as exc:
+            err_console.print(f"[red]{exc}[/red]")
+            raise typer.Exit(code=2) from None
+
+    suite_options = {
+        "performance": {
+            "concurrency": _parse_int_list(concurrency, "--concurrency"),
+            "prompt_words": _parse_int_list(prompt_words, "--prompt-words"),
+            "max_tokens": max_tokens,
+            "requests_per_setting": requests,
+            "warmup_requests": warmup,
+            "idle_seconds": idle_seconds,
+            "temperature": temperature,
+            "seed": seed,
+        },
+        "capability": {
+            "dataset": dataset,
+            "limit": limit,
+            "offline": offline,
+            "answer_style": answer_style,
+            "temperature": temperature,
+            "seed": seed,
+        },
+        "consistency": {
+            "context_probe_words": _parse_int_list(context_words, "--context-words"),
+            "temperature": temperature,
+            "seed": seed,
+        },
+        "safety": {
+            "dataset": dataset,
+            "limit": limit,
+            "offline": offline,
+            "temperature": temperature,
+            "seed": seed,
+            "faithfulness_model": str(faithfulness_model) if faithfulness_model else None,
+            "faithfulness_profile": faithfulness_profile,
+            "faithfulness_threshold": classifier_threshold,
+            "toxicity_model": str(toxicity_model) if toxicity_model else None,
+            "toxicity_threshold": classifier_threshold,
+            "allow_remote_code": allow_remote_code,
+        },
+        "compliance": {
+            "declaration": str(declaration) if declaration else None,
+        },
+    }
+
+    request = RunRequest(
+        model=model,
+        backend=backend,
+        suites=requested,
+        backend_config={
+            "base_url": base_url,
+            "prompt_mode": prompt_mode,
+            "api_key": api_key,
+            "timeout_s": timeout_s,
+            "quantization": quantization,
+        },
+        suite_options=suite_options,
+        output=output,
+        run_id=run_id,
+        model_source=source,
+        quantization=quantization,
+        weights_path=weights_path,
+        reference_type=reference_type,
+    )
+
+    try:
+        outcome = execute(request, on_event=lambda message: console.print(f"[dim]{message}[/dim]"))
+    except ValueError as exc:
+        err_console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=2) from None
+    except BackendError as exc:
+        err_console.print(f"[red]Backend error:[/red] {exc}")
+        raise typer.Exit(code=1) from None
+
+    _print_run_summary(outcome.report.payload())
+    console.print(f"\nReport: [bold]{outcome.report_path}[/bold]")
+    console.print(f"Hash  : [bold]{file_digest(outcome.report_path)}[/bold]")
+    if outcome.report.status == "partial":
+        raise typer.Exit(code=1)
+
+
+ReportPath = Annotated[
+    Path, typer.Argument(help="Path to report.json or to the run directory.")
+]
+
+
+@app.command("show")
+def show(report_path: ReportPath) -> None:
+    """Shows the summary of an already-generated report."""
+    path = report_path / REPORT_FILENAME if report_path.is_dir() else report_path
+    if not path.exists():
+        err_console.print(f"[red]Does not exist:[/red] {path}")
+        raise typer.Exit(code=2)
+    _print_run_summary(json.loads(path.read_text(encoding="utf-8")))
+    console.print(f"\nReport hash: [bold]{file_digest(path)}[/bold]")
+
+
+@app.command("backends")
+def backends_command() -> None:
+    """Lists the available engine adapters."""
+    table = Table(title="Registered adapters")
+    table.add_column("backend", style="bold")
+    table.add_column("engine")
+    table.add_column("default endpoint")
+    table.add_column("concurrency")
+    for name in available_backends():
+        instance = get_backend(name)
+        table.add_row(
+            name,
+            getattr(instance, "engine_label", "—"),
+            getattr(instance, "default_base_url", "—"),
+            "yes" if instance.supports_concurrency else "no (known limitation)",
+        )
+    console.print(table)
+
+
+@app.command("suites")
+def suites_command() -> None:
+    """Lists the implemented and the planned suites."""
+    table = Table(title="Evaluation suites")
+    table.add_column("suite", style="bold")
+    table.add_column("block")
+    table.add_column("status")
+    table.add_column("description")
+    for name in available_suites():
+        instance = get_suite(name)
+        table.add_row(name, instance.block, "[green]available[/green]", instance.description)
+    for name, plan in sorted(PLANNED_SUITES.items(), key=lambda item: item[1]["block"]):
+        table.add_row(
+            name,
+            plan["block"],
+            "[yellow]planned[/yellow]",
+            f"{plan['description']} ({plan['phase']})",
+        )
+    console.print(table)
+
+
+KeysDir = Annotated[
+    Path, typer.Option("--out", "-o", help="Directory where the key pair is stored.")
+]
+Passphrase = Annotated[
+    str | None,
+    typer.Option(
+        "--passphrase",
+        envvar="OPAAS_KEY_PASSPHRASE",
+        help="Encrypts the private key. Without this argument it is asked for at the "
+        "keyboard, which is the recommended way: it stays out of the history.",
+    ),
+]
+Did = Annotated[str, typer.Option("--did", help="Issuer DID for the credentials.")]
+Overwrite = Annotated[
+    bool, typer.Option("--overwrite", help="Overwrites an existing root key.")
+]
+
+
+TemplateOut = Annotated[
+    Path, typer.Option("--out", "-o", help="Declaration file to write.")
+]
+
+
+@app.command("compliance")
+def compliance_command(out: TemplateOut = Path("declaration.json")) -> None:
+    """Generates a declaration template for block E."""
+    if out.exists():
+        err_console.print(f"[red]Already exists:[/red] {out}. Delete it or choose another path.")
+        raise typer.Exit(code=2)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(
+        json.dumps(declaration_template(), indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+    )
+    console.print(f"[green]Template written to[/green] {out}")
+    console.print(
+        "\nFill in each requirement with a status (yes/partial/no/unknown) and its evidence.\n"
+        "[yellow]Without evidence, a requirement declared as 'yes' is marked unsupported "
+        "in the report.[/yellow]\n"
+        "Then: opaas-bench run --suite compliance --declaration "
+        f"{out}"
+    )
+
+
+ReportInputs = Annotated[
+    list[Path], typer.Option("--report", "-r", help="Report to compare. Repeat for each one.")
+]
+ComparisonOut = Annotated[
+    Path | None, typer.Option("--out", "-o", help="Comparison JSON file to write.")
+]
+
+
+@app.command("compare")
+def compare_command(report: ReportInputs, out: ComparisonOut = None) -> None:
+    """Compares several reports: quantizations, backends or configurations."""
+    try:
+        loaded = load_reports(list(report))
+        comparison = compare(loaded)
+    except ComparisonError as exc:
+        err_console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=2) from None
+
+    for warning in comparison["warnings"]:
+        console.print(f"[yellow]Warning:[/yellow] {warning}")
+
+    _print_comparison(comparison)
+
+    if out is not None:
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(canonical_json(comparison) + "\n", encoding="utf-8")
+        console.print(f"\nComparison written to [bold]{out}[/bold]")
+
+
+ImporterName = Annotated[
+    str, typer.Argument(help="Dataset to convert: 'ifeval' or 'xstest'.")
+]
+ImportSource = Annotated[
+    Path,
+    typer.Option("--input", "-i", help="File downloaded from the original source."),
+]
+ImportOut = Annotated[
+    Path, typer.Option("--out", "-o", help="Directory for the converted dataset.")
+]
+ImportLimit = Annotated[
+    int | None,
+    typer.Option("--limit", help="Subset size; defaults to the whole dataset."),
+]
+ImportSeed = Annotated[
+    int, typer.Option("--seed", help="Seed for the stratified sampling.")
+]
+ImportAppend = Annotated[
+    bool,
+    typer.Option("--append", help="Adds the task to an existing dataset instead of creating one."),
+]
+
+
+@app.command("import")
+def import_command(
+    name: ImporterName,
+    input_path: ImportSource,
+    out: ImportOut,
+    limit: ImportLimit = None,
+    seed: ImportSeed = 1234,
+    append: ImportAppend = False,
+) -> None:
+    """Converts a public dataset to the OPAAS-Bench format."""
+    try:
+        result = import_dataset(name, input_path, out, limit=limit, seed=seed, append=append)
+    except (ImporterError, OSError) as exc:
+        err_console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=2) from None
+
+    dataset = load_dataset(str(result.dataset_dir))
+    console.print(f"[green]Converted {result.items} items.[/green]")
+    console.print(f"  directory : {result.dataset_dir}")
+    console.print(f"  license   : {dataset.license}")
+    console.print(f"  hash      : {dataset.content_hash}")
+    for note in result.notes:
+        console.print(f"[yellow]{note}[/yellow]" if "WARNING" in note else f"[dim]{note}[/dim]")
+    console.print(
+        f"\nUse it with: opaas-bench run --model <id> --backend <b> "
+        f"--suite {'safety' if name == 'xstest' else 'capability'} "
+        f"--dataset {result.dataset_dir}"
+    )
+
+
+PublishReports = Annotated[
+    list[Path],
+    typer.Option("--report", "-r", help="Report to publish. Repeat for each certificate."),
+]
+PublishCredentials = Annotated[
+    list[Path],
+    typer.Option("--credential", "-c", help="Corresponding credential, in the same order."),
+]
+PublishOut = Annotated[
+    Path, typer.Option("--out", "-o", help="Directory for the generated static site.")
+]
+PublishDid = Annotated[
+    Path,
+    typer.Option("--did-document", help="did.json document with the issuer's public key."),
+]
+
+
+@app.command("publish")
+def publish(
+    report: PublishReports,
+    credential: PublishCredentials,
+    did_document: PublishDid,
+    out: PublishOut = Path("site"),
+) -> None:
+    """Generates the static certificate site."""
+    if len(report) != len(credential):
+        err_console.print(
+            f"[red]There are {len(report)} reports and {len(credential)} credentials.[/red] "
+            "Each certificate needs its pair, in the same order."
+        )
+        raise typer.Exit(code=2)
+
+    try:
+        did = json.loads(did_document.read_text(encoding="utf-8"))
+        entries = [
+            load_entry(report_path, credential_path)
+            for report_path, credential_path in zip(report, credential, strict=True)
+        ]
+        written = build_site(entries, out, did)
+    except (SiteError, OSError, json.JSONDecodeError) as exc:
+        err_console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=2) from None
+
+    console.print(f"[green]Site generated with {len(entries)} certificate(s).[/green]")
+    for entry in entries:
+        state = "complete" if entry.complete else "PARTIAL"
+        console.print(f"  * {entry.model} ({state}) → {out / 'cert' / entry.slug}/index.html")
+    console.print(f"\n  {len(written)} files in [bold]{out}[/bold]")
+    console.print(
+        "\n[dim]Serve it over HTTPS: in-browser verification needs a secure context. "
+        "The DID document goes at /.well-known/did.json.[/dim]"
+    )
+
+
+FetchSource = Annotated[
+    str | None,
+    typer.Argument(help="Source to download; with no argument, all known ones."),
+]
+
+
+@app.command("fetch")
+def fetch_command(source: FetchSource = None, limit: ItemLimit = None) -> None:
+    """Downloads datasets into the local cache, so as not to depend on the network later."""
+    names = [source] if source else available_sources()
+    unknown = [name for name in names if name not in available_sources()]
+    if unknown:
+        err_console.print(
+            f"[red]Unknown source: {', '.join(unknown)}.[/red] "
+            f"Available: {', '.join(available_sources())}"
+        )
+        raise typer.Exit(code=2)
+
+    for name in names:
+        if is_cached(name):
+            console.print(f"[dim]{name}: already cached[/dim]")
+            continue
+        console.print(f"Downloading {name}…")
+        try:
+            path = ensure_dataset(name, limit=limit)
+        except CacheError as exc:
+            err_console.print(f"[red]{exc}[/red]")
+            raise typer.Exit(code=1) from None
+        dataset = load_dataset(str(path))
+        console.print(
+            f"[green]{name}[/green]: {dataset.item_count} items · {dataset.content_hash}"
+        )
+
+    console.print(f"\nCache at [bold]{cache_dir()}[/bold]")
+    console.print(
+        "[dim]For a deployment without a network, copy that directory to the target "
+        "machine and run with --offline.[/dim]"
+    )
+
+
+@app.command("datasets")
+def datasets_command() -> None:
+    """Lists the available datasets and the cache status."""
+    remote = Table(title="Downloadable sources")
+    remote.add_column("source", style="bold")
+    remote.add_column("block")
+    remote.add_column("license")
+    remote.add_column("status")
+    for entry in describe_cache():
+        remote.add_row(
+            str(entry["name"]),
+            str(entry["block"]),
+            str(entry["license"]),
+            "[green]cached[/green]" if entry["cached"] else "[yellow]not downloaded[/yellow]",
+        )
+    console.print(remote)
+
+    local = Table(title="Local datasets")
+    local.add_column("dataset", style="bold")
+    local.add_column("version")
+    local.add_column("items", justify="right")
+    local.add_column("tasks")
+    local.add_column("hash")
+    local.add_column("use")
+    for name in builtin_datasets():
+        dataset = load_dataset(name)
+        local.add_row(
+            dataset.name,
+            dataset.version,
+            str(dataset.item_count),
+            ", ".join(f"{t.category} ({len(t.items)})" for t in dataset.tasks),
+            short_hash(dataset.content_hash, 12),
+            "[yellow]smoke only[/yellow]"
+            if dataset.synthetic_smoke
+            else "[green]evaluation[/green]",
+        )
+    console.print(local)
+    console.print(
+        f"\n[dim]Cache: {cache_dir()} · downloaded on first use and reused. "
+        "Other datasets (MMLU-Pro, GPQA): see docs/datasets.md.[/dim]"
+    )
+
+
+#: Below this, a passphrase does not protect much.
+_MIN_PASSPHRASE = 12
+
+
+def _ask_passphrase() -> str | None:
+    """Asks for the passphrase at the keyboard, twice.
+
+    It is not accepted via argument without a warning: `--passphrase` ends up
+    written in the shell history and visible in the process list for as long as
+    the command runs. For the key that signs every certificate, that will not
+    do.
+    """
+    if not sys.stdin.isatty():
+        err_console.print(
+            "[red]There is no interactive terminal to ask for the passphrase.[/red]\n"
+            "  Run it by hand, or pass it via the environment: $env:OPAAS_KEY_PASSPHRASE = '...'"
+        )
+        raise typer.Exit(code=2)
+
+    console.print(
+        "[dim]The passphrase is not echoed as you type it and stays out of the history.[/dim]"
+    )
+    first = getpass.getpass("Passphrase for the root key: ")
+    if not first:
+        console.print(
+            "[yellow]With no passphrase, the private key is left unencrypted[/yellow] — "
+            "compromised the moment the machine is."
+        )
+        if not typer.confirm("Generate it unencrypted anyway?", default=False):
+            raise typer.Exit(code=1)
+        return None
+
+    if getpass.getpass("Repeat it: ") != first:
+        err_console.print("[red]The passphrases do not match.[/red]")
+        raise typer.Exit(code=1)
+    if len(first) < _MIN_PASSPHRASE:
+        console.print(
+            f"[yellow]Warning:[/yellow] {len(first)} characters. For a certifier's root of "
+            f"trust, {_MIN_PASSPHRASE} is the reasonable minimum."
+        )
+    return first
+
+
+@app.command("keygen")
+def keygen(
+    out_dir: KeysDir = Path("keys"),
+    passphrase: Passphrase = None,
+    did: Did = "did:web:onpremialabs.com",
+    overwrite: Overwrite = False,
+) -> None:
+    """Generates the onpremIALabs root Ed25519 pair (root of trust)."""
+    if passphrase is None:
+        passphrase = _ask_passphrase()
+    elif not os.environ.get("OPAAS_KEY_PASSPHRASE"):
+        console.print(
+            "[yellow]Warning:[/yellow] the passphrase came in as an argument, so it is in "
+            "the shell history and was visible in the process list. For a root key, better "
+            "leave it blank and type it when prompted."
+        )
+
+    try:
+        paths = generate_root_keypair(
+            out_dir, passphrase=passphrase, did=did, key_id=f"{did}#key-1", overwrite=overwrite
+        )
+    except FileExistsError as exc:
+        err_console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=2) from None
+
+    public_key = load_public_key(paths.public_key)
+    console.print("[green]Root key pair generated.[/green]")
+    console.print(f"  private     : {paths.private_key}")
+    console.print(f"  public      : {paths.public_key}")
+    console.print(f"  document    : {paths.did_document}  → publish at /.well-known/did.json")
+    console.print(f"  fingerprint : {fingerprint(public_key)}")
+    if not passphrase:
+        console.print(
+            "[yellow]The private key is unencrypted.[/yellow] See docs/key-custody.md before "
+            "signing anything with it."
+        )
+
+
+InputReport = Annotated[
+    Path, typer.Option("--input", "-i", help="Report generated by 'opaas-bench run'.")
+]
+SigningKey = Annotated[
+    Path, typer.Option("--key", "-k", help="Ed25519 private key to sign with.")
+]
+CredentialOut = Annotated[
+    Path, typer.Option("--out", "-o", help="Credential file to write.")
+]
+Issuer = Annotated[str, typer.Option("--issuer", help="Issuer DID for the credential.")]
+Validity = Annotated[
+    int, typer.Option("--validity-days", help="Days of validity before re-certifying.")
+]
+ReportUrl = Annotated[
+    str | None, typer.Option("--report-url", help="Public URL of the report, if already published.")
+]
+LogFile = Annotated[
+    Path | None,
+    typer.Option("--log", help="Transparency log (JSONL) to record the issuance in."),
+]
+
+
+def _load_signing_key(key: Path, passphrase: str | None) -> Any:
+    """Loads the key, asking for the passphrase at the keyboard if needed.
+
+    Signing happens many times, so the passphrase would end up in the shell
+    history if `--passphrase` were the only way.
+    """
+    try:
+        return load_private_key(key, passphrase)
+    except TypeError:
+        if passphrase is not None or not sys.stdin.isatty():
+            raise
+    return load_private_key(key, getpass.getpass(f"Passphrase for {key.name}: "))
+
+
+@app.command("sign")
+def sign(
+    input_path: InputReport,
+    key: SigningKey,
+    out: CredentialOut = Path("credential.json"),
+    issuer: Issuer = "did:web:onpremialabs.com",
+    passphrase: Passphrase = None,
+    validity_days: Validity = DEFAULT_VALIDITY_DAYS,
+    report_url: ReportUrl = None,
+    log: LogFile = None,
+) -> None:
+    """Issues the signed W3C credential from a report."""
+    if not input_path.exists():
+        err_console.print(f"[red]The report does not exist:[/red] {input_path}")
+        raise typer.Exit(code=2)
+
+    try:
+        report = json.loads(input_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        err_console.print(f"[red]The report is not valid JSON:[/red] {exc}")
+        raise typer.Exit(code=2) from None
+
+    try:
+        private_key = _load_signing_key(key, passphrase)
+    except (OSError, TypeError, ValueError) as exc:
+        err_console.print(f"[red]The private key could not be loaded:[/red] {exc}")
+        raise typer.Exit(code=2) from None
+
+    key_id = f"{issuer}#key-1"
+    try:
+        credential = build_credential(
+            report,
+            # The hash of the report's BYTES is signed: verifying is sha256sum.
+            file_digest(input_path),
+            issuer=issuer,
+            key_id=key_id,
+            validity_days=validity_days,
+            report_url=report_url,
+        )
+    except CredentialError as exc:
+        err_console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=2) from None
+
+    signed = sign_credential(credential, private_key, key_id=key_id)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(signed, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
+    entry = None
+    if log is not None:
+        try:
+            entry = append_entry(log, signed, file_digest(input_path))
+        except TransparencyError as exc:
+            err_console.print(f"[red]Could not record in the log:[/red] {exc}")
+            raise typer.Exit(code=2) from None
+
+    eval_run = signed["credentialSubject"]["evalRun"]
+    console.print("[green]Credential signed.[/green]")
+    console.print(f"  id       : {signed['id']}")
+    console.print(f"  public   : {public_identifier(signed)}")
+    console.print(f"  report   : {eval_run['reportHash']}")
+    console.print(f"  validity : {signed['issuanceDate']} → {signed['expirationDate']}")
+    console.print(f"  file     : {out}")
+    if entry is not None:
+        console.print(f"  log      : entry {entry.index} in {log} ({entry.entryHash})")
+    if not eval_run["completeEvaluation"]:
+        console.print(
+            f"\n[yellow]Attention:[/yellow] this credential certifies a PARTIAL evaluation "
+            f"(blocks {', '.join(eval_run['blocksEvaluated']) or 'none'} of "
+            f"A, B, C, D, E). It is declared inside the credential itself."
+        )
+
+
+CredentialIn = Annotated[
+    Path, typer.Option("--credential", "-c", help="Credential to verify.")
+]
+VerifyKey = Annotated[
+    Path | None, typer.Option("--key", "-k", help="Issuer public key, if there is no anchor.")
+]
+DidDocument = Annotated[
+    Path | None, typer.Option("--did-document", help="Issuer did.json document.")
+]
+VerifyReport = Annotated[
+    Path | None,
+    typer.Option("--report", help="Report to check against the certified hash."),
+]
+
+
+@app.command("log-verify")
+def log_verify(log: Annotated[Path, typer.Argument(help="JSONL log to check.")]) -> None:
+    """Checks that the transparency log has not been altered."""
+    try:
+        entries = load_log(log)
+        summary = verify_log(entries)
+    except TransparencyError as exc:
+        err_console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=1) from None
+
+    console.print(f"[green]Log intact:[/green] {summary['entries']} entries")
+    console.print(f"  head: {summary['headHash']}")
+    for entry in entries[-5:]:
+        console.print(f"  [dim]{entry.index:>4}  {entry.issuedAt}  {entry.credentialId}[/dim]")
+    console.print(
+        "\n[dim]A hash chain proves this log is internally consistent. Detecting a full "
+        "rewrite requires comparing against an earlier copy — which is why it is worth "
+        "publishing it in a repository with history.[/dim]"
+    )
+
+
+@app.command("verify")
+def verify(
+    credential: CredentialIn,
+    key: VerifyKey = None,
+    did_document: DidDocument = None,
+    report: VerifyReport = None,
+    log: LogFile = None,
+) -> None:
+    """Verifies a third-party credential, without a network."""
+    if not credential.exists():
+        err_console.print(f"[red]The credential does not exist:[/red] {credential}")
+        raise typer.Exit(code=2)
+
+    try:
+        document = json.loads(credential.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        err_console.print(f"[red]The credential is not valid JSON:[/red] {exc}")
+        raise typer.Exit(code=2) from None
+
+    issuer = str(document.get("issuer", ""))
+    proof = document.get("proof") or {}
+    try:
+        public_key, origin = resolve_public_key(
+            issuer,
+            proof.get("verificationMethod"),
+            key_path=key,
+            did_document_path=did_document,
+        )
+    except (TrustAnchorError, ValueError) as exc:
+        err_console.print(f"[red]Cannot verify:[/red] {exc}")
+        raise typer.Exit(code=2) from None
+
+    result = verify_credential(document, public_key, report_path=report)
+
+    if log is not None:
+        try:
+            entries = load_log(log)
+            verify_log(entries)
+            included, detail = inclusion_check(
+                entries, document, file_digest(report) if report else ""
+            )
+            result.add("log", included, detail)
+        except TransparencyError as exc:
+            result.add("log", False, str(exc))
+
+    console.print(f"\nCredential : {document.get('id', 'no id')}")
+    console.print(f"Issuer     : {issuer}")
+    console.print(f"Key        : {origin}")
+    for check in result.checks:
+        mark = "[green]OK  [/green]" if check.ok else "[red]FAIL[/red]"
+        console.print(f"  {mark} {check.name}: {check.detail}")
+
+    for warning in result.warnings:
+        console.print(f"\n[yellow]{warning}[/yellow]")
+
+    if result.valid:
+        console.print("\n[green bold]Credential valid.[/green bold]")
+    else:
+        err_console.print("\n[red bold]Credential NOT valid.[/red bold]")
+        raise typer.Exit(code=1)
+
+
+@app.command("version")
+def version_command() -> None:
+    """Tool and methodology version."""
+    print_banner(console)
+
+
+def _print_run_summary(report: dict[str, Any]) -> None:
+    console.print()
+    console.print(f"[bold]Run[/bold] {report.get('runId')}  ·  status: {report.get('status')}")
+    model = report.get("model", {})
+    configuration = report.get("configuration", {})
+    console.print(
+        f"  model    : {model.get('name')}"
+        + (f"  ({model.get('quantization')})" if model.get("quantization") else "")
+    )
+    console.print(f"  backend  : {configuration.get('backend')}")
+    console.print(f"  hardware : {configuration.get('hardware')}")
+    console.print(f"  configHash: {configuration.get('configHash')}")
+
+    if cov := report.get("coverage"):
+        evaluated = ", ".join(cov.get("blocksEvaluated") or []) or "none"
+        if cov.get("complete"):
+            console.print(f"  coverage : blocks {evaluated} (complete)")
+        else:
+            missing = ", ".join(b["block"] for b in cov.get("blocksMissing", []))
+            console.print(
+                f"  coverage : blocks {evaluated} — [yellow]not evaluated: {missing}[/yellow]"
+            )
+
+    for result in report.get("suites", []):
+        printer = _SUITE_PRINTERS.get(str(result.get("suite")))
+        if result.get("status") == "completed" and printer:
+            printer(result.get("metrics", {}))
+        elif result.get("status") != "completed":
+            err_console.print(
+                f"[red]Suite '{result.get('suite')}' {result.get('status')}:[/red] "
+                f"{result.get('error')}"
+            )
+
+    if limitations := report.get("limitations"):
+        console.print("\n[yellow]Known limitations of this run:[/yellow]")
+        for limitation in limitations:
+            console.print(f"  * {limitation}")
+
+
+def _print_performance_table(metrics: dict[str, Any]) -> None:
+    idle = metrics.get("idle", {})
+    if idle:
+        rss = idle.get("processRssPeakMb")
+        ram = f"{_fmt(rss, 0)} MB (process {idle.get('processName')})" if rss else (
+            f"{_fmt(idle.get('ramMeanMb'), 0)} MB (system)"
+        )
+        console.print(
+            f"\n  [bold]Idle[/bold] (model loaded, not generating): "
+            f"VRAM {_fmt(idle.get('vramMeanMb'), 0)} MB · RAM {ram} · "
+            f"{_fmt(idle.get('powerMeanW'))} W"
+        )
+
+    table = Table(title="Block A — Performance")
+    table.add_column("prompt (words)", justify="right")
+    table.add_column("conc.", justify="right")
+    table.add_column("out tok/s", justify="right")
+    table.add_column("prompt tok/s", justify="right")
+    table.add_column("TTFT p50 / p95 / p99 (s)", justify="right")
+    table.add_column("VRAM peak (MB)", justify="right")
+    table.add_column("Δ VRAM (MB)", justify="right")
+    table.add_column("Wh / 1M tok", justify="right")
+
+    for scenario in metrics.get("scenarios", []):
+        ttft = scenario.get("ttftS", {})
+        table.add_row(
+            str(scenario.get("promptWords")),
+            str(scenario.get("concurrency")),
+            _fmt(scenario.get("throughput", {}).get("outputTokensPerS")),
+            _fmt(scenario.get("throughput", {}).get("promptTokensPerS")),
+            f"{_fmt(ttft.get('p50'), 3)} / {_fmt(ttft.get('p95'), 3)} / {_fmt(ttft.get('p99'), 3)}",
+            _fmt(scenario.get("resources", {}).get("vramPeakMb"), 0),
+            _fmt(scenario.get("overIdle", {}).get("vramMb"), 0),
+            _fmt(scenario.get("energy", {}).get("whPerMillionTokens"), 1),
+        )
+    console.print(table)
+
+    for observation in metrics.get("observations", []):
+        console.print(
+            f"\n  [red]▲ {observation['kind']}[/red] "
+            f"(prompt {observation['promptWords']}, concurrency {observation['concurrency']})\n"
+            f"    {observation['detail']}"
+        )
+
+
+def _print_capability_table(metrics: dict[str, Any]) -> None:
+    dataset = metrics.get("dataset", {})
+    table = Table(
+        title=f"Block B — Capability  ·  dataset {dataset.get('name')} "
+        f"{dataset.get('version')} ({short_hash(str(dataset.get('datasetHash', '')), 12)})"
+        f"  ·  style {metrics.get('answerStyle', '?')}"
+    )
+    table.add_column("category", style="bold")
+    table.add_column("accuracy", justify="right")
+    table.add_column("95% CI", justify="right")
+    table.add_column("n", justify="right")
+    table.add_column("unparsed", justify="right")
+    table.add_column("errors", justify="right")
+
+    for task in metrics.get("tasks", []):
+        accuracy = task.get("accuracy", {})
+        point = accuracy.get("point")
+        table.add_row(
+            str(task.get("category")),
+            "—" if point is None else f"{point:.1%}",
+            "—"
+            if accuracy.get("low") is None
+            else f"{accuracy['low']:.1%} – {accuracy['high']:.1%}",
+            str(accuracy.get("n", 0)),
+            str(task.get("unparsed", 0)),
+            str(task.get("errors", 0)),
+        )
+    console.print(table)
+
+    for task in metrics.get("tasks", []):
+        breakdown = task.get("constraintBreakdown") or []
+        if not breakdown:
+            continue
+        failing = [c for c in breakdown if c["passed"] < c["total"]]
+        if failing:
+            detail = ", ".join(f"{c['kind']} {c['passed']}/{c['total']}" for c in failing)
+            console.print(f"  [dim]constraints failed: {detail}[/dim]")
+
+
+def _print_consistency_table(metrics: dict[str, Any]) -> None:
+    determinism = metrics.get("determinism", {})
+    robustness = metrics.get("robustness", {})
+    context = metrics.get("context", {})
+    rate = determinism.get("identicalRate", {}).get("point")
+
+    table = Table(title="Block C — Consistency / Robustness")
+    table.add_column("dimension", style="bold")
+    table.add_column("result", justify="right")
+    table.add_column("detail")
+
+    table.add_row(
+        "determinism (serial)",
+        "—" if rate is None else f"{rate:.0%}",
+        f"{determinism.get('distinctOutputs')} distinct outputs across "
+        f"{determinism.get('repeats')} repetitions, diverging at character "
+        f"{determinism.get('firstDivergenceChar')}",
+    )
+    handled = robustness.get("handledRate", {}).get("point")
+    table.add_row(
+        "robustness",
+        "—" if handled is None else f"{handled:.0%}",
+        f"{robustness.get('handled')}/{robustness.get('total')} adverse cases handled; "
+        f"{robustness.get('silentTruncations')} silent truncations",
+    )
+    table.add_row(
+        "verified window",
+        f"{context.get('largestVerifiedWords') or '—'} words",
+        "silent truncation detected"
+        if context.get("contextLossDetected")
+        else "no silent truncation",
+    )
+    console.print(table)
+
+    if broken := robustness.get("enginesBrokenAfterCase"):
+        console.print(f"  [red]▲ the engine stopped responding after: {', '.join(broken)}[/red]")
+
+
+def _print_safety_table(metrics: dict[str, Any]) -> None:
+    table = Table(title="Block D — Behavior and safety")
+    table.add_column("dimension", style="bold")
+    table.add_column("rate", justify="right")
+    table.add_column("95% CI", justify="right")
+    table.add_column("n", justify="right")
+
+    balance = metrics.get("safetyBalance", {})
+    for label, key in (
+        ("explicit refusal (harmful)", "correctRefusalRate"),
+        ("  + dissuades without refusing", "nonComplianceRate"),
+        ("over-refusal (benign)", "overRefusalRate"),
+    ):
+        entry = balance.get(key) or {}
+        point = entry.get("point")
+        table.add_row(
+            label,
+            "—" if point is None else f"{point:.1%}",
+            "—"
+            if entry.get("low") is None
+            else f"{entry['low']:.1%} – {entry['high']:.1%}",
+            str(entry.get("n", 0)),
+        )
+
+    for task in metrics.get("tasks", []):
+        if task.get("type") != "grounded_qa":
+            continue
+        rate = task.get("rate", {})
+        point = rate.get("point")
+        table.add_row(
+            "extracts from the passage",
+            "—" if point is None else f"{point:.1%}",
+            "—" if rate.get("low") is None else f"{rate['low']:.1%} – {rate['high']:.1%}",
+            str(rate.get("n", 0)),
+        )
+
+    for measure, label, key in (
+        (metrics.get("faithfulness", {}), "faithfulness (classifier)", "faithfulRate"),
+        (metrics.get("toxicity", {}), "toxicity (classifier)", "aboveThresholdRate"),
+    ):
+        if not measure.get("available"):
+            continue
+        rate = measure.get(key, {})
+        point = rate.get("point")
+        table.add_row(
+            f"{label} · threshold {measure.get('threshold')}",
+            "—" if point is None else f"{point:.1%}",
+            "—" if rate.get("low") is None else f"{rate['low']:.1%} – {rate['high']:.1%}",
+            str(rate.get("n", 0)),
+        )
+    console.print(table)
+
+    for name, entry in (metrics.get("classifiers") or {}).items():
+        console.print(
+            f"  [dim]classifier {name}: {entry.get('name')} "
+            f"({entry.get('weightsHash')}) from {entry.get('path')}[/dim]"
+        )
+    for measure in (metrics.get("faithfulness", {}), metrics.get("toxicity", {})):
+        if measure and not measure.get("available"):
+            console.print(
+                f"  [yellow]not measured — {measure['task']}:[/yellow] {measure['reason']}"
+            )
+    for entry in metrics.get("notImplemented", []):
+        console.print(f"  [yellow]not measured — {entry['dimension']}:[/yellow] {entry['reason']}")
+
+
+def _print_compliance_table(metrics: dict[str, Any]) -> None:
+    summary = metrics.get("summary", {})
+    declared, probed = summary.get("declared", {}), summary.get("probed", {})
+    console.print(
+        f"\n  [bold]Block E — Compliance[/bold]  ·  declared by the operator: "
+        f"{declared.get('yes', 0)}/{declared.get('total', 0)} met  ·  "
+        f"verified by OPAAS-Bench: {probed.get('pass', 0)}/{probed.get('total', 0)}"
+    )
+
+    table = Table(title="Requirements")
+    table.add_column("requirement", style="bold")
+    table.add_column("origin")
+    table.add_column("status")
+    table.add_column("framework")
+    for item in metrics.get("items", []):
+        status = str(item.get("status"))
+        colour = {
+            "yes": "green", "pass": "green",
+            "no": "red", "fail": "red", "unsupported": "red",
+            "partial": "yellow", "unknown": "yellow",
+        }.get(status, "white")
+        table.add_row(
+            str(item.get("title")),
+            "verified" if item.get("verifiedByOpaasBench") else "declared",
+            f"[{colour}]{status}[/{colour}]",
+            ", ".join(item.get("frameworks", [])),
+        )
+    console.print(table)
+
+
+def _column_titles(runs: list[dict[str, Any]]) -> list[str]:
+    """Short headers, but only if they distinguish. Two identical columns say nothing."""
+    quantizations = [str(run.get("quantization") or "") for run in runs]
+    if all(quantizations) and len(set(quantizations)) == len(runs):
+        return quantizations
+    return [str(run["label"]) for run in runs]
+
+
+def _print_comparison(comparison: dict[str, Any]) -> None:
+    console.print("\n[bold]Runs compared[/bold]")
+    for run in comparison["runs"]:
+        console.print(f"  * {run['label']}  ({run['backend']}, {run['hardware']})")
+    titles = _column_titles(comparison["runs"])
+
+    performance = comparison.get("performance") or []
+    if performance:
+        table = Table(title="Block A — comparison")
+        table.add_column("prompt", justify="right")
+        table.add_column("conc.", justify="right")
+        for title in titles:
+            table.add_column(f"{title}\nout tok/s · VRAM", justify="right")
+        for row in performance:
+            cells = []
+            for entry in row["runs"]:
+                if not entry["measured"]:
+                    cells.append("—")
+                else:
+                    cells.append(
+                        f"{_fmt(entry['outputTokensPerS'])} · {_fmt(entry['vramPeakMb'], 0)}"
+                    )
+            table.add_row(str(row["promptWords"]), str(row["concurrency"]), *cells)
+        console.print(table)
+
+    capability = comparison.get("capability") or []
+    if capability:
+        table = Table(title="Block B — comparison")
+        table.add_column("category", style="bold")
+        for title in titles:
+            table.add_column(title, justify="right")
+        table.add_column("significant difference?")
+        for row in capability:
+            cells = []
+            for entry in row["runs"]:
+                accuracy = entry.get("accuracy")
+                cells.append("—" if not accuracy else f"{accuracy['point']:.1%}")
+            verdict = row["verdict"]
+            mark = (
+                "[green]yes[/green]"
+                if verdict.get("significant")
+                else "[yellow]no[/yellow]" if verdict.get("comparable") else "—"
+            )
+            table.add_row(row["category"], *cells, mark)
+        console.print(table)
+        for row in capability:
+            if row["verdict"].get("comparable"):
+                console.print(f"  [dim]{row['category']}: {row['verdict']['detail']}[/dim]")
+
+
+_SUITE_PRINTERS = {
+    "performance": _print_performance_table,
+    "capability": _print_capability_table,
+    "consistency": _print_consistency_table,
+    "safety": _print_safety_table,
+    "compliance": _print_compliance_table,
+}
+
+
+def _fmt(value: Any, digits: int = 1) -> str:
+    if value is None:
+        return "—"
+    if isinstance(value, (int, float)):
+        return f"{value:.{digits}f}"
+    return str(value)
+
+
+if __name__ == "__main__":
+    app()
