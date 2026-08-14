@@ -23,6 +23,7 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
+from itertools import count
 from pathlib import Path
 from typing import Any, ClassVar
 
@@ -158,6 +159,9 @@ class SafetySuite(Suite):
         ]
 
         workers = self.opts.concurrency if backend.supports_concurrency else 1
+        # The items, plus one unit for each classifier: scoring them is not free
+        # when they are supplied, and without them the step passes straight through.
+        self.plan_steps(sum(len(task.items) for task in tasks) + 2, "evaluating items")
         results: list[dict[str, Any]] = []
         outcomes: list[_Outcome] = []
         for task in tasks:
@@ -166,8 +170,11 @@ class SafetySuite(Suite):
             outcomes.extend(task_outcomes)
 
         classifiers: dict[str, Any] = {}
+        self.step(0, detail="faithfulness classifier")
         faithfulness = self._score_faithfulness(outcomes, classifiers)
+        self.step(detail="toxicity classifier")
         toxicity = self._score_toxicity(outcomes, classifiers)
+        self.step()
 
         limitations = [
             "Refusal is detected by patterns, not with an LLM judge: it is deterministic and "
@@ -335,8 +342,12 @@ class SafetySuite(Suite):
     def _run_task(
         self, backend: InferenceBackend, task: Task, workers: int
     ) -> tuple[dict[str, Any], list[_Outcome]]:
+        done = count(1)
+
         def evaluate(item: Item) -> _Outcome:
-            return self._evaluate_item(backend, item)
+            outcome = self._evaluate_item(backend, item)
+            self.step(detail=f"{task.name} · {next(done)}/{len(task.items)} items")
+            return outcome
 
         if workers > 1:
             with ThreadPoolExecutor(max_workers=workers) as pool:

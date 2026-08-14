@@ -80,6 +80,8 @@ The full cycle: evaluate, certify, verify.
 opaas-bench run --model llama3.2:1b --backend ollama --suite all --output result.json
 ```
 
+A complete evaluation takes a long time, so `run` reports the percentage and the elapsed time as it goes: a bar that says which block it is on and what it is doing inside it (`[2/5] capability · reasoning · 34/60 items`). Redirected to a file or in CI there is no bar to redraw — the same information comes out as lines, every 15 seconds.
+
 ```bash
 opaas-bench sign --input result.json --key keys/opaas-root-ed25519.pem --out credential.json
 ```

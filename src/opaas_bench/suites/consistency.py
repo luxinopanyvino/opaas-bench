@@ -84,6 +84,15 @@ class ConsistencySuite(Suite):
         self.opts = ConsistencyOptions.from_dict(self.options)
 
     def evaluate(self, backend: InferenceBackend) -> tuple[dict[str, Any], list[str]]:
+        # Three phases with a known number of generations each: repetitions,
+        # adverse cases, and the context probe (control + one per length).
+        self.plan_steps(
+            max(2, self.opts.determinism_repeats)
+            + len(_ROBUSTNESS_CASES)
+            + 1
+            + len(set(self.opts.context_probe_words)),
+            "determinism",
+        )
         determinism = self._measure_determinism(backend)
         robustness = self._measure_robustness(backend)
         context = self._probe_context(backend)
@@ -141,7 +150,9 @@ class ConsistencySuite(Suite):
     def _measure_determinism(self, backend: InferenceBackend) -> dict[str, Any]:
         outputs: list[str] = []
         errors: list[str] = []
-        for _ in range(max(2, self.opts.determinism_repeats)):
+        repeats = max(2, self.opts.determinism_repeats)
+        for attempt in range(1, repeats + 1):
+            self.step(0, detail=f"determinism · repetition {attempt}/{repeats}")
             try:
                 result = backend.generate(
                     self.opts.determinism_prompt,
@@ -153,6 +164,7 @@ class ConsistencySuite(Suite):
                 outputs.append(result.text)
             except Exception as exc:  # noqa: BLE001
                 errors.append(f"{type(exc).__name__}: {exc}")
+            self.step()
 
         if not outputs:
             return {
@@ -187,9 +199,12 @@ class ConsistencySuite(Suite):
                 # The engine is already unusable: the remaining cases were not tried,
                 # and saying they failed would be as false as saying they passed.
                 cases.append(_skipped_case(name, prompt, broken_after[0]))
+                self.step(detail=f"robustness · {name} (skipped)")
                 continue
 
+            self.step(0, detail=f"robustness · {name}")
             case = self._run_robustness_case(backend, name, prompt)
+            self.step()
             cases.append(case)
             # An explicit error is acceptable behavior; the engine being left
             # unusable afterwards is not.
@@ -256,7 +271,9 @@ class ConsistencySuite(Suite):
         context is silently truncated — and accusing the innocent of that defect
         is worse than not detecting it.
         """
+        self.step(0, detail=f"context · control of {_CONTROL_WORDS} words")
         control = self._canary_attempt(backend, _CONTROL_WORDS)
+        self.step()
         if not control["canaryEchoed"]:
             reason = (
                 f"The engine failed with a trivial context: {control['detail']}"
@@ -286,7 +303,9 @@ class ConsistencySuite(Suite):
         silent_truncation = False
 
         for words in sorted(set(self.opts.context_probe_words)):
+            self.step(0, detail=f"context · probe of {words} words")
             level = self._canary_attempt(backend, words)
+            self.step()
             levels.append(level)
             if level["status"] == "ok":
                 largest_ok = max(largest_ok, words)

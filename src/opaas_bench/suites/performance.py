@@ -94,6 +94,17 @@ class PerformanceSuite(Suite):
                 "and is reported as null."
             )
 
+        lengths = sorted(set(self.opts.prompt_words))
+        # One unit per request that is going to be issued, plus warmup and idle:
+        # the scenarios with high concurrency issue more, and weighing them the
+        # same would make the bar stall on the longest one.
+        self.plan_steps(
+            max(0, self.opts.warmup_requests)
+            + 1
+            + len(lengths) * sum(self.opts.requests_for(c) for c in levels),
+            "warmup",
+        )
+
         self._warmup(backend)
         # Idle is measured AFTER warmup: engines like Ollama load the model on the
         # first request, so measuring before would give the memory of an empty GPU
@@ -101,7 +112,7 @@ class PerformanceSuite(Suite):
         idle = self._measure_idle(backend)
 
         scenarios: list[dict[str, Any]] = []
-        for words in sorted(set(self.opts.prompt_words)):
+        for words in lengths:
             prompt = _build_prompt(words)
             for concurrency in levels:
                 scenarios.append(self._run_scenario(backend, prompt, words, concurrency, idle))
@@ -157,6 +168,7 @@ class PerformanceSuite(Suite):
         prompt = _build_prompt(min(self.opts.prompt_words))
         for _ in range(max(0, self.opts.warmup_requests)):
             self._attempt(backend, prompt, max_tokens=16)
+            self.step(detail="warmup")
 
     def _attempt(self, backend: InferenceBackend, prompt: str, max_tokens: int) -> _Attempt:
         started = time.perf_counter()
@@ -178,10 +190,12 @@ class PerformanceSuite(Suite):
 
     def _measure_idle(self, backend: InferenceBackend) -> dict[str, Any]:
         """Consumption with the model loaded and not generating."""
+        self.step(0, detail=f"idle consumption ({self.opts.idle_seconds:.0f}s)")
         sampler = ResourceSampler(
             interval_s=min(self.opts.sample_interval_s, 0.5), pid=backend.server_pid()
         ).start()
         time.sleep(max(0.0, self.opts.idle_seconds))
+        self.step(detail="idle consumption")
         return sampler.stop().as_dict()
 
     def _run_scenario(
@@ -193,22 +207,27 @@ class PerformanceSuite(Suite):
         idle: dict[str, Any],
     ) -> dict[str, Any]:
         total_requests = self.opts.requests_for(concurrency)
+        label = f"prompt {words} w · concurrency {concurrency}"
+        self.step(0, detail=f"{label} · 0/{total_requests} requests")
         sampler = ResourceSampler(
             interval_s=self.opts.sample_interval_s, pid=backend.server_pid()
         ).start()
 
+        attempts: list[_Attempt] = []
         wall_start = time.perf_counter()
         if concurrency == 1:
-            attempts = [
-                self._attempt(backend, prompt, self.opts.max_tokens) for _ in range(total_requests)
-            ]
+            for _ in range(total_requests):
+                attempts.append(self._attempt(backend, prompt, self.opts.max_tokens))
+                self.step(detail=f"{label} · {len(attempts)}/{total_requests} requests")
         else:
             with ThreadPoolExecutor(max_workers=concurrency) as pool:
                 futures = [
                     pool.submit(self._attempt, backend, prompt, self.opts.max_tokens)
                     for _ in range(total_requests)
                 ]
-                attempts = [f.result() for f in as_completed(futures)]
+                for future in as_completed(futures):
+                    attempts.append(future.result())
+                    self.step(detail=f"{label} · {len(attempts)}/{total_requests} requests")
         wall_s = time.perf_counter() - wall_start
 
         resources = sampler.stop()
