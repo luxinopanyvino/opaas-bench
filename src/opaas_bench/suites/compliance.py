@@ -66,10 +66,16 @@ class ComplianceSuite(Suite):
                 "uncovered. Generate a template with 'opaas-bench compliance --template'."
             )
 
+        self.plan_steps(3, "air-gapped probe")
         egress = self._probe_egress(backend)
+        self.step(detail="explainability probe (logprobs)")
+        logprobs = _probe_logprobs(backend)
+        self.step(detail="explainability probe (reasoning)")
+        reasoning = _probe_reasoning(backend)
+        self.step()
         probes = {
-            "logprobs": _probe_logprobs(backend),
-            "reasoning": _probe_reasoning(backend),
+            "logprobs": logprobs,
+            "reasoning": reasoning,
             "egress": egress,
         }
 

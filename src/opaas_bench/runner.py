@@ -9,6 +9,8 @@ Steps 4–6 (signed credential, publication) arrive in Phases 4 and 5.
 
 from __future__ import annotations
 
+import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -88,6 +90,39 @@ class RunOutcome:
     report_path: Path
 
 
+def format_elapsed(seconds: float) -> str:
+    """`mm:ss`, and `h:mm:ss` once the run goes past the hour."""
+    total = max(0, int(seconds))
+    hours, rest = divmod(total, 3600)
+    minutes, secs = divmod(rest, 60)
+    return f"{hours}:{minutes:02d}:{secs:02d}" if hours else f"{minutes:02d}:{secs:02d}"
+
+
+@dataclass(slots=True)
+class RunEvent:
+    """What the run is doing, how far along it is and for how long.
+
+    It is passed to `on_event` instead of a bare string so a caller can draw a
+    bar with it; printing it directly still gives a usable line, which is what
+    a log or a redirected run needs.
+    """
+
+    message: str
+    #: 'info' | 'suite-start' | 'progress' | 'suite-end'. Only 'progress' is
+    #: emitted many times per second: a consumer may throttle those.
+    kind: str = "info"
+    #: Percentage of the whole run, suites weighed equally.
+    percent: float = 0.0
+    elapsed_s: float = 0.0
+    suite: str | None = None
+    #: Position of the suite in the run, 1-based. 0 outside the suites.
+    index: int = 0
+    total: int = 0
+
+    def __str__(self) -> str:
+        return f"[{self.percent:5.1f}% · {format_elapsed(self.elapsed_s)}] {self.message}"
+
+
 #: Keys never written to the report: secrets or non-serializable objects.
 _SECRET_KEYS = frozenset({"api_key"})
 _NON_SERIALIZABLE_KEYS = frozenset({"transport"})
@@ -103,10 +138,41 @@ def _publishable_config(config: dict[str, Any]) -> dict[str, Any]:
     return clean
 
 
-def execute(request: RunRequest, *, on_event: Any = None) -> RunOutcome:
-    """Runs the whole thing and leaves the report on disk."""
-    notify = on_event or (lambda _message: None)
+def execute(
+    request: RunRequest, *, on_event: Callable[[RunEvent], None] | None = None
+) -> RunOutcome:
+    """Runs the whole thing and leaves the report on disk.
+
+    `on_event` receives a `RunEvent` with the progress and the elapsed time of
+    the run; it is a side channel, and nothing in the measurement depends on it.
+    """
+    notify = on_event or (lambda _event: None)
     request.validate()
+    started_clock = time.monotonic()
+    total_suites = len(request.suites)
+    #: Suites already finished. The one in flight adds its own fraction.
+    finished_suites = 0
+
+    def emit(
+        message: str,
+        kind: str = "info",
+        *,
+        suite: str | None = None,
+        index: int = 0,
+        fraction: float = 0.0,
+    ) -> None:
+        done = (finished_suites + fraction) / total_suites if total_suites else 0.0
+        notify(
+            RunEvent(
+                message=message,
+                kind=kind,
+                percent=100.0 * min(max(done, 0.0), 1.0),
+                elapsed_s=time.monotonic() - started_clock,
+                suite=suite,
+                index=index,
+                total=total_suites,
+            )
+        )
 
     scan_dir = request.output.parent if request.output else DEFAULT_RUNS_DIR
     run_id = request.run_id or allocate_run_id(scan_dir)
@@ -122,7 +188,7 @@ def execute(request: RunRequest, *, on_event: Any = None) -> RunOutcome:
         "suiteOptions": request.suite_options,
     }
 
-    notify(f"Run {run_id}: loading model {request.model} on backend {request.backend}")
+    emit(f"Run {run_id}: loading model {request.model} on backend {request.backend}")
     backend = get_backend(request.backend)
     backend.load(request.model, request.backend_config)
 
@@ -150,15 +216,42 @@ def execute(request: RunRequest, *, on_event: Any = None) -> RunOutcome:
             reference_type=request.reference_type,
         )
 
-        for suite_name in request.suites:
-            notify(f"Running suite '{suite_name}'…")
+        for position, suite_name in enumerate(request.suites, start=1):
+            emit(
+                f"Suite '{suite_name}' ({position}/{total_suites})…",
+                "suite-start",
+                suite=suite_name,
+                index=position,
+            )
             suite = get_suite(suite_name, request.suite_options.get(suite_name, {}))
+            # What the block reports about itself becomes progress for the whole
+            # run: each block is a slice, and inside it the block says where it is.
+            suite.set_progress_callback(
+                lambda fraction, detail, name=suite_name, at=position: emit(
+                    f"[{at}/{total_suites}] {name}" + (f" · {detail}" if detail else ""),
+                    "progress",
+                    suite=name,
+                    index=at,
+                    fraction=fraction,
+                )
+            )
             result = suite.run(backend)
+            finished_suites = position
             report.suites.append(result)
             if result.status == "failed":
-                notify(f"Suite '{suite_name}' failed: {result.error}")
+                emit(
+                    f"Suite '{suite_name}' failed: {result.error}",
+                    "suite-end",
+                    suite=suite_name,
+                    index=position,
+                )
             else:
-                notify(f"Suite '{suite_name}' completed in {result.duration_s}s")
+                emit(
+                    f"Suite '{suite_name}' completed in {result.duration_s}s",
+                    "suite-end",
+                    suite=suite_name,
+                    index=position,
+                )
     finally:
         backend.close()
 
@@ -186,5 +279,5 @@ def execute(request: RunRequest, *, on_event: Any = None) -> RunOutcome:
         report.status = "evaluated-partial"
 
     report_path = report.write(output_path)
-    notify(f"Report written to {report_path}")
+    emit(f"Report written to {report_path}")
     return RunOutcome(report=report, report_path=report_path)

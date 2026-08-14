@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
+from itertools import count
 from typing import Any, ClassVar
 
 from opaas_bench.adapters.base import InferenceBackend
@@ -132,6 +133,7 @@ class CapabilitySuite(Suite):
                 f"Dataset '{dataset.name}' has no multiple-choice or instruction-following "
                 "tasks: block B has nothing to evaluate."
             )
+        self.plan_steps(sum(len(task.items) for task in own_tasks), "evaluating items")
         tasks = [self._run_task(backend, task, workers) for task in own_tasks]
 
         if failed := sum(task["errors"] for task in tasks):
@@ -160,8 +162,12 @@ class CapabilitySuite(Suite):
     # ------------------------------------------------------------------ internal
 
     def _run_task(self, backend: InferenceBackend, task: Task, workers: int) -> dict[str, Any]:
+        done = count(1)
+
         def evaluate(item: Item) -> _Outcome:
-            return self._evaluate_item(backend, item)
+            outcome = self._evaluate_item(backend, item)
+            self.step(detail=f"{task.name} · {next(done)}/{len(task.items)} items")
+            return outcome
 
         if workers > 1:
             with ThreadPoolExecutor(max_workers=workers) as pool:

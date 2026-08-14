@@ -6,12 +6,23 @@ import getpass
 import json
 import os
 import sys
+import time
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Annotated, Any
 
 import typer
 from rich.console import Console
-from rich.table import Table
+from rich.progress import (
+    BarColumn,
+    Progress,
+    SpinnerColumn,
+    TaskProgressColumn,
+    TextColumn,
+    TimeElapsedColumn,
+)
+from rich.table import Column, Table
 
 from opaas_bench.adapters import available_backends, get_backend
 from opaas_bench.adapters.base import DEFAULT_PROMPT_MODE, PROMPT_MODES, BackendError
@@ -48,7 +59,7 @@ from opaas_bench.datasets.importers import ImporterError, import_dataset
 from opaas_bench.declaration import template as declaration_template
 from opaas_bench.hashing import canonical_json, file_digest, short_hash
 from opaas_bench.report import REPORT_FILENAME
-from opaas_bench.runner import RunRequest, execute
+from opaas_bench.runner import RunEvent, RunRequest, execute
 from opaas_bench.scoring import ScoringError, prompt_template_hash
 from opaas_bench.suites import PLANNED_SUITES, available_suites, get_suite, planned_suite_hint
 from opaas_bench.transparency import (
@@ -265,6 +276,63 @@ AllowRemoteCode = Annotated[
 ]
 
 
+#: Without a terminal, progress lines are not printed more often than this: a
+#: redirected run would otherwise write one line per request into the log.
+_PLAIN_PROGRESS_INTERVAL_S = 15.0
+
+
+@contextmanager
+def _progress_reporter(suites: int) -> Iterator[Callable[[RunEvent], None]]:
+    """How the progress of the run is shown.
+
+    With a terminal, a single bar with the percentage and the elapsed time,
+    which keeps ticking while a suite generates. Redirected to a file or in CI
+    there is no bar to redraw: the same events come out as lines with the
+    percentage and the elapsed time in front, throttled so an hour-long run
+    does not turn into thousands of lines.
+    """
+    if not console.is_terminal:
+        last_progress = 0.0
+
+        def plain(event: RunEvent) -> None:
+            nonlocal last_progress
+            now = time.monotonic()
+            # Milestones always come out; the ticks inside a block, at intervals.
+            if event.kind == "progress":
+                if now - last_progress < _PLAIN_PROGRESS_INTERVAL_S:
+                    return
+                last_progress = now
+            console.print(f"[dim]{event}[/dim]")
+
+        yield plain
+        return
+
+    progress = Progress(
+        # The braille spinner does not survive a legacy Windows console (cp1252):
+        # there, the ASCII one. A crash while rendering would abort the run.
+        SpinnerColumn(spinner_name="line" if console.legacy_windows else "dots"),
+        TextColumn(
+            "[dim]{task.description}[/dim]",
+            table_column=Column(no_wrap=True, max_width=52),
+        ),
+        BarColumn(bar_width=24),
+        TaskProgressColumn(),
+        TimeElapsedColumn(),
+        console=console,
+    )
+    with progress:
+        bar = progress.add_task(f"starting · {suites} block(s)", total=100.0)
+
+        def live(event: RunEvent) -> None:
+            progress.update(bar, completed=event.percent, description=event.message)
+            if event.kind != "progress":
+                # The milestones are left above the bar: when the run finishes,
+                # what remains on screen is a readable log of what happened.
+                progress.console.print(f"[dim]{event}[/dim]")
+
+        yield live
+
+
 @app.command()
 def run(
     model: Model,
@@ -411,7 +479,8 @@ def run(
     )
 
     try:
-        outcome = execute(request, on_event=lambda message: console.print(f"[dim]{message}[/dim]"))
+        with _progress_reporter(len(requested)) as reporter:
+            outcome = execute(request, on_event=reporter)
     except ValueError as exc:
         err_console.print(f"[red]{exc}[/red]")
         raise typer.Exit(code=2) from None
