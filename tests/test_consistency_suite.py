@@ -1,6 +1,11 @@
 import itertools
 
-from opaas_bench.suites.consistency import ConsistencySuite, _canary_prompt, _first_divergence
+from opaas_bench.suites.consistency import (
+    ConsistencySuite,
+    _canary_prompt,
+    _first_divergence,
+    _truncation_evidence,
+)
 
 from .conftest import ScriptedBackend
 
@@ -64,6 +69,49 @@ def test_a_nondeterministic_model_is_caught():
     assert determinism["distinctOutputs"] > 1
     assert determinism["firstDivergenceChar"] is not None
     assert any("NOT deterministic" in lim for lim in run.result.limitations)
+
+
+def test_determinism_is_anchored_to_the_most_repeated_output():
+    """One odd answer among four identical ones is 25% divergence, not 80%.
+
+    Scoring against the first sample turned four identical answers and one
+    outlier into "20% determinism", an order of magnitude off in the alarming
+    direction.
+    """
+    counter = itertools.count()
+
+    def responder(prompt: str) -> str:
+        if "verification code" in prompt:
+            return "The code is OPAAS-CANARY-7Q42."
+        # Warmup plus one outlier, then always the same answer.
+        return "odd one out" if next(counter) < 2 else "stable response"
+
+    run = _run(responder, {"determinism_repeats": 4, "determinism_warmup": 1})
+    determinism = run.metrics["determinism"]
+    assert determinism["repeats"] == 4
+    assert determinism["distinctOutputs"] == 2
+    assert determinism["identicalRate"]["point"] == 0.75
+    assert determinism["anchor"] == "modal"
+
+
+def test_the_warmup_generation_is_discarded_before_measuring():
+    """The first request runs against a cold engine and is not part of the sample."""
+    seen: list[str] = []
+
+    def responder(prompt: str) -> str:
+        if "verification code" in prompt:
+            return "The code is OPAAS-CANARY-7Q42."
+        if "on-premise" not in prompt:
+            return "ok"
+        seen.append(prompt)
+        return "cold start" if len(seen) == 1 else "stable response"
+
+    run = _run(responder, {"determinism_repeats": 3, "determinism_warmup": 1})
+    determinism = run.metrics["determinism"]
+    assert len(seen) == 4, "one warmup plus three measured repetitions"
+    assert determinism["warmupDiscarded"] == 1
+    assert determinism["identicalRate"]["point"] == 1.0
+    assert not any("NOT deterministic" in lim for lim in run.result.limitations)
 
 
 def test_batching_caveat_is_always_stated():
@@ -167,6 +215,89 @@ def test_attention_loss_is_not_reported_as_engine_truncation():
     assert context["enginePromptTruncation"] == "ruled-out"
     assert any("the model's attention" in lim for lim in result.limitations)
     assert not any("CONFIRMED" in lim for lim in result.limitations)
+
+
+def _levels(*rows):
+    """(words, tokens, canary came back) → the shape the probe records."""
+    return [
+        {
+            "promptWords": words,
+            "promptTokens": tokens,
+            "status": "ok" if echoed else "canary-lost",
+        }
+        for words, tokens, echoed in rows
+    ]
+
+
+#: Measured against qwen2.5 on Ollama with num_ctx unpinned: the count lands
+#: exactly on the 4096-token window while the growth of the shorter prompts
+#: predicts around 4500. The old check compared the largest level against the
+#: *smallest*, where the canary preamble costs 3.58 tokens per word instead of
+#: 1.15, and that dilution let this pass as healthy.
+_REAL_TRUNCATED_RUN = _levels(
+    (24, 86, True), (256, 338, True), (1024, 1176, True), (4096, 4096, False)
+)
+
+
+def test_a_count_that_stops_short_of_the_predicted_growth_is_truncation():
+    evidence = _truncation_evidence(_REAL_TRUNCATED_RUN, None)
+    assert evidence["verdict"] == "confirmed"
+    assert evidence["observedTokens"] == 4096
+    assert evidence["expectedTokens"] > 4400
+
+
+def test_the_reference_rate_ignores_the_fixed_cost_of_the_preamble():
+    """Same run, but the engine did process everything: it must not be accused."""
+    healthy = _levels((24, 86, True), (256, 338, True), (1024, 1176, True), (4096, 4703, False))
+    evidence = _truncation_evidence(healthy, None)
+    assert evidence["verdict"] == "ruled-out"
+
+
+def test_a_known_served_window_names_the_cap():
+    evidence = _truncation_evidence(_REAL_TRUNCATED_RUN, 4096)
+    assert evidence["verdict"] == "confirmed"
+    assert evidence["servedWindowTokens"] == 4096
+    assert "4096" in evidence["reason"]
+
+
+def test_with_a_single_reference_level_a_normal_growth_is_not_accused():
+    """One level gives no way to separate the preamble from the per-word cost."""
+    evidence = _truncation_evidence(_levels((24, 41, True), (64, 81, False)), None)
+    assert evidence["verdict"] == "ruled-out"
+    assert "weaker" in evidence["reason"]
+
+
+def test_with_a_single_reference_level_a_flat_count_still_is_truncation():
+    evidence = _truncation_evidence(_levels((24, 41, True), (64, 45, False)), None)
+    assert evidence["verdict"] == "confirmed"
+
+
+def test_the_served_window_reaches_the_report():
+    run = _run(_canary_aware())
+    assert "servedWindowTokens" in run.metrics["context"]
+    assert any("served context window is unknown" in lim for lim in run.result.limitations)
+
+
+def test_a_silently_truncated_adverse_case_is_not_counted_as_handled():
+    """Cutting the answer without saying so is the defect, not a way of coping."""
+
+    class Truncating(ScriptedBackend):
+        def generate(self, prompt, **params):
+            result = super().generate(prompt, **params)
+            if prompt.startswith("the the"):
+                result.finish_reason = None
+            return result
+
+    backend = Truncating(_canary_aware())
+    backend.load("fake/model-1b", {})
+    result = CoSuite().run(backend)
+    robustness = result.metrics["robustness"]
+
+    case = next(c for c in robustness["cases"] if c["case"] == "extreme repetition")
+    assert case["silentTruncation"] is True
+    assert case["outcome"] == "truncated"
+    assert robustness["handled"] == 8
+    assert any("no reason given by the engine" in lim for lim in result.limitations)
 
 
 def test_a_model_that_cannot_follow_the_instruction_is_not_accused_of_truncating():

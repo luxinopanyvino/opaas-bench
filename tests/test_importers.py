@@ -120,6 +120,42 @@ def test_import_writes_a_loadable_dataset(tmp_path):
     assert dataset.tasks[0].type == "instruction_following"
 
 
+def test_the_manifest_records_what_was_left_out(tmp_path):
+    """'complete (N items)' hid that part of the source is never evaluated."""
+    result = import_dataset("ifeval", _write_ifeval(tmp_path), tmp_path / "out")
+    manifest = json.loads((result.dataset_dir / "dataset.json").read_text(encoding="utf-8"))
+    task = manifest["tasks"][0]
+
+    assert task["itemsAvailable"] == 3
+    assert task["itemsSelected"] == 2
+    assert task["excluded"] == {"count": 1, "byReason": {"language:response_language": 1}}
+    assert "complete" not in task["source"]
+    assert "2 of 3 items" in task["source"]
+
+
+def test_a_source_imported_whole_says_so(tmp_path):
+    records = [r for r in IFEVAL_RECORDS if "language:response_language" not in
+               r["instruction_id_list"]]
+    result = import_dataset("ifeval", _write_ifeval(tmp_path, records), tmp_path / "out")
+    manifest = json.loads((result.dataset_dir / "dataset.json").read_text(encoding="utf-8"))
+    task = manifest["tasks"][0]
+
+    assert task["excluded"] == {"count": 0, "byReason": {}}
+    assert "complete (2 items)" in task["source"]
+
+
+def test_the_exclusions_reach_the_report_as_a_limitation(tmp_path):
+    from opaas_bench.datasets import exclusion_limitations
+
+    result = import_dataset("ifeval", _write_ifeval(tmp_path), tmp_path / "out")
+    dataset = load_dataset(str(result.dataset_dir))
+    limitations = exclusion_limitations(dataset)
+
+    assert len(limitations) == 1
+    assert "1 of 3 source items are NOT evaluated" in limitations[0]
+    assert "language:response_language" in limitations[0]
+
+
 # ----------------------------------------------------------------------- XSTest
 
 XSTEST_ROWS = [

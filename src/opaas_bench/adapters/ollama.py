@@ -63,6 +63,7 @@ class OllamaBackend(InferenceBackend):
         self._version: str | None = None
         self._pid: int | None = _UNRESOLVED
         self._pid_note: str | None = None
+        self._num_ctx: int | None = None
 
     # ---------------------------------------------------------------- lifecycle
 
@@ -74,6 +75,10 @@ class OllamaBackend(InferenceBackend):
         # text instead of following instructions. See PROMPT_MODES.
         self._prompt_mode = _resolve_prompt_mode(config)
         self._raw = self._prompt_mode == "raw"
+        # Not sending num_ctx means inheriting whatever the server defaults to
+        # (OLLAMA_CONTEXT_LENGTH), which is usually far below what the model
+        # supports and silently trims the prompt. See context_window().
+        self._num_ctx = _positive_int(config.get("num_ctx"), "num_ctx")
 
         self._client = httpx.Client(
             base_url=self._base_url,
@@ -145,6 +150,8 @@ class OllamaBackend(InferenceBackend):
         }
         if (seed := params.pop("seed", None)) is not None:
             options["seed"] = int(seed)
+        if self._num_ctx is not None:
+            options["num_ctx"] = self._num_ctx
         options.update(params.pop("options", {}))
 
         body = {
@@ -227,6 +234,31 @@ class OllamaBackend(InferenceBackend):
 
     # ---------------------------------------------------------------- metadata
 
+    def context_window(self) -> int | None:
+        """The window this run is really served with, when it can be established.
+
+        Ollama decides it per request from `num_ctx`, and when nobody sends one
+        it falls back to the server's default — a number the API does not
+        expose. So: pinned with `--num-ctx`, this returns it and the run is
+        reproducible; without it, the honest answer is None.
+        """
+        return self._num_ctx
+
+    def model_context_length(self) -> int | None:
+        """Window the *model* was trained with, from `/api/show`.
+
+        It is an upper bound on what could be served, never proof of what is
+        being served: the gap between the two is exactly where silent
+        truncation lives.
+        """
+        info = self._details.get("model_info") if isinstance(self._details, dict) else None
+        if not isinstance(info, dict):
+            return None
+        for key, value in info.items():
+            if str(key).endswith(".context_length"):
+                return _positive_int(value, str(key))
+        return None
+
     def server_pid(self) -> int | None:
         if not _is_local(self._base_url):
             return None
@@ -270,6 +302,16 @@ class OllamaBackend(InferenceBackend):
             "quantization": details.get("quantization_level") or self._config.get("quantization"),
             "parameterSize": details.get("parameter_size"),
             "family": details.get("family"),
+            "numCtx": self._num_ctx,
+            "contextWindowTokens": self.context_window(),
+            "modelContextLength": self.model_context_length(),
+            "contextWindowNote": (
+                f"num_ctx pinned to {self._num_ctx} tokens on every request."
+                if self._num_ctx is not None
+                else "num_ctx NOT pinned: the server's default applies (OLLAMA_CONTEXT_LENGTH, "
+                "typically far below what the model supports) and it is not exposed by the API. "
+                "Pin it with --num-ctx so the served window is known and the run reproducible."
+            ),
             "supportsConcurrency": self.supports_concurrency,
             "concurrencyNote": "Real parallelism is capped by OLLAMA_NUM_PARALLEL on the server: "
             "if it is lower than the requested concurrency, Ollama queues and the measurement "
@@ -278,6 +320,18 @@ class OllamaBackend(InferenceBackend):
             "serverPid": self.server_pid(),
             "serverPidNote": self._pid_note,
         }
+
+
+def _positive_int(value: Any, field: str) -> int | None:
+    if value is None:
+        return None
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        raise BackendError(f"{field} must be an integer, received {value!r}") from None
+    if number <= 0:
+        raise BackendError(f"{field} must be greater than 0, received {number}")
+    return number
 
 
 def _ns_to_s(value: Any) -> float | None:

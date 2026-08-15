@@ -1,8 +1,9 @@
 """Conversion of public datasets to the OPAAS-Bench format.
 
-None of them download anything: the source file is supplied by whoever
-evaluates, having accepted its license. That keeps the dataset a local,
-hashable artifact and does not break a deployment with no internet access.
+None of them download anything: they convert a file they are handed. Obtaining
+it, verifying it against a pinned hash and caching it is `datasets/cache.py`'s
+job, so the dataset stays a local, hashable artifact and `--offline` keeps
+working with no internet access.
 
 The subset selection uses stratified sampling with a fixed seed, and is written
 into the manifest: "the first N" is neither reproducible nor representative.
@@ -22,6 +23,12 @@ ImporterError = ValueError
 
 #: Available importers: name → module.
 IMPORTERS = {"ifeval": ifeval, "xstest": xstest}
+
+#: Bumped when the manifest gains fields the report depends on. A cache written
+#: by an older version is re-imported instead of being served with the
+#: provenance missing: a report that omits how many items were excluded is
+#: worse than a slower first run.
+MANIFEST_VERSION = 2
 
 
 @dataclass(slots=True)
@@ -92,13 +99,26 @@ def import_dataset(
     effective_source = source_url or module.MANIFEST["source"]
 
     task = dict(module.TASK)
-    selection = (
-        f"complete ({len(selected)} items)"
-        if limit is None or limit >= len(items)
-        else f"stratified sampling by category, seed {seed}, "
-        f"{len(selected)} of {len(items)} items"
-    )
+    excluded = _excluded(stats)
+    # "complete" used to mean "everything that could be imported", which reads
+    # as "the whole dataset" to anyone auditing the report. If items were
+    # dropped for being uncheckable, the count says so out loud.
+    if limit is not None and limit < len(items):
+        selection = (
+            f"stratified sampling by category, seed {seed}, {len(selected)} of {len(items)} items"
+        )
+    elif excluded["count"]:
+        selection = (
+            f"{len(selected)} of {stats.total} items; "
+            f"{excluded['count']} excluded ({_reasons(excluded)})"
+        )
+    else:
+        selection = f"complete ({len(selected)} items)"
     task["source"] = f"{effective_source} — {selection}"
+    task["itemsAvailable"] = getattr(stats, "total", None)
+    task["itemsImported"] = len(items)
+    task["itemsSelected"] = len(selected)
+    task["excluded"] = excluded
 
     manifest_path = out_dir / "dataset.json"
     if append and manifest_path.is_file():
@@ -123,6 +143,7 @@ def import_dataset(
             "syntheticSmoke": False,
             "tasks": [task],
         }
+    manifest["manifestVersion"] = MANIFEST_VERSION
     (out_dir / "dataset.json").write_text(
         json.dumps(manifest, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
     )
@@ -137,6 +158,22 @@ def import_dataset(
         stats=stats,
         notes=_notes(name, stats, len(selected)),
     )
+
+
+def _excluded(stats: Any) -> dict[str, Any]:
+    """Items left out of the import, with why. Empty is a valid, explicit answer."""
+    by_reason = {
+        str(instruction): int(count)
+        for instruction, count in getattr(stats, "skipped_by_instruction", {}).items()
+    }
+    count = int(getattr(stats, "skipped", 0))
+    if count and not by_reason:
+        by_reason = {"unusable record": count}
+    return {"count": count, "byReason": by_reason}
+
+
+def _reasons(excluded: dict[str, Any]) -> str:
+    return ", ".join(f"{reason} {count}" for reason, count in sorted(excluded["byReason"].items()))
 
 
 def _join(existing: Any, addition: str) -> str:

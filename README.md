@@ -80,6 +80,14 @@ The full cycle: evaluate, certify, verify.
 opaas-bench run --model llama3.2:1b --backend ollama --suite all --output result.json
 ```
 
+**Pin the context window.** Without `--num-ctx`, Ollama serves whatever its own default is — usually far below what the model supports — and a long prompt gets trimmed with nothing warning you. The run stays valid, but it measures the deployment as configured and says so. To measure the model's window instead:
+
+```bash
+opaas-bench run --model llama3.2:1b --backend ollama --num-ctx 32768 --suite all
+```
+
+On vLLM the window is fixed at server start (`--max-model-len`) and OPAAS-Bench reads it from the server. Either way it ends up in the report as `servedWindowTokens`, and block C uses it to tell an engine trimming the prompt apart from a model losing track of it.
+
 A complete evaluation takes a long time, so `run` reports the percentage and the elapsed time as it goes: a bar that says which block it is on and what it is doing inside it (`[2/5] capability · reasoning · 34/60 items`). Redirected to a file or in CI there is no bar to redraw — the same information comes out as lines, every 15 seconds.
 
 ```bash

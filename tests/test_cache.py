@@ -181,6 +181,29 @@ def test_ensure_dataset_downloads_converts_and_caches(monkeypatch):
     assert "CC0" in dataset.license
 
 
+def test_a_cache_from_an_older_importer_is_rebuilt(monkeypatch):
+    """Serving a stale manifest would drop the provenance from the report."""
+    payload = IFEVAL_LINE.encode()
+    monkeypatch.setitem(
+        __import__("opaas_bench.datasets.sources", fromlist=["KNOWN_SOURCES"]).KNOWN_SOURCES,
+        "test",
+        _source(payload),
+    )
+    _serve(monkeypatch, payload)
+    path = ensure_dataset("test")
+
+    manifest_path = path / "dataset.json"
+    stale = json.loads(manifest_path.read_text(encoding="utf-8"))
+    del stale["manifestVersion"]
+    stale["tasks"][0].pop("excluded")
+    manifest_path.write_text(json.dumps(stale), encoding="utf-8")
+
+    assert is_cached("test") is False
+    rebuilt = json.loads((ensure_dataset("test") / "dataset.json").read_text(encoding="utf-8"))
+    assert "excluded" in rebuilt["tasks"][0]
+    assert is_cached("test") is True
+
+
 def test_a_source_name_resolves_like_a_dataset(monkeypatch):
     payload = IFEVAL_LINE.encode()
     monkeypatch.setitem(

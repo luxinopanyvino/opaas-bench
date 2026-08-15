@@ -182,3 +182,25 @@ def test_remote_endpoint_flags_telemetry_caveat():
         assert "non-local" in (usage.note or "").lower()
     else:
         assert usage.note
+
+
+def _models_handler(entries):
+    def handle(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/models"):
+            return httpx.Response(200, json={"data": entries})
+        return httpx.Response(404)
+
+    return httpx.MockTransport(handle)
+
+
+def test_the_served_window_comes_from_max_model_len():
+    """vLLM fixes it at startup, so reading it once at load time is enough."""
+    backend = _load(_models_handler([{"id": MODEL, "max_model_len": 8192}]))
+    assert backend.context_window() == 8192
+    assert backend.get_backend_metadata()["contextWindowTokens"] == 8192
+
+
+def test_a_server_that_hides_the_window_says_unknown_instead_of_guessing():
+    backend = _load(_models_handler([{"id": MODEL}]))
+    assert backend.context_window() is None
+    assert "unknown" in backend.get_backend_metadata()["contextWindowNote"]

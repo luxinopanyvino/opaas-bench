@@ -99,13 +99,25 @@ class OpenAICompatibleBackend(InferenceBackend):
         except json.JSONDecodeError as exc:
             raise BackendError(f"Non-JSON response from {self._base_url}/models: {exc}") from exc
 
-        served = [entry.get("id") for entry in payload.get("data", []) if isinstance(entry, dict)]
+        entries = [entry for entry in payload.get("data", []) if isinstance(entry, dict)]
+        served = [entry.get("id") for entry in entries]
         if served and self._model_id not in served:
             raise BackendError(
                 f"Model {self._model_id!r} is not served at {self._base_url}. "
                 f"Available models: {', '.join(str(m) for m in served)}"
             )
-        return {"servedModels": served}
+        # vLLM (and several compatible servers) publish the window the server
+        # was started with. It is fixed for the whole process, so one read at
+        # load time is enough.
+        window = next(
+            (
+                entry.get("max_model_len")
+                for entry in entries
+                if entry.get("id") == self._model_id and entry.get("max_model_len")
+            ),
+            None,
+        )
+        return {"servedModels": served, "maxModelLen": _positive_int(window)}
 
     # ---------------------------------------------------------------- inference
 
@@ -268,12 +280,24 @@ class OpenAICompatibleBackend(InferenceBackend):
             "api": self._api,
             "promptMode": self._prompt_mode,
             "servedModels": self._server_info.get("servedModels", []),
+            "contextWindowTokens": self.context_window(),
+            "contextWindowNote": (
+                "Reported by the server as max_model_len: the window it was started with."
+                if self.context_window() is not None
+                else "The server does not publish max_model_len: the served window is unknown, "
+                "so an engine trimming the prompt cannot be told apart from a model losing it."
+            ),
             "quantization": self._config.get("quantization"),
             "supportsConcurrency": self.supports_concurrency,
             "localEndpoint": _is_local(self._base_url),
             "serverPid": self.server_pid(),
             "serverPidNote": self._pid_note,
         }
+
+    def context_window(self) -> int | None:
+        """`max_model_len` as published by the server, when it publishes it."""
+        window = self._server_info.get("maxModelLen")
+        return int(window) if window else None
 
     def _engine_version(self) -> str | None:
         """Generic OpenAI-compatible servers do not expose a version."""
@@ -292,6 +316,15 @@ def _extract_text(choice: dict[str, Any], api: str, *, streaming: bool = False) 
 def _is_local(base_url: str) -> bool:
     host = httpx.URL(base_url).host
     return host in ("localhost", "127.0.0.1", "::1", "0.0.0.0")
+
+
+def _positive_int(value: Any) -> int | None:
+    """A window the server reports as 0, negative or garbage is 'unknown'."""
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        return None
+    return number if number > 0 else None
 
 
 def _resolve_prompt_mode(config: dict[str, Any]) -> str:

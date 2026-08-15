@@ -158,6 +158,14 @@ PromptMode = Annotated[
         "text completion, not instruction following.",
     ),
 ]
+NumCtx = Annotated[
+    int | None,
+    typer.Option(
+        "--num-ctx",
+        help="Context window in tokens the engine must serve (Ollama num_ctx). Without it the "
+        "server's default applies and a long prompt may be trimmed with nothing warning you.",
+    ),
+]
 ApiKey = Annotated[
     str | None,
     typer.Option(
@@ -340,6 +348,7 @@ def run(
     suite: Suites = None,
     base_url: BaseUrl = None,
     prompt_mode: PromptMode = DEFAULT_PROMPT_MODE,
+    num_ctx: NumCtx = None,
     api_key: ApiKey = None,
     timeout_s: Timeout = 300.0,
     concurrency: Concurrency = "1,4,16",
@@ -397,6 +406,10 @@ def run(
             f"[red]Unknown --prompt-mode: {prompt_mode!r}.[/red] "
             f"Valid ones: {', '.join(PROMPT_MODES)}"
         )
+        raise typer.Exit(code=2)
+
+    if num_ctx is not None and num_ctx <= 0:
+        err_console.print(f"[red]--num-ctx must be greater than 0, received {num_ctx}.[/red]")
         raise typer.Exit(code=2)
 
     if declaration is not None and not declaration.exists():
@@ -465,6 +478,7 @@ def run(
         backend_config={
             "base_url": base_url,
             "prompt_mode": prompt_mode,
+            "num_ctx": num_ctx,
             "api_key": api_key,
             "timeout_s": timeout_s,
             "quantization": quantization,
@@ -1122,11 +1136,19 @@ def _print_run_summary(report: dict[str, Any]) -> None:
     if cov := report.get("coverage"):
         evaluated = ", ".join(cov.get("blocksEvaluated") or []) or "none"
         if cov.get("complete"):
-            console.print(f"  coverage : blocks {evaluated} (complete)")
+            # Every block ran, which is not the same as every dimension being
+            # measured: saying only "complete" above a list of "not measured"
+            # invites reading the report as more thorough than it is.
+            console.print(f"  coverage : blocks {evaluated} (all five blocks ran)")
         else:
             missing = ", ".join(b["block"] for b in cov.get("blocksMissing", []))
             console.print(
                 f"  coverage : blocks {evaluated} — [yellow]not evaluated: {missing}[/yellow]"
+            )
+        if unmeasured := _unmeasured_dimensions(report):
+            console.print(
+                f"           : [yellow]{len(unmeasured)} dimensions within those blocks were "
+                f"not measured: {', '.join(unmeasured)}[/yellow]"
             )
 
     for result in report.get("suites", []):
@@ -1143,6 +1165,20 @@ def _print_run_summary(report: dict[str, Any]) -> None:
         console.print("\n[yellow]Known limitations of this run:[/yellow]")
         for limitation in limitations:
             console.print(f"  * {limitation}")
+
+
+def _unmeasured_dimensions(report: dict[str, Any]) -> list[str]:
+    """Dimensions a block declares it did not measure, gathered for the header."""
+    names: list[str] = []
+    for result in report.get("suites", []):
+        metrics = result.get("metrics") or {}
+        for entry in metrics.get("notImplemented", []):
+            names.append(str(entry.get("dimension")))
+        for key in ("faithfulness", "toxicity"):
+            measure = metrics.get(key) or {}
+            if measure and not measure.get("available"):
+                names.append(str(measure.get("task", key)))
+    return names
 
 
 def _print_performance_table(metrics: dict[str, Any]) -> None:
@@ -1162,7 +1198,7 @@ def _print_performance_table(metrics: dict[str, Any]) -> None:
     table.add_column("prompt (words)", justify="right")
     table.add_column("conc.", justify="right")
     table.add_column("out tok/s", justify="right")
-    table.add_column("prompt tok/s", justify="right")
+    table.add_column("prefill tok/s p50", justify="right")
     table.add_column("TTFT p50 / p95 / p99 (s)", justify="right")
     table.add_column("VRAM peak (MB)", justify="right")
     table.add_column("Δ VRAM (MB)", justify="right")
@@ -1174,7 +1210,7 @@ def _print_performance_table(metrics: dict[str, Any]) -> None:
             str(scenario.get("promptWords")),
             str(scenario.get("concurrency")),
             _fmt(scenario.get("throughput", {}).get("outputTokensPerS")),
-            _fmt(scenario.get("throughput", {}).get("promptTokensPerS")),
+            _fmt(scenario.get("throughput", {}).get("prefillTokensPerS", {}).get("p50")),
             f"{_fmt(ttft.get('p50'), 3)} / {_fmt(ttft.get('p95'), 3)} / {_fmt(ttft.get('p99'), 3)}",
             _fmt(scenario.get("resources", {}).get("vramPeakMb"), 0),
             _fmt(scenario.get("overIdle", {}).get("vramMb"), 0),
@@ -1225,8 +1261,28 @@ def _print_capability_table(metrics: dict[str, Any]) -> None:
             continue
         failing = [c for c in breakdown if c["passed"] < c["total"]]
         if failing:
-            detail = ", ".join(f"{c['kind']} {c['passed']}/{c['total']}" for c in failing)
-            console.print(f"  [dim]constraints failed: {detail}[/dim]")
+            # Failures over total, not passes: printing the passes under a
+            # "failed" heading read as the exact opposite of the data.
+            detail = ", ".join(
+                f"{c['kind']} {c['total'] - c['passed']}/{c['total']}" for c in failing
+            )
+            console.print(f"  [dim]constraints failed (failed/checked): {detail}[/dim]")
+
+    for task in dataset.get("tasks", []):
+        excluded = task.get("excluded") or {}
+        if excluded.get("count"):
+            reasons = ", ".join(
+                f"{reason} {count}" for reason, count in sorted(excluded["byReason"].items())
+            )
+            # Three different numbers: what the source has, what could be
+            # checked, and what this run evaluated after --limit. Collapsing
+            # them into one ratio is how the exclusions got lost in the first
+            # place.
+            console.print(
+                f"  [yellow]{task['name']}: {task['items']} items evaluated of "
+                f"{task['itemsImported']} checkable; {excluded['count']} of "
+                f"{task['itemsAvailable']} source items excluded ({reasons})[/yellow]"
+            )
 
 
 def _print_consistency_table(metrics: dict[str, Any]) -> None:
@@ -1240,31 +1296,62 @@ def _print_consistency_table(metrics: dict[str, Any]) -> None:
     table.add_column("result", justify="right")
     table.add_column("detail")
 
+    divergence = determinism.get("firstDivergenceChar")
+    distinct = determinism.get("distinctOutputs") or 0
     table.add_row(
         "determinism (serial)",
         "—" if rate is None else f"{rate:.0%}",
-        f"{determinism.get('distinctOutputs')} distinct outputs across "
-        f"{determinism.get('repeats')} repetitions, diverging at character "
-        f"{determinism.get('firstDivergenceChar')}",
+        f"{distinct} distinct output{'' if distinct == 1 else 's'} across "
+        f"{determinism.get('repeats')} repetitions"
+        + (f", diverging at character {divergence}" if divergence is not None else "")
+        + (
+            f" (share of the most repeated output; {determinism['warmupDiscarded']} warmup "
+            "discarded)"
+            if determinism.get("warmupDiscarded")
+            else ""
+        ),
     )
     handled = robustness.get("handledRate", {}).get("point")
+    truncations = robustness.get("silentTruncations") or 0
     table.add_row(
         "robustness",
         "—" if handled is None else f"{handled:.0%}",
         f"{robustness.get('handled')}/{robustness.get('total')} adverse cases handled; "
-        f"{robustness.get('silentTruncations')} silent truncations",
+        f"{truncations} silent truncation{'' if truncations == 1 else 's'}",
     )
+    window = context.get("servedWindowTokens")
     table.add_row(
         "verified window",
         f"{context.get('largestVerifiedWords') or '—'} words",
-        "silent truncation detected"
-        if context.get("contextLossDetected")
-        else "no silent truncation",
+        _context_detail(context),
+    )
+    table.add_row(
+        "served window",
+        f"{window} tokens" if window else "unknown",
+        "pinned for this run, so the probe is reproducible"
+        if window
+        else "the engine does not expose it and it was not pinned: use --num-ctx "
+        "(Ollama) or --max-model-len (vLLM)",
     )
     console.print(table)
 
     if broken := robustness.get("enginesBrokenAfterCase"):
         console.print(f"  [red]▲ the engine stopped responding after: {', '.join(broken)}[/red]")
+
+    evidence = context.get("truncationEvidence") or {}
+    if context.get("contextLossDetected") and evidence.get("reason"):
+        colour = "red" if evidence.get("verdict") == "confirmed" else "yellow"
+        console.print(f"  [{colour}]▲ {evidence['reason']}[/{colour}]")
+
+
+def _context_detail(context: dict[str, Any]) -> str:
+    """What the row says, matching the verdict instead of prejudging it."""
+    if not context.get("contextLossDetected"):
+        return "the whole prompt arrives"
+    return {
+        "confirmed": "the engine trimmed the prompt (silent truncation)",
+        "ruled-out": "the prompt arrives whole; the model loses its beginning",
+    }.get(str(context.get("enginePromptTruncation")), "beginning of the prompt lost, cause unknown")
 
 
 def _print_safety_table(metrics: dict[str, Any]) -> None:
@@ -1336,10 +1423,26 @@ def _print_safety_table(metrics: dict[str, Any]) -> None:
 def _print_compliance_table(metrics: dict[str, Any]) -> None:
     summary = metrics.get("summary", {})
     declared, probed = summary.get("declared", {}), summary.get("probed", {})
+    # "0/7 met" with all seven undeclared read as seven breaches. Unknown is not
+    # failure: what is missing is the declaration, and that is what gets said.
+    declared_total = declared.get("total", 0)
+    unknown = declared.get("unknown", 0)
+    declared_text = f"{declared.get('yes', 0)}/{declared_total} met"
+    if unknown:
+        declared_text += (
+            f", {unknown} not declared"
+            if unknown < declared_total
+            else " — no declaration supplied"
+        )
+    probed_total = probed.get("total", 0)
+    probed_text = f"{probed.get('pass', 0)}/{probed_total} pass"
+    if probed.get("fail"):
+        probed_text += f", {probed['fail']} fail"
+    if probed.get("unknown"):
+        probed_text += f", {probed['unknown']} inconclusive"
     console.print(
-        f"\n  [bold]Block E — Compliance[/bold]  ·  declared by the operator: "
-        f"{declared.get('yes', 0)}/{declared.get('total', 0)} met  ·  "
-        f"verified by OPAAS-Bench: {probed.get('pass', 0)}/{probed.get('total', 0)}"
+        f"\n  [bold]Block E — Compliance[/bold]  ·  declared by the operator: {declared_text}"
+        f"  ·  verified by OPAAS-Bench: {probed_text}"
     )
 
     table = Table(title="Requirements")

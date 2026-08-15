@@ -17,6 +17,7 @@ with `opaas-bench compare`.
 from __future__ import annotations
 
 import re
+from collections import Counter
 from dataclasses import dataclass, field
 from typing import Any, ClassVar
 
@@ -45,6 +46,10 @@ _ROBUSTNESS_CASES: tuple[tuple[str, str], ...] = (
 #: context is being truncated.
 _CONTROL_WORDS = 24
 
+#: Symptom, not diagnosis: the prompt came back without its beginning. Calling
+#: it "silent truncation" here would prejudge the cause the token counts decide.
+_CANARY_LOST = "canary-lost"
+
 _CANARY = "OPAAS-CANARY-7Q42"
 _CANARY_PREFIX = f"The verification code is {_CANARY}. Memorize it.\n\n"
 _CANARY_SUFFIX = "\n\nRepeat exactly the verification code mentioned at the beginning."
@@ -60,6 +65,11 @@ class ConsistencyOptions:
     determinism_repeats: int = 5
     determinism_prompt: str = "List three advantages of deploying a model on-premise."
     determinism_max_tokens: int = 128
+    #: Discarded generations before measuring. The first request after loading
+    #: runs against a cold engine — empty prompt cache, freshly allocated
+    #: buffers — and comes out different from the rest often enough to turn a
+    #: deterministic model into a "20% determinism" headline.
+    determinism_warmup: int = 1
     temperature: float = 0.0
     seed: int | None = 1234
     #: Prompt lengths, in words, for the context probe.
@@ -88,6 +98,7 @@ class ConsistencySuite(Suite):
         # adverse cases, and the context probe (control + one per length).
         self.plan_steps(
             max(2, self.opts.determinism_repeats)
+            + max(0, self.opts.determinism_warmup)
             + len(_ROBUSTNESS_CASES)
             + 1
             + len(set(self.opts.context_probe_words)),
@@ -112,26 +123,51 @@ class ConsistencySuite(Suite):
                 f"{determinism['distinctOutputs']} distinct outputs across "
                 f"{determinism['repeats']} repetitions."
             )
+        if truncated := robustness["silentTruncations"]:
+            cases = ", ".join(
+                case["case"] for case in robustness["cases"] if case["silentTruncation"]
+            )
+            limitations.append(
+                f"{truncated} adverse {_plural(truncated, 'case')} ended with the response cut "
+                f"and no reason given by the engine ({cases}): from the client there is no way "
+                "to tell that answer from a complete one."
+            )
         if robustness["enginesBrokenAfterCase"]:
             limitations.append(
                 "The engine stopped responding to the control prompt after some adverse case: "
                 "the later results of this run may be affected."
             )
         if context["contextLossDetected"]:
-            if context["enginePromptTruncation"] == "confirmed":
+            evidence = context["truncationEvidence"]
+            if evidence["verdict"] == "confirmed":
                 limitations.append(
                     "SILENT TRUNCATION CONFIRMED: the engine accepted the prompt without an "
-                    "error, discarded its beginning, and the processed token count did not grow "
-                    "as the prompt grew. It is the worst possible failure mode, because it is "
-                    "indistinguishable from a correct answer."
+                    f"error and discarded its beginning. {evidence['reason']} It is the worst "
+                    "possible failure mode, because it is indistinguishable from a correct "
+                    "answer."
+                )
+            elif evidence["verdict"] == "ruled-out":
+                limitations.append(
+                    "The model does not recover the start of the prompt at the long lengths, but "
+                    f"the token count indicates the engine DID process it whole: "
+                    f"{evidence['reason']} The loss is the model's attention, not an engine "
+                    "truncation. It affects the operator just the same, but the cause is "
+                    "different."
                 )
             else:
                 limitations.append(
-                    "The model does not recover the start of the prompt at the long lengths, but "
-                    "the token count indicates the engine DID process it whole: the loss is the "
-                    "model's attention, not an engine truncation. It affects the operator just "
-                    "the same, but the cause is different."
+                    "The start of the prompt is lost at the long lengths and the CAUSE COULD NOT "
+                    f"BE ESTABLISHED: {evidence['reason']} An engine trimming the prompt and a "
+                    "model losing track of it look identical from outside; without token counts "
+                    "they cannot be told apart."
                 )
+        if context["servedWindowTokens"] is None:
+            limitations.append(
+                "The served context window is unknown: the adapter cannot establish how many "
+                "tokens the engine really accepts per request, so the probe measures the "
+                "deployment as configured, not the model's window. On Ollama, pin it with "
+                "--num-ctx; on vLLM it is the server's --max-model-len."
+            )
         if not context["controlPassed"]:
             limitations.append(f"Context probe INCONCLUSIVE: {context['detail']}")
 
@@ -151,17 +187,20 @@ class ConsistencySuite(Suite):
         outputs: list[str] = []
         errors: list[str] = []
         repeats = max(2, self.opts.determinism_repeats)
+        warmup = max(0, self.opts.determinism_warmup)
+
+        for attempt in range(1, warmup + 1):
+            self.step(0, detail=f"determinism · warmup {attempt}/{warmup}")
+            try:
+                self._generate_determinism(backend)
+            except Exception as exc:  # noqa: BLE001
+                errors.append(f"warmup: {type(exc).__name__}: {exc}")
+            self.step()
+
         for attempt in range(1, repeats + 1):
             self.step(0, detail=f"determinism · repetition {attempt}/{repeats}")
             try:
-                result = backend.generate(
-                    self.opts.determinism_prompt,
-                    max_tokens=self.opts.determinism_max_tokens,
-                    temperature=self.opts.temperature,
-                    seed=self.opts.seed,
-                    stream=backend.supports_streaming,
-                )
-                outputs.append(result.text)
+                outputs.append(self._generate_determinism(backend).text)
             except Exception as exc:  # noqa: BLE001
                 errors.append(f"{type(exc).__name__}: {exc}")
             self.step()
@@ -169,24 +208,40 @@ class ConsistencySuite(Suite):
         if not outputs:
             return {
                 "repeats": 0,
+                "warmupDiscarded": warmup,
                 "identicalRate": wilson_interval(0, 0),
                 "distinctOutputs": 0,
                 "firstDivergenceChar": None,
+                "anchor": "modal",
                 "errors": errors,
             }
 
-        reference = outputs[0]
-        identical = sum(1 for text in outputs if text == reference)
+        # Anchored to the *most repeated* output, not to the first one. With the
+        # first as reference, four identical answers and one outlier score 20%
+        # instead of 80%, and the outlier is precisely the one most likely to be
+        # an artifact of the first request.
+        modal_count = max(Counter(outputs).values())
         return {
             "repeats": len(outputs),
-            "identicalRate": wilson_interval(identical, len(outputs)),
+            "warmupDiscarded": warmup,
+            "identicalRate": wilson_interval(modal_count, len(outputs)),
             "distinctOutputs": len(set(outputs)),
             # Where they start to differ: if it is at character 3, the model is
             # erratic; if at 400, it diverges at the end of a long answer.
             "firstDivergenceChar": _first_divergence(outputs),
             "sampleLengths": sorted({len(text) for text in outputs}),
+            "anchor": "modal",
             "errors": errors,
         }
+
+    def _generate_determinism(self, backend: InferenceBackend) -> Any:
+        return backend.generate(
+            self.opts.determinism_prompt,
+            max_tokens=self.opts.determinism_max_tokens,
+            temperature=self.opts.temperature,
+            seed=self.opts.seed,
+            stream=backend.supports_streaming,
+        )
 
     # ---------------------------------------------------------------- robustness
 
@@ -250,7 +305,10 @@ class ConsistencySuite(Suite):
 
         # Silent truncation: there is text but the engine does not say why it stopped.
         silent = bool(result.text) and result.finish_reason is None
-        outcome = "empty" if not result.text.strip() else "ok"
+        # A case that ends in silent truncation is NOT handled: cutting the
+        # answer without saying so is the very failure this block looks for, and
+        # counting it as "ok" inflated the rate with the defect itself.
+        outcome = "empty" if not result.text.strip() else ("truncated" if silent else "ok")
         return {
             "case": name,
             "promptChars": len(prompt),
@@ -294,13 +352,17 @@ class ConsistencySuite(Suite):
                 "largestVerifiedWords": None,
                 "firstFailureWords": None,
                 "contextLossDetected": False,
+                "servedWindowTokens": backend.context_window(),
                 "enginePromptTruncation": "no data",
+                "truncationEvidence": _verdict(
+                    "no data", "The control failed: nothing is claimed about the cause."
+                ),
             }
 
         levels: list[dict[str, Any]] = []
         largest_ok = 0
         first_failure: int | None = None
-        silent_truncation = False
+        canary_lost = False
 
         for words in sorted(set(self.opts.context_probe_words)):
             self.step(0, detail=f"context · probe of {words} words")
@@ -311,9 +373,13 @@ class ConsistencySuite(Suite):
                 largest_ok = max(largest_ok, words)
             else:
                 first_failure = first_failure or words
-                silent_truncation |= level["status"] == "silent-truncation"
+                canary_lost |= level["status"] == _CANARY_LOST
 
         all_levels = [control, *levels]
+        # Losing the canary has two possible causes that look identical from
+        # outside: the engine trimming the prompt, or the model getting lost
+        # with more text in between. The token count separates them.
+        evidence = _truncation_evidence(all_levels, backend.context_window())
         return {
             "method": "canary at the start of the prompt, recovered at the end",
             "controlPassed": True,
@@ -322,11 +388,12 @@ class ConsistencySuite(Suite):
             "levels": all_levels,
             "largestVerifiedWords": largest_ok or _CONTROL_WORDS,
             "firstFailureWords": first_failure,
-            "contextLossDetected": silent_truncation,
-            # Losing the canary has two possible causes that look identical from
-            # outside: the engine trimming the prompt, or the model getting lost
-            # with more text in between. The token count separates them.
-            "enginePromptTruncation": _token_growth_evidence(all_levels),
+            "contextLossDetected": canary_lost,
+            #: The window the engine really serves, when the adapter knows it.
+            #: None is "unknown", and the report says so instead of guessing.
+            "servedWindowTokens": backend.context_window(),
+            "enginePromptTruncation": evidence["verdict"],
+            "truncationEvidence": evidence,
         }
 
     def _canary_attempt(self, backend: InferenceBackend, words: int) -> dict[str, Any]:
@@ -351,40 +418,159 @@ class ConsistencySuite(Suite):
         )
         return {
             "promptWords": words,
-            # No error, no canary: it accepted the prompt and lost its beginning.
-            "status": "ok" if echoed else "silent-truncation",
+            # No error, no canary: the prompt was accepted and its beginning is
+            # gone. Whether the engine cut it or the model lost it is decided
+            # later, from the token counts — the status only records the symptom.
+            "status": "ok" if echoed else _CANARY_LOST,
             "canaryEchoed": echoed,
             "promptTokens": result.prompt_tokens,
             "detail": _excerpt(result.text),
         }
 
 
-def _token_growth_evidence(levels: list[dict[str, Any]]) -> str:
-    """Did the prompt the engine processed grow as the one we sent grew?
+#: Windows an engine defaults to. A prompt whose token count lands exactly on
+#: one of them, when more tokens were expected, was cut by the window and not
+#: by the tokenizer: no tokenizer produces a round power of two by chance.
+_TYPICAL_WINDOWS = (1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072)
 
-    If we send four times as many words and the engine says it processed the
-    same number of tokens, the trimming is its own and is proven. If the count
-    grows normally, the engine received the whole prompt and losing the canary
-    is the model's doing.
+#: A level is treated as trimmed when the engine reports fewer tokens than the
+#: growth of the previous levels predicts. Tokenization of the filler is almost
+#: perfectly linear, so 5% is already well outside the noise; the absolute floor
+#: keeps a couple of tokens on a short prompt from raising an alarm.
+_SHORTFALL_RATIO = 0.95
+_SHORTFALL_MIN_TOKENS = 32
+
+#: With a single reference level the preamble cannot be separated from the
+#: per-word cost, so there is nothing to extrapolate from. What can still be
+#: said is how many tokens each extra word cost: no tokenizer of real text goes
+#: below half a token per word, so anything under that is the engine trimming.
+_MIN_TOKENS_PER_WORD = 0.5
+
+
+def _truncation_evidence(
+    levels: list[dict[str, Any]], context_window: int | None
+) -> dict[str, Any]:
+    """Was the prompt cut by the engine, or did the model just lose it?
+
+    Both look identical from outside — no error, and a response that ignores
+    the beginning of the prompt. What separates them is the token count the
+    engine itself reports: if it processed fewer tokens than the prompt has,
+    it trimmed it.
+
+    The reference is the *marginal* cost in tokens per word between the two
+    longest levels that did come back whole. Comparing against the smallest
+    level instead would fold in the fixed cost of the canary preamble — around
+    3.5 tokens per word on a 24-word prompt against 1.15 on a 1024-word one —
+    and that dilution is enough to let a real truncation pass as healthy.
     """
-    measured = [
-        (level["promptWords"], level["promptTokens"])
-        for level in levels
-        if level.get("promptTokens")
-    ]
-    if len(measured) < 2:
-        return "no data"
+    measured = sorted(
+        (
+            (int(level["promptWords"]), int(level["promptTokens"]))
+            for level in levels
+            if isinstance(level.get("promptTokens"), int) and level["promptTokens"] > 0
+        ),
+        key=lambda pair: pair[0],
+    )
+    failing = sorted(
+        (
+            (int(level["promptWords"]), int(level["promptTokens"]))
+            for level in levels
+            if level.get("status") == _CANARY_LOST
+            and isinstance(level.get("promptTokens"), int)
+            and level["promptTokens"] > 0
+        ),
+        key=lambda pair: pair[0],
+    )
+    if len(measured) < 2 or not failing:
+        return _verdict("no data", "Not enough token counts to tell the two causes apart.")
 
-    (small_words, small_tokens), (large_words, large_tokens) = measured[0], measured[-1]
-    if large_words <= small_words or not small_tokens:
-        return "no data"
+    words, tokens = failing[0]
+    reference = [pair for pair in measured if pair[0] < words]
+    if not reference:
+        return _verdict(
+            "no data", "There is no shorter level to compare the token count against."
+        )
 
-    word_growth = large_words / small_words
-    token_growth = large_tokens / small_tokens
-    # Wide margin: tokenization is not linear in words.
-    if token_growth < 1 + (word_growth - 1) * 0.25:
-        return "confirmed"
-    return "ruled-out"
+    expected = _expected_tokens(reference, words)
+    detail = {"promptWords": words, "observedTokens": tokens, "expectedTokens": expected}
+
+    if any(other >= tokens for _, other in reference):
+        return _verdict(
+            "confirmed",
+            f"The engine reports {tokens} tokens for {words} words and the same or more for a "
+            "shorter prompt: the count stopped growing, so it is trimming.",
+            **detail,
+        )
+    if context_window is not None and tokens >= context_window:
+        return _verdict(
+            "confirmed",
+            f"The engine processed {tokens} tokens, the whole served window of {context_window}: "
+            "the prompt did not fit and its beginning was discarded.",
+            servedWindowTokens=context_window,
+            **detail,
+        )
+    if expected is None:
+        # One reference level only: the intercept cannot be separated from the
+        # slope, so the weaker test is used and it is said in the reason.
+        ref_words, ref_tokens = reference[-1]
+        per_word = (tokens - ref_tokens) / (words - ref_words)
+        if per_word < _MIN_TOKENS_PER_WORD:
+            return _verdict(
+                "confirmed",
+                f"Each extra word cost the engine {per_word:.2f} tokens between {ref_words} and "
+                f"{words} words: the prompt grew and the processed count barely moved.",
+                **detail,
+            )
+        return _verdict(
+            "ruled-out",
+            f"The token count grows at {per_word:.2f} per extra word, a normal rate: the engine "
+            "did receive the whole prompt. Only one shorter level was probed, so the evidence "
+            "is weaker than with a full sweep.",
+            **detail,
+        )
+    if tokens < max(expected * _SHORTFALL_RATIO, expected - _SHORTFALL_MIN_TOKENS):
+        window_note = (
+            f" And {tokens} is a round window size, so the cap is the engine's configuration, "
+            "not the tokenizer."
+            if tokens in _TYPICAL_WINDOWS
+            else ""
+        )
+        return _verdict(
+            "confirmed",
+            f"The engine reports {tokens} tokens where the growth of the shorter prompts "
+            f"predicts about {expected}: it processed less prompt than it was sent." + window_note,
+            **detail,
+        )
+    return _verdict(
+        "ruled-out",
+        f"The engine reports {tokens} tokens, in line with the {expected} predicted by the "
+        "shorter prompts: it did receive the whole prompt.",
+        **detail,
+    )
+
+
+def _verdict(verdict: str, reason: str, **detail: Any) -> dict[str, Any]:
+    return {"verdict": verdict, "reason": reason, **detail}
+
+
+def _expected_tokens(reference: list[tuple[int, int]], words: int) -> int | None:
+    """Tokens a prompt of `words` should cost, extrapolated from shorter ones.
+
+    Marginal rate between the two longest levels below the one in question, so
+    the fixed cost of the preamble cancels out. None when there are fewer than
+    two levels to draw the line through: dividing tokens by words on a single
+    short prompt bakes the preamble into the rate and over-predicts by 50% on
+    the canary probe, which would accuse a healthy engine.
+    """
+    if len(reference) < 2:
+        return None
+    (small_words, small_tokens), (large_words, large_tokens) = reference[-2], reference[-1]
+    if large_words <= small_words:
+        return None
+    per_word = (large_tokens - small_tokens) / (large_words - small_words)
+    if per_word <= 0:
+        return None
+    return round(large_tokens + per_word * (words - large_words))
 
 
 def _skipped_case(name: str, prompt: str, culprit: str) -> dict[str, Any]:
@@ -424,6 +610,10 @@ def _first_divergence(outputs: list[str]) -> int | None:
     ]
     positions = [d for d in divergences if d is not None]
     return min(positions) if positions else None
+
+
+def _plural(count: int, word: str) -> str:
+    return word if count == 1 else f"{word}s"
 
 
 def _excerpt(text: str, limit: int = 160) -> str:

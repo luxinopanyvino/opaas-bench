@@ -4,9 +4,10 @@ IFEval (Google, Apache-2.0) brings 541 prompts with programmatically checkable
 instructions. Each item carries `instruction_id_list` and `kwargs`; they are
 translated here into `opaas_bench.constraints` constraints.
 
-**Nothing is downloaded.** The file is supplied by whoever evaluates, having
-accepted the source license. That keeps the dataset a hashable local artifact
-and does not break an air-gapped deployment.
+**The importer downloads nothing**: it converts a file it is handed. Fetching
+it — with its hash pinned and verified — belongs to `datasets/cache.py`, and
+with `--offline` even that is forbidden, so an air-gapped deployment works from
+a copied cache.
 
 **An item whose constraint list cannot be checked in full is discarded**, and
 how many and why is reported. Scoring an item while checking only part of its
