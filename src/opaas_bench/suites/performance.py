@@ -267,6 +267,12 @@ def _aggregate(
     ttfts = [r.ttft_s for r in ok if r.ttft_s is not None]
     latencies = [r.total_s for r in ok]
     decode_rates = [r.output_tokens_per_s for r in ok if r.output_tokens_per_s is not None]
+    # How fast the engine really digests the prompt. Under concurrency the TTFT
+    # includes the queue, so this collapses along with it — which is the honest
+    # reading: that is the prefill the client waits for.
+    prefill_rates = [
+        r.prompt_tokens / r.ttft_s for r in ok if r.ttft_s and r.ttft_s > 0 and r.prompt_tokens
+    ]
 
     prompt_tokens = sum(r.prompt_tokens for r in ok)
     completion_tokens = sum(r.completion_tokens for r in ok)
@@ -291,10 +297,17 @@ def _aggregate(
         "throughput": {
             # Aggregate system throughput: what the operator sees.
             "outputTokensPerS": _round(output_tps),
+            # Prompt tokens over the whole measurement window, decoding time
+            # included. It is NOT prefill speed: it grows with prompt length
+            # just by amortising the fixed cost of the request. Read
+            # prefillTokensPerS for that.
             "promptTokensPerS": _round(prompt_tps),
+            "promptTokensPerSNote": "aggregate over the window, not prefill speed",
             "requestsPerS": _round(len(ok) / wall_s if wall_s > 0 else None),
             # Per-request decoding speed: what an end user perceives.
             "perRequestDecodeTokensPerS": summarize(decode_rates, digits=2),
+            # Prompt tokens divided by TTFT: the actual prefill rate.
+            "prefillTokensPerS": summarize(prefill_rates, digits=2),
         },
         "ttftS": summarize(ttfts),
         "requestLatencyS": summarize(latencies),

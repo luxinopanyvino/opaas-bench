@@ -25,6 +25,7 @@ A `prompt length × concurrency` sweep, with warmup discarded.
 | Metric | How |
 |---|---|
 | Throughput | Output and prompt tokens per second, aggregated over the measurement window |
+| Prefill | `prefillTokensPerS`: prompt tokens ÷ TTFT, per request. This is the engine's real prefill rate; `promptTokensPerS` is an aggregate over the window that includes decoding time and grows with prompt length just by amortising fixed cost |
 | TTFT | p50/p95/p99 on the streaming response |
 | Latency | p50/p95/p99 of the full request |
 | Memory | VRAM via `nvidia-smi`; system RAM and server-process RSS via `psutil` |
@@ -48,11 +49,15 @@ And for the same reason, the prompt goes through the **model's chat template** (
 
 ### Block C — Consistency
 
-**Determinism**, serially with a fixed seed. 100% here does **not** guarantee determinism under load: with continuous batching the output changes depending on which other requests yours is grouped with, because the order of floating-point reductions changes.
+**Determinism**, serially with a fixed seed. A warmup generation is discarded first — the first request after loading runs against a cold engine — and the rate is the share of the **most repeated** output, not of matches against the first sample. Anchoring on the first sample turns four identical answers plus one outlier into 20% instead of 80%. 100% here does **not** guarantee determinism under load: with continuous batching the output changes depending on which other requests yours is grouped with, because the order of floating-point reductions changes.
 
-**Robustness** against nine adverse prompts. An explicit error counts as correct behavior; the engine being left unusable does not. If that happens, the battery stops and the remaining cases are recorded as not run.
+**Robustness** against nine adverse prompts. An explicit error counts as correct behavior; the engine being left unusable does not. If that happens, the battery stops and the remaining cases are recorded as not run. A response cut with no reason given by the engine is `truncated` and does **not** count as handled: it is the failure mode the block looks for.
 
 **Real window**, with a canary at the start of the prompt. A control with trivial context runs first: without it, a model unable to follow the instruction would be confused with one whose context gets truncated. When the canary is lost, the processed token count distinguishes an engine trimming the prompt (`enginePromptTruncation: confirmed`) from the model losing attention.
+
+The reference is the **marginal** token cost between the two longest levels that came back whole, never the smallest one: the canary preamble costs ~3.5 tokens per word on a 24-word prompt against ~1.15 on a 1024-word one, and comparing against it hides real truncations. A count that reaches the served window, or that stops growing while the prompt grows, is truncation on its own. `truncationEvidence` records the verdict, the observed and predicted counts, and the reason.
+
+**The served window is measured, not assumed.** `servedWindowTokens` is what the engine really accepts per request: `--num-ctx` on Ollama (which is sent on every request, so the run is reproducible), `max_model_len` published by vLLM. Unpinned it is `null` — unknown, never unlimited — and the run declares that it measures the deployment as configured rather than the model's window. The model's trained context length is reported separately, as an upper bound.
 
 ### Block D — Behavior and safety
 

@@ -74,6 +74,13 @@ class Task:
     items: list[Item]
     source: str | None = None
     file_hash: str = ""
+    #: Items the original source had, before anything was dropped.
+    items_available: int | None = None
+    #: Items that survived the import, before `--limit` trims anything.
+    items_imported: int | None = None
+    #: Items the import left out, and why. `{"count": 0, "byReason": {}}` when
+    #: nothing was dropped; None when the manifest predates this field.
+    excluded: dict[str, Any] | None = None
 
 
 @dataclass(slots=True)
@@ -112,10 +119,42 @@ class Dataset:
                     "items": len(task.items),
                     "fileHash": task.file_hash,
                     "source": task.source,
+                    # What the source had against what is actually evaluated:
+                    # without it, a report saying "IFEval" hides that part of
+                    # IFEval was never run.
+                    "itemsAvailable": task.items_available,
+                    "itemsImported": task.items_imported,
+                    "excluded": task.excluded,
                 }
                 for task in self.tasks
             ],
         }
+
+
+def exclusion_limitations(dataset: Dataset) -> list[str]:
+    """Items the import dropped, said out loud in the report.
+
+    The importer already knew — it left them out on purpose, because scoring an
+    item whose instructions cannot all be checked inflates the result. What it
+    did not do was tell whoever reads the report, and a score computed over 94%
+    of a public benchmark is not comparable with the published figure unless
+    that is stated.
+    """
+    limitations: list[str] = []
+    for task in dataset.tasks:
+        excluded = task.excluded or {}
+        if not excluded.get("count"):
+            continue
+        reasons = ", ".join(
+            f"{reason} ({count})" for reason, count in sorted(excluded["byReason"].items())
+        )
+        limitations.append(
+            f"Task '{task.name}': {excluded['count']} of {task.items_available} source items are "
+            f"NOT evaluated because their instructions cannot be checked here — {reasons}. "
+            "The score covers the rest and is not directly comparable with figures published "
+            "over the full dataset."
+        )
+    return limitations
 
 
 def stratified_sample(
@@ -279,6 +318,9 @@ def _load_task(root: Path, entry: dict[str, Any], *, limit: int | None) -> Task:
         type=item_type,
         description=str(entry.get("description", "")),
         source=entry.get("source"),
+        items_available=entry.get("itemsAvailable"),
+        items_imported=entry.get("itemsImported"),
+        excluded=entry.get("excluded"),
         items=stratified_sample(items, limit, seed=1234, key=lambda item: item.category),
         # The hash is of the whole file, not the selection, and of the content,
         # not the bytes: CRLF and LF describe the same dataset.

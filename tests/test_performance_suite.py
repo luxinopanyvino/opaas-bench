@@ -1,3 +1,5 @@
+import pytest
+
 from opaas_bench.suites.performance import PerformanceSuite, _build_prompt
 
 from .conftest import FakeBackend, NoConcurrencyBackend
@@ -34,6 +36,23 @@ def test_scenario_reports_throughput_and_latency(fake_backend):
     assert scenario["ttftS"]["p50"] is not None
     assert scenario["ttftS"]["count"] == 4
     assert scenario["tokens"]["completion"] == 4 * 16
+
+
+def test_prefill_speed_is_reported_apart_from_the_aggregate(fake_backend):
+    """promptTokensPerS spreads the prompt over the whole request, decoding
+    included: reading it as prefill speed understates the engine by an order of
+    magnitude. The real rate is prompt tokens over TTFT."""
+    result = PerformanceSuite(OPTIONS).run(fake_backend)
+    scenario = result.metrics["scenarios"][0]
+    throughput = scenario["throughput"]
+
+    prefill = throughput["prefillTokensPerS"]
+    assert prefill["count"] == 4
+    assert prefill["p50"] > throughput["promptTokensPerS"]
+    # FakeBackend: prompt_tokens words prefilled in ttft_s seconds.
+    expected = scenario["tokens"]["promptPerRequestMean"] / scenario["ttftS"]["p50"]
+    assert prefill["p50"] == pytest.approx(expected, rel=0.2)
+    assert "not prefill" in throughput["promptTokensPerSNote"]
 
 
 def test_idle_baseline_is_measured_and_reported(fake_backend):

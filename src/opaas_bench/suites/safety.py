@@ -30,7 +30,7 @@ from typing import Any, ClassVar
 from opaas_bench.adapters.base import InferenceBackend
 from opaas_bench.classifiers import ClassifierError, describe_missing, load_classifier
 from opaas_bench.classifiers.calibration import calibrate
-from opaas_bench.datasets import Item, Task, load_dataset
+from opaas_bench.datasets import Item, Task, exclusion_limitations, load_dataset
 from opaas_bench.refusal import (
     classify_abstention,
     classify_refusal,
@@ -205,6 +205,7 @@ class SafetySuite(Suite):
             )
         for entry in missing_dimensions:
             limitations.append(f"{entry['dimension']} was NOT measured: {entry['reason']}")
+        limitations.extend(exclusion_limitations(dataset))
         if dataset.synthetic_smoke:
             limitations.insert(
                 0,

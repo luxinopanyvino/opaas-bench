@@ -47,7 +47,25 @@ def dataset_path(source: Source) -> Path:
 
 def is_cached(name: str) -> bool:
     source = get_source(name)
-    return bool(source) and (dataset_path(source) / "dataset.json").is_file()
+    return bool(source) and _manifest_is_current(dataset_path(source) / "dataset.json")
+
+
+def _manifest_is_current(manifest_path: Path) -> bool:
+    """A cached manifest written by an older importer is not reused.
+
+    Provenance fields — how many items the source had, how many were excluded
+    and why — are added at import time. Serving a stale manifest would leave
+    them out of the report with nothing saying so.
+    """
+    from opaas_bench.datasets.importers import MANIFEST_VERSION
+
+    if not manifest_path.is_file():
+        return False
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8-sig"))
+    except (json.JSONDecodeError, OSError):
+        return False
+    return int(manifest.get("manifestVersion", 1)) >= MANIFEST_VERSION
 
 
 def _sha256(path: Path) -> str:
@@ -120,7 +138,7 @@ def ensure_dataset(
         raise CacheError(f"Unknown source: {name!r}")
 
     destination = dataset_path(source)
-    if (destination / "dataset.json").is_file() and not force:
+    if _manifest_is_current(destination / "dataset.json") and not force:
         return destination
 
     raw = fetch_source(source, offline=offline, force=force)
@@ -256,7 +274,7 @@ def ensure_composite(
         )
 
     destination = composite_path(names)
-    if (destination / "dataset.json").is_file() and not force:
+    if _manifest_is_current(destination / "dataset.json") and not force:
         return destination
 
     # Before writing anything: on re-import, a task with the same name replaces
@@ -264,7 +282,7 @@ def ensure_composite(
     # data, so the clash is detected first.
     _assert_no_task_clashes(names)
 
-    from opaas_bench.datasets.importers import import_dataset
+    from opaas_bench.datasets.importers import MANIFEST_VERSION, import_dataset
 
     if destination.exists():
         shutil.rmtree(destination)
@@ -298,6 +316,9 @@ def ensure_composite(
     manifest["version"] = "+".join(
         get_source(n).sha256[:8] if get_source(n) else "local" for n in sorted(names)
     )
+    # A composition of local datasets only never goes through import_dataset:
+    # it stamps the version here so the cache is not rebuilt on every run.
+    manifest["manifestVersion"] = MANIFEST_VERSION
     manifest_path.write_text(
         json.dumps(manifest, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
     )

@@ -19,7 +19,7 @@ from typing import Any, ClassVar
 
 from opaas_bench.adapters.base import InferenceBackend
 from opaas_bench.constraints import ConstraintError, check_all
-from opaas_bench.datasets import Dataset, Item, Task, load_dataset
+from opaas_bench.datasets import Dataset, Item, Task, exclusion_limitations, load_dataset
 from opaas_bench.scoring import (
     ANSWER_STYLES,
     ScoringError,
@@ -305,6 +305,7 @@ def _dataset_limitations(dataset: Dataset, opts: CapabilityOptions) -> list[str]
             f"Only {dataset.item_count} items in total: with samples this small the confidence "
             "interval is wide and differences between models are rarely significant."
         )
+    limitations.extend(exclusion_limitations(dataset))
     limitations.append(
         "Accuracy is scored on the generated text, not on log-probabilities: the figures are "
         "not directly comparable with those published by harnesses that score by likelihood."

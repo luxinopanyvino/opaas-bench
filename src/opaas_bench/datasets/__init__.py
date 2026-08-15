@@ -18,6 +18,7 @@ from opaas_bench.datasets.loader import (
     Item,
     Task,
     builtin_datasets,
+    exclusion_limitations,
     load_dataset,
     resolve_dataset_path,
 )
@@ -47,6 +48,7 @@ __all__ = [
     "describe_cache",
     "ensure_composite",
     "ensure_dataset",
+    "exclusion_limitations",
     "fetch_source",
     "get_source",
     "is_cached",

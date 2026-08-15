@@ -126,6 +126,19 @@ class InferenceBackend(ABC):
     def get_backend_metadata(self) -> dict[str, Any]:
         """Engine version, detected quantization and everything that goes into the credential."""
 
+    def context_window(self) -> int | None:
+        """Tokens the engine will really process in a single request, if known.
+
+        This is the *served* window, not the one the model was trained with: an
+        engine happily serving a 32k model inside a 4096-token window trims the
+        prompt and says nothing. Block C needs this number to tell that apart
+        from a model that simply loses track of a long prompt.
+
+        Returns None when the adapter cannot establish it. None means "unknown",
+        never "unlimited", and the report says so.
+        """
+        return None
+
     def server_pid(self) -> int | None:
         """PID of the process serving the model, if it runs on this machine.
 

@@ -14,7 +14,10 @@ TAGS = {
         {"name": MODEL, "details": {"quantization_level": "Q4_K_M", "parameter_size": "70B"}}
     ]
 }
-SHOW = {"details": {"quantization_level": "Q4_K_M", "parameter_size": "70B", "family": "llama"}}
+SHOW = {
+    "details": {"quantization_level": "Q4_K_M", "parameter_size": "70B", "family": "llama"},
+    "model_info": {"general.architecture": "llama", "llama.context_length": 32768},
+}
 
 
 def _ndjson(*events: dict) -> str:
@@ -150,3 +153,46 @@ def test_metadata_carries_quantization_and_concurrency_caveat():
     assert metadata["quantization"] == "Q4_K_M"
     assert metadata["parameterSize"] == "70B"
     assert "OLLAMA_NUM_PARALLEL" in metadata["concurrencyNote"]
+
+
+def test_num_ctx_is_sent_on_every_request_when_it_is_pinned():
+    """Without it the server's default applies and trims long prompts silently."""
+    seen: list[dict] = []
+
+    def generate(request: httpx.Request) -> httpx.Response:
+        seen.append(json.loads(request.content)["options"])
+        return httpx.Response(200, text=_ndjson({"response": "x", "done": False}, _done()))
+
+    backend = _load(_handler(generate=generate), num_ctx=8192)
+    backend.generate("prompt", max_tokens=24)
+    backend.generate("another prompt", max_tokens=24)
+    assert [options["num_ctx"] for options in seen] == [8192, 8192]
+    assert backend.context_window() == 8192
+
+
+def test_without_num_ctx_the_served_window_is_declared_unknown():
+    """Unknown is the honest answer: the API does not expose the server default."""
+
+    def generate(request: httpx.Request) -> httpx.Response:
+        assert "num_ctx" not in json.loads(request.content)["options"]
+        return httpx.Response(200, text=_ndjson({"response": "x", "done": False}, _done()))
+
+    backend = _load(_handler(generate=generate))
+    backend.generate("prompt")
+    assert backend.context_window() is None
+    metadata = backend.get_backend_metadata()
+    assert metadata["contextWindowTokens"] is None
+    assert "--num-ctx" in metadata["contextWindowNote"]
+
+
+def test_the_model_window_is_read_but_is_not_taken_as_the_served_one():
+    """A 32k model served inside a 4k window is exactly the trap being detected."""
+    backend = _load(_handler())
+    assert backend.model_context_length() == 32768
+    assert backend.context_window() is None
+    assert backend.get_backend_metadata()["modelContextLength"] == 32768
+
+
+def test_a_nonsensical_num_ctx_is_rejected_at_load_time():
+    with pytest.raises(BackendError, match="num_ctx"):
+        _load(_handler(), num_ctx=0)
