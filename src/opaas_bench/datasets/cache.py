@@ -50,6 +50,24 @@ def is_cached(name: str) -> bool:
     return bool(source) and _manifest_is_current(dataset_path(source) / "dataset.json")
 
 
+def source_is_downloaded(name: str) -> bool:
+    """Whether the raw artifact is in the cache and still hashes to what it should.
+
+    This is not `is_cached`. A source used inside a composition is downloaded
+    and converted into the composition's directory, never into its own, so
+    `is_cached` says False about a file that is on disk, verified and being
+    evaluated right now. Reporting that as "not downloaded" misstates where the
+    data came from, which is the one thing this tool cannot afford to do.
+    """
+    source = get_source(name)
+    if source is None:
+        return False
+    path = source_path(source)
+    # The artifacts are small (hundreds of KB) and the hash is what makes the
+    # answer worth anything: a corrupt file is not a downloaded one.
+    return path.is_file() and _sha256(path) == source.sha256
+
+
 def _manifest_is_current(manifest_path: Path) -> bool:
     """A cached manifest written by an older importer is not reused.
 
@@ -326,17 +344,72 @@ def ensure_composite(
 
 
 def describe_cache() -> list[dict[str, object]]:
-    """Cache status, for `opaas-bench datasets`."""
+    """Cache status, for `opaas-bench datasets`.
+
+    `status` is the honest one of the two: 'dataset' when the source has its own
+    converted directory, 'source' when only the raw artifact is cached — which
+    is what a composition leaves behind — and 'missing' when the network is
+    still needed. `cached` is kept as it was: converted, standalone.
+    """
     from opaas_bench.datasets.sources import KNOWN_SOURCES
 
-    return [
-        {
-            "name": source.name,
-            "block": source.block,
-            "license": source.license,
-            "description": source.description,
-            "cached": is_cached(source.name),
-            "path": str(dataset_path(source)),
-        }
-        for source in KNOWN_SOURCES.values()
-    ]
+    entries: list[dict[str, object]] = []
+    for source in KNOWN_SOURCES.values():
+        converted = is_cached(source.name)
+        if converted:
+            status = "dataset"
+        elif source_is_downloaded(source.name):
+            status = "source"
+        else:
+            status = "missing"
+        entries.append(
+            {
+                "name": source.name,
+                "block": source.block,
+                "license": source.license,
+                "description": source.description,
+                "cached": converted,
+                "status": status,
+                "path": str(dataset_path(source)),
+                "source_path": str(source_path(source)),
+            }
+        )
+    return entries
+
+
+def describe_cached_datasets() -> list[dict[str, object]]:
+    """Datasets already built in the cache, compositions included.
+
+    A run over several sources evaluates the composition, not the parts, and it
+    is the composition's hash that ends up in the report. A listing that only
+    knows about individual sources leaves the evaluated dataset off the screen.
+    """
+    from opaas_bench.datasets.loader import DatasetError, load_dataset
+
+    root = cache_dir() / "datasets"
+    if not root.is_dir():
+        return []
+
+    entries: list[dict[str, object]] = []
+    for directory in sorted(path for path in root.iterdir() if path.is_dir()):
+        if not _manifest_is_current(directory / "dataset.json"):
+            continue
+        try:
+            dataset = load_dataset(str(directory))
+        except (DatasetError, OSError):
+            # A half-written or hand-edited directory is skipped: a listing is
+            # not the place to fail over it, and `run` will fail loudly anyway.
+            continue
+        entries.append(
+            {
+                "name": dataset.name,
+                "version": dataset.version,
+                "items": dataset.item_count,
+                "tasks": [(task.category, len(task.items)) for task in dataset.tasks],
+                "hash": dataset.content_hash,
+                "synthetic_smoke": dataset.synthetic_smoke,
+                "composite": "+" in directory.name,
+                "path": str(directory),
+            }
+        )
+    return entries

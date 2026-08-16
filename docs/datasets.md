@@ -131,6 +131,8 @@ opaas-bench datasets
 | `ifeval` | B | Apache-2.0 | 541 → 510 converted (94%) |
 | `xstest` | D | CC-BY-4.0 | 450 (250 benign + 200 harmful) |
 
+A composition is cached as a **single dataset** (`ifeval+xstest`), because that is what the run evaluates and its hash is what goes in the report. `opaas-bench datasets` lists it under *Datasets built in the cache*, and marks each source as `cached (in a composition)`: the file is downloaded and verified, it simply has no converted directory of its own.
+
 **What is downloaded is verified against a pinned hash.** If the source file changes, the run stops with both hashes on screen instead of certifying against something else. It may be a legitimate new version: review it and update the hash in [`datasets/sources.py`](../src/opaas_bench/datasets/sources.py).
 
 From IFEval, 31 items are discarded, all of them `language:response_language`: checking the response's language would require an automatic identifier, and its version would become part of the result. **An item whose constraints cannot all be checked is discarded whole**; scoring it while checking only part would give an inflated score.

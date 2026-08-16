@@ -51,6 +51,7 @@ from opaas_bench.datasets import (
     builtin_datasets,
     cache_dir,
     describe_cache,
+    describe_cached_datasets,
     ensure_dataset,
     is_cached,
     load_dataset,
@@ -784,6 +785,15 @@ def fetch_command(source: FetchSource = None, limit: ItemLimit = None) -> None:
     )
 
 
+#: 'source' is downloaded and hash-verified, but converted inside a composition
+#: rather than into its own directory. It needs no network either.
+_SOURCE_STATUS = {
+    "dataset": "[green]cached[/green]",
+    "source": "[green]cached (in a composition)[/green]",
+    "missing": "[yellow]not downloaded[/yellow]",
+}
+
+
 @app.command("datasets")
 def datasets_command() -> None:
     """Lists the available datasets and the cache status."""
@@ -797,11 +807,34 @@ def datasets_command() -> None:
             str(entry["name"]),
             str(entry["block"]),
             str(entry["license"]),
-            "[green]cached[/green]" if entry["cached"] else "[yellow]not downloaded[/yellow]",
+            _SOURCE_STATUS[str(entry["status"])],
         )
     console.print(remote)
 
-    local = Table(title="Local datasets")
+    cached = describe_cached_datasets()
+    if cached:
+        built = Table(title="Datasets built in the cache")
+        built.add_column("dataset", style="bold")
+        built.add_column("version")
+        built.add_column("items", justify="right")
+        built.add_column("tasks")
+        built.add_column("hash")
+        built.add_column("use")
+        for entry in cached:
+            tasks: list[tuple[str, int]] = entry["tasks"]  # type: ignore[assignment]
+            built.add_row(
+                str(entry["name"]),
+                str(entry["version"]),
+                str(entry["items"]),
+                ", ".join(f"{category} ({count})" for category, count in tasks),
+                short_hash(str(entry["hash"]), 12),
+                "[yellow]smoke only[/yellow]"
+                if entry["synthetic_smoke"]
+                else "[green]evaluation[/green]",
+            )
+        console.print(built)
+
+    local = Table(title="Packaged datasets")
     local.add_column("dataset", style="bold")
     local.add_column("version")
     local.add_column("items", justify="right")
@@ -823,6 +856,8 @@ def datasets_command() -> None:
     console.print(local)
     console.print(
         f"\n[dim]Cache: {cache_dir()} · downloaded on first use and reused. "
+        "A run over several sources (the default, --dataset ifeval,xstest) evaluates the "
+        "composition, and it is the composition's hash that goes in the report. "
         "Other datasets (MMLU-Pro, GPQA): see docs/datasets.md.[/dim]"
     )
 

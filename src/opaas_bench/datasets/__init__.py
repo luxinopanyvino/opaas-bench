@@ -4,10 +4,12 @@ from opaas_bench.datasets.cache import (
     CacheError,
     cache_dir,
     describe_cache,
+    describe_cached_datasets,
     ensure_composite,
     ensure_dataset,
     fetch_source,
     is_cached,
+    source_is_downloaded,
 )
 from opaas_bench.datasets.loader import (
     BUILTIN_DIR,
@@ -46,6 +48,7 @@ __all__ = [
     "builtin_datasets",
     "cache_dir",
     "describe_cache",
+    "describe_cached_datasets",
     "ensure_composite",
     "ensure_dataset",
     "exclusion_limitations",
@@ -54,4 +57,5 @@ __all__ = [
     "is_cached",
     "load_dataset",
     "resolve_dataset_path",
+    "source_is_downloaded",
 ]

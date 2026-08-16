@@ -440,4 +440,94 @@ def test_describe_cache_reports_state():
     entries = {entry["name"]: entry for entry in describe_cache()}
     assert set(entries) == {"ifeval", "xstest"}
     assert entries["ifeval"]["cached"] is False
+    assert entries["ifeval"]["status"] == "missing"
     assert entries["xstest"]["block"] == "D"
+
+
+def _compose_two(monkeypatch):
+    from opaas_bench.datasets.cache import ensure_composite
+
+    _register(monkeypatch, "one", IFEVAL_LINE.encode())
+    _register(monkeypatch, "two", XSTEST_CSV, importer="xstest", filename="data.csv")
+    _serve_many(
+        monkeypatch,
+        {
+            "https://example.invalid/data.jsonl": IFEVAL_LINE.encode(),
+            "https://example.invalid/data.csv": XSTEST_CSV,
+        },
+    )
+    return ensure_composite(["one", "two"])
+
+
+def test_a_source_used_in_a_composition_counts_as_downloaded(monkeypatch):
+    """It never gets its own directory, and saying "not downloaded" about the
+    data being evaluated misstates where the report's numbers came from."""
+    from opaas_bench.datasets.cache import source_is_downloaded
+
+    _compose_two(monkeypatch)
+
+    assert is_cached("one") is False, "the composition builds no standalone dataset"
+    assert source_is_downloaded("one") is True
+    entries = {entry["name"]: entry for entry in describe_cache()}
+    assert entries["one"]["status"] == "source"
+    assert entries["two"]["status"] == "source"
+
+
+def test_a_standalone_dataset_is_reported_as_such(monkeypatch):
+    from opaas_bench.datasets.cache import source_is_downloaded
+
+    payload = IFEVAL_LINE.encode()
+    _register(monkeypatch, "one", payload)
+    _serve(monkeypatch, payload)
+    ensure_dataset("one")
+
+    assert source_is_downloaded("one") is True
+    entries = {entry["name"]: entry for entry in describe_cache()}
+    assert entries["one"]["status"] == "dataset"
+
+
+def test_a_corrupt_source_file_is_not_downloaded(monkeypatch):
+    """`fetch_source` deletes and re-downloads it, so the cache is not populated."""
+    from opaas_bench.datasets.cache import source_is_downloaded
+
+    payload = IFEVAL_LINE.encode()
+    _register(monkeypatch, "one", payload)
+    _serve(monkeypatch, payload)
+    ensure_dataset("one")
+
+    source_path(get_source("one")).write_bytes(b"something else")
+    assert source_is_downloaded("one") is False
+
+
+def test_cached_datasets_list_the_compositions(monkeypatch):
+    """The composition is what a run evaluates, and its hash is what is reported."""
+    from opaas_bench.datasets.cache import describe_cached_datasets
+
+    path = _compose_two(monkeypatch)
+
+    entries = describe_cached_datasets()
+    assert [entry["path"] for entry in entries] == [str(path)]
+    composed = entries[0]
+    assert composed["composite"] is True
+    assert composed["items"] == load_dataset(str(path)).item_count
+    assert composed["hash"] == load_dataset(str(path)).content_hash
+    assert composed["synthetic_smoke"] is False
+    assert dict(composed["tasks"])["instruction-following"] == 1
+
+
+def test_an_unreadable_cache_directory_does_not_break_the_listing(monkeypatch):
+    from opaas_bench.datasets.cache import describe_cached_datasets
+    from opaas_bench.datasets.importers import MANIFEST_VERSION
+
+    _compose_two(monkeypatch)
+
+    # A current manifest — so it is not skipped early — whose dataset cannot be
+    # loaded: half-written, or edited by hand.
+    broken = cache_dir() / "datasets" / "broken"
+    broken.mkdir()
+    (broken / "dataset.json").write_text(
+        json.dumps({"manifestVersion": MANIFEST_VERSION, "name": "broken", "version": "1"}),
+        encoding="utf-8",
+    )
+
+    assert [entry["name"] for entry in describe_cached_datasets()] == ["one+two"]
