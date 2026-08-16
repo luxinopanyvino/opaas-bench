@@ -183,6 +183,20 @@ def test_the_status_mentions_the_cache_location():
     assert "cache:" in text
 
 
+def test_the_status_counts_sources_downloaded_inside_a_composition(monkeypatch):
+    """A source used in a composition has no converted directory of its own, and
+    the cover page was calling the data being evaluated 'not downloaded'."""
+    import opaas_bench.datasets as datasets
+
+    monkeypatch.setattr(datasets, "source_is_downloaded", lambda name: name == "ifeval")
+    text = " ".join(message for _, message, _ in status_lines())
+    assert "datasets cached: ifeval" in text
+
+    monkeypatch.setattr(datasets, "source_is_downloaded", lambda name: False)
+    text = " ".join(message for _, message, _ in status_lines())
+    assert "not downloaded" in text
+
+
 # --------------------------------------------------------------------- SVG
 
 

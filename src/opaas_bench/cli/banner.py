@@ -69,7 +69,7 @@ MIN_HEIGHT_SPRITE = SPRITE_HEIGHT + 2
 
 def status_lines() -> list[tuple[str, str, str]]:
     """Environment status: (mark, text, style). It checks, it does not decorate."""
-    from opaas_bench.datasets import available_sources, cache_dir, is_cached
+    from opaas_bench.datasets import available_sources, cache_dir, source_is_downloaded
     from opaas_bench.suites import BLOCKS, available_suites
 
     lines: list[tuple[str, str, str]] = [
@@ -81,7 +81,10 @@ def status_lines() -> list[tuple[str, str, str]]:
         )
     ]
 
-    cached = [name for name in available_sources() if is_cached(name)]
+    # Downloaded, not converted: a source used inside a composition never gets
+    # its own directory, and the cover page saying "not downloaded" about the
+    # data being evaluated was simply wrong.
+    cached = [name for name in available_sources() if source_is_downloaded(name)]
     if cached:
         lines.append(("✓", f"datasets cached: {', '.join(cached)}", PALETTE.ok))
     else:
