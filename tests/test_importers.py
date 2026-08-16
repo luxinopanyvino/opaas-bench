@@ -149,11 +149,40 @@ def test_the_exclusions_reach_the_report_as_a_limitation(tmp_path):
 
     result = import_dataset("ifeval", _write_ifeval(tmp_path), tmp_path / "out")
     dataset = load_dataset(str(result.dataset_dir))
-    limitations = exclusion_limitations(dataset)
+    limitations = exclusion_limitations(dataset.tasks)
 
     assert len(limitations) == 1
     assert "1 of 3 source items are NOT evaluated" in limitations[0]
     assert "language:response_language" in limitations[0]
+
+
+def test_only_the_tasks_a_block_scored_are_declared():
+    """Blocks B and D share one composed dataset. Handed the whole dataset, each
+    block declared the other's exclusions as if they were its own, and the same
+    limitation reached the report twice."""
+    from opaas_bench.datasets import Task, exclusion_limitations
+
+    instructions = Task(
+        name="ifeval",
+        category="instruction-following",
+        type="instruction_following",
+        description="",
+        items=[],
+        items_available=541,
+        excluded={"count": 31, "byReason": {"language:response_language": 31}},
+    )
+    refusal = Task(
+        name="xstest",
+        category="refusal",
+        type="refusal",
+        description="",
+        items=[],
+        items_available=450,
+        excluded={"count": 0, "byReason": {}},
+    )
+
+    assert len(exclusion_limitations([instructions, refusal])) == 1
+    assert exclusion_limitations([refusal]) == []
 
 
 # ----------------------------------------------------------------------- XSTest

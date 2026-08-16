@@ -14,6 +14,7 @@ from typing import Annotated, Any
 
 import typer
 from rich.console import Console
+from rich.markup import escape
 from rich.progress import (
     BarColumn,
     Progress,
@@ -1155,17 +1156,32 @@ def version_command() -> None:
     print_banner(console)
 
 
+def _plain(value: Any) -> str:
+    """Report text, never read as Rich markup.
+
+    A limitation that begins with '[faithfulness]' is a label, not a style: printed
+    as-is, Rich swallows it and the line comes out missing the word that said which
+    dimension went unmeasured. In a tool that promises to omit nothing, the renderer
+    eating part of a limitation is worse than the limitation itself. It also means a
+    third party's report cannot break `show` with a stray bracket.
+    """
+    return escape(str(value))
+
+
 def _print_run_summary(report: dict[str, Any]) -> None:
     console.print()
-    console.print(f"[bold]Run[/bold] {report.get('runId')}  ·  status: {report.get('status')}")
+    console.print(
+        f"[bold]Run[/bold] {_plain(report.get('runId'))}  ·  "
+        f"status: {_plain(report.get('status'))}"
+    )
     model = report.get("model", {})
     configuration = report.get("configuration", {})
     console.print(
-        f"  model    : {model.get('name')}"
-        + (f"  ({model.get('quantization')})" if model.get("quantization") else "")
+        f"  model    : {_plain(model.get('name'))}"
+        + (f"  ({_plain(model.get('quantization'))})" if model.get("quantization") else "")
     )
-    console.print(f"  backend  : {configuration.get('backend')}")
-    console.print(f"  hardware : {configuration.get('hardware')}")
+    console.print(f"  backend  : {_plain(configuration.get('backend'))}")
+    console.print(f"  hardware : {_plain(configuration.get('hardware'))}")
     console.print(f"  configHash: {configuration.get('configHash')}")
 
     if cov := report.get("coverage"):
@@ -1183,7 +1199,7 @@ def _print_run_summary(report: dict[str, Any]) -> None:
         if unmeasured := _unmeasured_dimensions(report):
             console.print(
                 f"           : [yellow]{len(unmeasured)} dimensions within those blocks were "
-                f"not measured: {', '.join(unmeasured)}[/yellow]"
+                f"not measured: {_plain(', '.join(unmeasured))}[/yellow]"
             )
 
     for result in report.get("suites", []):
@@ -1192,14 +1208,14 @@ def _print_run_summary(report: dict[str, Any]) -> None:
             printer(result.get("metrics", {}))
         elif result.get("status") != "completed":
             err_console.print(
-                f"[red]Suite '{result.get('suite')}' {result.get('status')}:[/red] "
-                f"{result.get('error')}"
+                f"[red]Suite '{_plain(result.get('suite'))}' {_plain(result.get('status'))}:"
+                f"[/red] {_plain(result.get('error'))}"
             )
 
     if limitations := report.get("limitations"):
         console.print("\n[yellow]Known limitations of this run:[/yellow]")
         for limitation in limitations:
-            console.print(f"  * {limitation}")
+            console.print(f"  * {_plain(limitation)}")
 
 
 def _unmeasured_dimensions(report: dict[str, Any]) -> list[str]:
@@ -1220,7 +1236,7 @@ def _print_performance_table(metrics: dict[str, Any]) -> None:
     idle = metrics.get("idle", {})
     if idle:
         rss = idle.get("processRssPeakMb")
-        ram = f"{_fmt(rss, 0)} MB (process {idle.get('processName')})" if rss else (
+        ram = f"{_fmt(rss, 0)} MB (process {_plain(idle.get('processName'))})" if rss else (
             f"{_fmt(idle.get('ramMeanMb'), 0)} MB (system)"
         )
         console.print(
@@ -1255,18 +1271,19 @@ def _print_performance_table(metrics: dict[str, Any]) -> None:
 
     for observation in metrics.get("observations", []):
         console.print(
-            f"\n  [red]▲ {observation['kind']}[/red] "
+            f"\n  [red]▲ {_plain(observation['kind'])}[/red] "
             f"(prompt {observation['promptWords']}, concurrency {observation['concurrency']})\n"
-            f"    {observation['detail']}"
+            f"    {_plain(observation['detail'])}"
         )
 
 
 def _print_capability_table(metrics: dict[str, Any]) -> None:
     dataset = metrics.get("dataset", {})
     table = Table(
-        title=f"Block B — Capability  ·  dataset {dataset.get('name')} "
-        f"{dataset.get('version')} ({short_hash(str(dataset.get('datasetHash', '')), 12)})"
-        f"  ·  style {metrics.get('answerStyle', '?')}"
+        title=f"Block B — Capability  ·  dataset {_plain(dataset.get('name'))} "
+        f"{_plain(dataset.get('version'))} "
+        f"({short_hash(str(dataset.get('datasetHash', '')), 12)})"
+        f"  ·  style {_plain(metrics.get('answerStyle', '?'))}"
     )
     table.add_column("category", style="bold")
     table.add_column("accuracy", justify="right")
@@ -1279,7 +1296,7 @@ def _print_capability_table(metrics: dict[str, Any]) -> None:
         accuracy = task.get("accuracy", {})
         point = accuracy.get("point")
         table.add_row(
-            str(task.get("category")),
+            _plain(task.get("category")),
             "—" if point is None else f"{point:.1%}",
             "—"
             if accuracy.get("low") is None
@@ -1299,7 +1316,7 @@ def _print_capability_table(metrics: dict[str, Any]) -> None:
             # Failures over total, not passes: printing the passes under a
             # "failed" heading read as the exact opposite of the data.
             detail = ", ".join(
-                f"{c['kind']} {c['total'] - c['passed']}/{c['total']}" for c in failing
+                f"{_plain(c['kind'])} {c['total'] - c['passed']}/{c['total']}" for c in failing
             )
             console.print(f"  [dim]constraints failed (failed/checked): {detail}[/dim]")
 
@@ -1307,14 +1324,15 @@ def _print_capability_table(metrics: dict[str, Any]) -> None:
         excluded = task.get("excluded") or {}
         if excluded.get("count"):
             reasons = ", ".join(
-                f"{reason} {count}" for reason, count in sorted(excluded["byReason"].items())
+                f"{_plain(reason)} {count}"
+                for reason, count in sorted(excluded["byReason"].items())
             )
             # Three different numbers: what the source has, what could be
             # checked, and what this run evaluated after --limit. Collapsing
             # them into one ratio is how the exclusions got lost in the first
             # place.
             console.print(
-                f"  [yellow]{task['name']}: {task['items']} items evaluated of "
+                f"  [yellow]{_plain(task['name'])}: {task['items']} items evaluated of "
                 f"{task['itemsImported']} checkable; {excluded['count']} of "
                 f"{task['itemsAvailable']} source items excluded ({reasons})[/yellow]"
             )
@@ -1371,12 +1389,14 @@ def _print_consistency_table(metrics: dict[str, Any]) -> None:
     console.print(table)
 
     if broken := robustness.get("enginesBrokenAfterCase"):
-        console.print(f"  [red]▲ the engine stopped responding after: {', '.join(broken)}[/red]")
+        console.print(
+            f"  [red]▲ the engine stopped responding after: {_plain(', '.join(broken))}[/red]"
+        )
 
     evidence = context.get("truncationEvidence") or {}
     if context.get("contextLossDetected") and evidence.get("reason"):
         colour = "red" if evidence.get("verdict") == "confirmed" else "yellow"
-        console.print(f"  [{colour}]▲ {evidence['reason']}[/{colour}]")
+        console.print(f"  [{colour}]▲ {_plain(evidence['reason'])}[/{colour}]")
 
 
 def _context_detail(context: dict[str, Any]) -> str:
@@ -1443,16 +1463,20 @@ def _print_safety_table(metrics: dict[str, Any]) -> None:
 
     for name, entry in (metrics.get("classifiers") or {}).items():
         console.print(
-            f"  [dim]classifier {name}: {entry.get('name')} "
-            f"({entry.get('weightsHash')}) from {entry.get('path')}[/dim]"
+            f"  [dim]classifier {_plain(name)}: {_plain(entry.get('name'))} "
+            f"({entry.get('weightsHash')}) from {_plain(entry.get('path'))}[/dim]"
         )
     for measure in (metrics.get("faithfulness", {}), metrics.get("toxicity", {})):
         if measure and not measure.get("available"):
             console.print(
-                f"  [yellow]not measured — {measure['task']}:[/yellow] {measure['reason']}"
+                f"  [yellow]not measured — {_plain(measure['task'])}:[/yellow] "
+                f"{_plain(measure['reason'])}"
             )
     for entry in metrics.get("notImplemented", []):
-        console.print(f"  [yellow]not measured — {entry['dimension']}:[/yellow] {entry['reason']}")
+        console.print(
+            f"  [yellow]not measured — {_plain(entry['dimension'])}:[/yellow] "
+            f"{_plain(entry['reason'])}"
+        )
 
 
 def _print_compliance_table(metrics: dict[str, Any]) -> None:
@@ -1493,10 +1517,10 @@ def _print_compliance_table(metrics: dict[str, Any]) -> None:
             "partial": "yellow", "unknown": "yellow",
         }.get(status, "white")
         table.add_row(
-            str(item.get("title")),
+            _plain(item.get("title")),
             "verified" if item.get("verifiedByOpaasBench") else "declared",
             f"[{colour}]{status}[/{colour}]",
-            ", ".join(item.get("frameworks", [])),
+            _plain(", ".join(item.get("frameworks", []))),
         )
     console.print(table)
 
@@ -1512,8 +1536,11 @@ def _column_titles(runs: list[dict[str, Any]]) -> list[str]:
 def _print_comparison(comparison: dict[str, Any]) -> None:
     console.print("\n[bold]Runs compared[/bold]")
     for run in comparison["runs"]:
-        console.print(f"  * {run['label']}  ({run['backend']}, {run['hardware']})")
-    titles = _column_titles(comparison["runs"])
+        console.print(
+            f"  * {_plain(run['label'])}  "
+            f"({_plain(run['backend'])}, {_plain(run['hardware'])})"
+        )
+    titles = [_plain(title) for title in _column_titles(comparison["runs"])]
 
     performance = comparison.get("performance") or []
     if performance:
@@ -1552,11 +1579,14 @@ def _print_comparison(comparison: dict[str, Any]) -> None:
                 if verdict.get("significant")
                 else "[yellow]no[/yellow]" if verdict.get("comparable") else "—"
             )
-            table.add_row(row["category"], *cells, mark)
+            table.add_row(_plain(row["category"]), *cells, mark)
         console.print(table)
         for row in capability:
             if row["verdict"].get("comparable"):
-                console.print(f"  [dim]{row['category']}: {row['verdict']['detail']}[/dim]")
+                console.print(
+                    f"  [dim]{_plain(row['category'])}: "
+                    f"{_plain(row['verdict']['detail'])}[/dim]"
+                )
 
 
 _SUITE_PRINTERS = {

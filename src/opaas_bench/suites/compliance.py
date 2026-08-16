@@ -63,7 +63,8 @@ class ComplianceSuite(Suite):
         else:
             limitations.append(
                 "No compliance declaration: the documentary part of block E is left "
-                "uncovered. Generate a template with 'opaas-bench compliance --template'."
+                "uncovered. Generate a template with 'opaas-bench compliance --out "
+                "declaration.json', fill it in and pass it with --declaration."
             )
 
         self.plan_steps(3, "air-gapped probe")

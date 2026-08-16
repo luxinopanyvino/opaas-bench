@@ -116,6 +116,36 @@ def test_show_missing_report_exits_with_error(tmp_path):
     assert result.exit_code == 2
 
 
+def test_show_does_not_read_report_text_as_rich_markup(tmp_path):
+    """Limitations are tagged '[faithfulness] ...'. Printed raw, Rich takes that
+    for a style and swallows it, so the line loses the word that named the
+    dimension — a renderer quietly dropping part of a limitation."""
+    assert _run(tmp_path).exit_code == 0
+    path = tmp_path / "result.json"
+    report = json.loads(path.read_text(encoding="utf-8"))
+    report["limitations"] = ["[faithfulness] No faithfulness classifier."]
+    path.write_text(json.dumps(report), encoding="utf-8")
+
+    result = runner.invoke(app, ["show", str(path)])
+    assert result.exit_code == 0
+    assert "[faithfulness] No faithfulness classifier." in _flat(result.output)
+
+
+def test_show_survives_a_report_with_broken_markup(tmp_path):
+    """A third party's report is not ours to trust for rendering."""
+    assert _run(tmp_path).exit_code == 0
+    path = tmp_path / "result.json"
+    report = json.loads(path.read_text(encoding="utf-8"))
+    report["limitations"] = ["unclosed [/] tag"]
+    report["model"]["name"] = "model [bold]with markup"
+    path.write_text(json.dumps(report), encoding="utf-8")
+
+    result = runner.invoke(app, ["show", str(path)])
+    assert result.exit_code == 0
+    assert "unclosed [/] tag" in _flat(result.output)
+    assert "model [bold]with markup" in _flat(result.output)
+
+
 def test_keygen_creates_root_of_trust(tmp_path):
     result = _keygen(tmp_path / "keys")
     assert result.exit_code == 0
