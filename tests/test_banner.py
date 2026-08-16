@@ -259,10 +259,16 @@ def test_unknown_keys_are_ignored():
     assert chosen.label == "One"
 
 
+def _chooses(monkeypatch, *picks):
+    """Feeds `present` a fixed sequence of choices, cancelling once they run out."""
+    remaining = iter(picks)
+    monkeypatch.setattr("opaas_bench.cli.menu.choose", lambda *a, **k: next(remaining, None))
+
+
 def test_an_entry_with_a_command_prints_it_instead_of_running_anything(monkeypatch):
     """The menu teaches the CLI, it does not replace it."""
     item = MenuItem("x", "Evaluate", command="opaas-bench run --model X")
-    monkeypatch.setattr("opaas_bench.cli.menu.choose", lambda *a, **k: item)
+    _chooses(monkeypatch, item)
     console = Console(width=80, no_color=True)
     with console.capture() as capture:
         present(console, [item])
@@ -272,15 +278,36 @@ def test_an_entry_with_a_command_prints_it_instead_of_running_anything(monkeypat
 def test_an_entry_with_an_action_executes_it(monkeypatch):
     executed = []
     item = MenuItem("x", "List", action=lambda: executed.append(True))
-    monkeypatch.setattr("opaas_bench.cli.menu.choose", lambda *a, **k: item)
+    _chooses(monkeypatch, item)
     present(Console(width=80, no_color=True), [item])
     assert executed == [True]
 
 
 def test_quitting_does_nothing(monkeypatch):
     item = MenuItem("x", "Exit", command="never", quit=True)
-    monkeypatch.setattr("opaas_bench.cli.menu.choose", lambda *a, **k: item)
+    _chooses(monkeypatch, item)
     console = Console(width=80, no_color=True)
     with console.capture() as capture:
         present(console, [item])
     assert "never" not in capture.get()
+
+
+def test_the_menu_comes_back_after_each_entry(monkeypatch):
+    executed = []
+    action = MenuItem("x", "List", action=lambda: executed.append("action"))
+    command = MenuItem("y", "Evaluate", command="opaas-bench run --model X")
+    _chooses(monkeypatch, action, command, action)
+    console = Console(width=80, no_color=True)
+    with console.capture() as capture:
+        present(console, [action, command])
+    assert executed == ["action", "action"]
+    assert "opaas-bench run --model X" in capture.get()
+
+
+def test_an_exit_entry_stops_the_menu(monkeypatch):
+    executed = []
+    action = MenuItem("x", "List", action=lambda: executed.append("action"))
+    leave = MenuItem("z", "Exit", quit=True)
+    _chooses(monkeypatch, action, leave, action)
+    present(Console(width=80, no_color=True), [action, leave])
+    assert executed == ["action"]

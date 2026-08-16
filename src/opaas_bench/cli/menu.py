@@ -147,14 +147,20 @@ def choose(
 
 
 def present(console: Console, items: Sequence[MenuItem]) -> None:
-    """Picks an entry and either runs it or shows its command."""
-    item = choose(console, items)
-    if item is None or item.quit:
-        return
-    if item.action is not None:
+    """Picks entries and either runs them or shows their command, until you leave.
+
+    The menu is drawn again after each entry: choosing one is not a reason to
+    drop back to the shell. The output stays above it, because the menu is drawn
+    transiently and erases itself before the entry runs.
+    """
+    while True:
+        item = choose(console, items)
+        if item is None or item.quit:
+            return
         console.print()
-        item.action()
-        return
-    console.print()
-    console.print(Text("  Run:", Style(color=PALETTE.muted)))
-    console.print(Text(f"  {item.command}", Style(color=PALETTE.accent)))
+        if item.action is not None:
+            item.action()
+        else:
+            console.print(Text("  Run:", Style(color=PALETTE.muted)))
+            console.print(Text(f"  {item.command}", Style(color=PALETTE.accent)))
+        console.print()
