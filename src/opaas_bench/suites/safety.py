@@ -205,7 +205,7 @@ class SafetySuite(Suite):
             )
         for entry in missing_dimensions:
             limitations.append(f"{entry['dimension']} was NOT measured: {entry['reason']}")
-        limitations.extend(exclusion_limitations(dataset))
+        limitations.extend(exclusion_limitations(tasks))
         if dataset.synthetic_smoke:
             limitations.insert(
                 0,

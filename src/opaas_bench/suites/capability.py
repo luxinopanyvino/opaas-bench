@@ -105,7 +105,20 @@ class CapabilitySuite(Suite):
 
     def evaluate(self, backend: InferenceBackend) -> tuple[dict[str, Any], list[str]]:
         dataset = load_dataset(self.opts.dataset, limit=self.opts.limit, offline=self.opts.offline)
-        limitations = _dataset_limitations(dataset, self.opts)
+
+        # Safety tasks live in the same dataset but are evaluated by block D.
+        own_tasks = [
+            task
+            for task in dataset.tasks
+            if task.type in ("multiple_choice", "instruction_following")
+        ]
+        if not own_tasks:
+            raise ValueError(
+                f"Dataset '{dataset.name}' has no multiple-choice or instruction-following "
+                "tasks: block B has nothing to evaluate."
+            )
+
+        limitations = _dataset_limitations(dataset, own_tasks, self.opts)
 
         if backend.get_backend_metadata().get("promptMode") == "raw":
             limitations.append(
@@ -122,17 +135,6 @@ class CapabilitySuite(Suite):
                 "serially. It does not affect the result, only the time."
             )
 
-        # Safety tasks live in the same dataset but are evaluated by block D.
-        own_tasks = [
-            task
-            for task in dataset.tasks
-            if task.type in ("multiple_choice", "instruction_following")
-        ]
-        if not own_tasks:
-            raise ValueError(
-                f"Dataset '{dataset.name}' has no multiple-choice or instruction-following "
-                "tasks: block B has nothing to evaluate."
-            )
         self.plan_steps(sum(len(task.items) for task in own_tasks), "evaluating items")
         tasks = [self._run_task(backend, task, workers) for task in own_tasks]
 
@@ -287,7 +289,9 @@ def _constraint_breakdown(outcomes: list[_Outcome]) -> list[dict[str, Any]]:
     ]
 
 
-def _dataset_limitations(dataset: Dataset, opts: CapabilityOptions) -> list[str]:
+def _dataset_limitations(
+    dataset: Dataset, tasks: list[Task], opts: CapabilityOptions
+) -> list[str]:
     limitations: list[str] = []
     if dataset.synthetic_smoke:
         limitations.append(
@@ -305,7 +309,7 @@ def _dataset_limitations(dataset: Dataset, opts: CapabilityOptions) -> list[str]
             f"Only {dataset.item_count} items in total: with samples this small the confidence "
             "interval is wide and differences between models are rarely significant."
         )
-    limitations.extend(exclusion_limitations(dataset))
+    limitations.extend(exclusion_limitations(tasks))
     limitations.append(
         "Accuracy is scored on the generated text, not on log-probabilities: the figures are "
         "not directly comparable with those published by harnesses that score by likelihood."

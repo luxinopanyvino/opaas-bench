@@ -83,6 +83,29 @@ def test_runs_without_a_declaration_and_says_what_is_missing():
     assert result.metrics["summary"]["declared"]["unknown"] == len(DECLARED_REQUIREMENTS)
 
 
+def test_the_suggested_command_is_one_that_exists():
+    """The limitation told the reader to run 'compliance --template', a flag that
+    was never implemented: following the report's own advice failed."""
+    from typer.testing import CliRunner
+
+    from opaas_bench.cli.main import app
+
+    advice = next(lim for lim in _run().limitations if "No compliance declaration" in lim)
+    assert "--template" not in advice
+
+    flags = [word.strip("'\",.") for word in advice.split() if word.startswith("--")]
+    assert flags, "the advice names no flag to run"
+
+    runner = CliRunner()
+    # The advice spans two commands: generate the template, then feed it to a run.
+    known = " ".join(
+        " ".join(runner.invoke(app, [command, "--help"]).output.split())
+        for command in ("compliance", "run")
+    )
+    for flag in flags:
+        assert flag in known, f"the advice names {flag}, which no command accepts"
+
+
 def test_declared_and_probed_are_never_summed():
     summary = _run().metrics["summary"]
     assert summary["declared"]["total"] == len(DECLARED_REQUIREMENTS)

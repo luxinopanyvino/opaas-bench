@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import random
 from collections import defaultdict
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, TypeVar
@@ -131,7 +132,7 @@ class Dataset:
         }
 
 
-def exclusion_limitations(dataset: Dataset) -> list[str]:
+def exclusion_limitations(tasks: Iterable[Task]) -> list[str]:
     """Items the import dropped, said out loud in the report.
 
     The importer already knew — it left them out on purpose, because scoring an
@@ -139,9 +140,13 @@ def exclusion_limitations(dataset: Dataset) -> list[str]:
     did not do was tell whoever reads the report, and a score computed over 94%
     of a public benchmark is not comparable with the published figure unless
     that is stated.
+
+    It takes the tasks a block actually scored, not the whole dataset: blocks B
+    and D share one composed dataset, and passing them all made each block
+    declare the other's exclusions as if they were its own.
     """
     limitations: list[str] = []
-    for task in dataset.tasks:
+    for task in tasks:
         excluded = task.excluded or {}
         if not excluded.get("count"):
             continue
