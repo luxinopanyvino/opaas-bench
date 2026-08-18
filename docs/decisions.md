@@ -123,6 +123,24 @@ The design asked for a quality reference against cloud endpoints, marked as `clo
 
 A rule written in the documentation gets broken; one the code rejects does not.
 
+## D26 — The block D classifiers download themselves too, against a pinned revision
+
+**Status:** applied · **Revises:** D17 · **Affects:** [`classifiers/registry.py`](../src/opaas_bench/classifiers/registry.py), [`classifiers/cache.py`](../src/opaas_bench/classifiers/cache.py), [`suites/safety.py`](../src/opaas_bench/suites/safety.py)
+
+D17 rule 1 said nothing is downloaded at run time, and the weights are supplied by whoever evaluates. The reasoning was D9's, and D20 already revised it for datasets and left classifiers behind — inconsistently, because the argument is identical. The consequence was the one D20 named: `--suite all` ran the five blocks and quietly declared two dimensions unmeasured, and the fix was a documentation page telling you to go download two models by hand. Most people never did, so most reports never measured toxicity.
+
+Revised: with the classifiers extra installed and no `--toxicity-model` / `--faithfulness-model` given, the pinned default is fetched once into `~/.opaas-bench/cache/classifiers/<task>/` and reused. What is **not** given up:
+
+- **The revision is a full commit SHA, not a branch.** `main` would mean two runs of the identical command on different days silently using different weights — the exact failure the dataset SHA-256 exists to prevent. Bumping it is a reviewed change to the registry, and a cached directory whose recorded revision does not match the pinned one is re-downloaded rather than trusted.
+- **An explicit path still wins and downloads nothing.** The operator's choice is never silently replaced.
+- **`--offline` forbids this download as firmly as the dataset one**, failing with what to supply instead of trying. `opaas-bench fetch` pre-populates both.
+- **Calibration (D18) still gates everything.** A default that fails the control set publishes no figure, exactly like one you picked yourself. The default is a convenience, not a promise that it discriminates.
+- **The report says which weights measured.** When the pinned default did the work, the repo and revision go into `limitations`, so a reader never assumes weights the operator chose. The weights hash travels as before.
+
+**What it costs.** A first run on a fresh machine now pulls ~800 MB it did not pull before, and the operator did not ask for it explicitly — the trade D20 already made for datasets, with a bigger number. It is gated on the extra being installed, which is itself an explicit `pip install`, and `opaas-bench datasets` shows what is cached before a run starts.
+
+**What is deliberately not automated.** Block E's seven declared requirements are claims the operator makes under their own responsibility, with evidence; auto-filling them would let a certificate assert compliance nobody verified, which is the failure mode this project exists to prevent. And `grounded_qa` items have no generic artifact to download: the point is whether the model invents things about *your* documents.
+
 ## D20 — Datasets download themselves, but against a pinned hash
 
 **Status:** applied · **Revises:** D9 and D15 · **Affects:** [`datasets/sources.py`](../src/opaas_bench/datasets/sources.py), [`datasets/cache.py`](../src/opaas_bench/datasets/cache.py)
@@ -172,7 +190,7 @@ Every control case records the language it is written in, so the verdict can nam
 
 ## D17 — Classifiers are pinned artifacts, not dependencies
 
-**Status:** applied · **Affects:** [`classifiers/`](../src/opaas_bench/classifiers), [`suites/safety.py`](../src/opaas_bench/suites/safety.py)
+**Status:** applied, rule 1 revised by [D26](#d26--the-block-d-classifiers-download-themselves-too-against-a-pinned-revision) · **Affects:** [`classifiers/`](../src/opaas_bench/classifiers), [`suites/safety.py`](../src/opaas_bench/suites/safety.py)
 
 D11 closed toxicity and faithfulness-with-a-judge as unmeasurable. That was true for a general-purpose LLM and false for a **small, open classifier**, which can be treated as an artifact: local weights, hashed, with its threshold declared and everything recorded in the report. The same three rules that govern datasets:
 

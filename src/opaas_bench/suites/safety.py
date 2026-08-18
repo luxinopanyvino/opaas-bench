@@ -11,12 +11,15 @@ Two measurements, both scored programmatically and without an LLM judge (see
   that is **not in it**. The correct answer is to say it is not stated;
   answering anyway is hallucinating, and that can be checked without a judge.
 
-And two more measurements **if a pinned classifier is supplied** (see
+And two more measurements **if a classifier is available** (see
 `classifiers/`): faithfulness to the passage, and toxicity. A small, local,
 hashed classifier does not break reproducibility the way an LLM judge would:
-its weights are just another artifact of the run, like the dataset. Without
-one, those dimensions are declared unmeasured instead of publishing a figure
-that does not hold up.
+its weights are just another artifact of the run, like the dataset.
+`--toxicity-model` / `--faithfulness-model` point at weights already on disk;
+without one, and only if the classifiers extra is installed, the pinned
+default is fetched once into the cache and reused (see `classifiers.cache`).
+Without either, those dimensions are declared unmeasured instead of
+publishing a figure that does not hold up.
 """
 
 from __future__ import annotations
@@ -28,7 +31,14 @@ from pathlib import Path
 from typing import Any, ClassVar
 
 from opaas_bench.adapters.base import InferenceBackend
-from opaas_bench.classifiers import ClassifierError, describe_missing, load_classifier
+from opaas_bench.classifiers import (
+    DEFAULT_CLASSIFIERS,
+    ClassifierError,
+    classifiers_available,
+    describe_missing,
+    ensure_default_classifier,
+    load_classifier,
+)
 from opaas_bench.classifiers.calibration import calibrate
 from opaas_bench.datasets import Item, Task, exclusion_limitations, load_dataset
 from opaas_bench.refusal import (
@@ -73,12 +83,16 @@ _DIMENSION_REQUIREMENTS = {
 }
 
 _TOXICITY_UNAVAILABLE = (
-    "No toxicity classifier. Supply one with --toxicity-model: it gets hashed and its "
+    "No toxicity classifier. Install the classifiers extra (pip install "
+    "'opaas-bench[classifiers]') to fetch the pinned default automatically, or point "
+    "--toxicity-model at weights you already have — either way it gets hashed and its "
     "hash goes into the report, so the measurement stays reproducible."
 )
 _FAITHFULNESS_UNAVAILABLE = (
-    "No faithfulness classifier. Supply one with --faithfulness-model to measure whether "
-    "the response is supported by the passage, beyond whether it contains the expected facts."
+    "No faithfulness classifier. Install the classifiers extra (pip install "
+    "'opaas-bench[classifiers]') to fetch the pinned default automatically, or point "
+    "--faithfulness-model at weights you already have, to measure whether the response is "
+    "supported by the passage, beyond whether it contains the expected facts."
 )
 
 
@@ -88,13 +102,15 @@ class SafetyOptions:
     #: default keeps programmatic use from hitting the network unasked.
     dataset: str = "opaas-smoke"
     limit: int | None = None
-    #: True forbids the network: cached datasets only.
+    #: True forbids the network: cached datasets only, and no pinned default
+    #: classifier is fetched either — fails saying what to supply instead.
     offline: bool = False
     max_tokens: int = 320
     temperature: float = 0.0
     seed: int | None = 1234
     concurrency: int = 4
-    #: Local paths to the weights. None = that dimension is not measured, and is declared.
+    #: Local paths to the weights. None = the pinned default is used instead, if
+    #: the classifiers extra is installed; with neither, unmeasured and declared.
     faithfulness_model: str | None = None
     faithfulness_profile: str = "nli"
     faithfulness_threshold: float | None = None
@@ -197,6 +213,8 @@ class SafetySuite(Suite):
                 limitations.append(f"[{measure['task']}] {calibration['verdict']}")
             if note := measure.get("classifierNote"):
                 limitations.append(f"[{measure['task']}] {note}")
+            if source_note := measure.get("defaultSource"):
+                limitations.append(f"[{measure['task']}] {source_note}")
         if toxicity.get("available"):
             limitations.append(
                 "Toxicity is measured over the responses this block generates, not over a set "
@@ -237,15 +255,49 @@ class SafetySuite(Suite):
 
     # ---------------------------------------------------------------- classifiers
 
+    def _default_source(self, task: str, profile: str) -> Any:
+        """The pinned default for `task`, but only if `profile` is the one it
+        was picked for: a profile chosen deliberately without a model path is
+        not silently overridden by an unrelated default."""
+        if not classifiers_available():
+            return None
+        source = DEFAULT_CLASSIFIERS.get(task)
+        return source if source is not None and source.profile == profile else None
+
+    def _configured(self, task: str, model: str | None, profile: str) -> bool:
+        """Whether there is a classifier to try for `task` — without downloading
+        anything. Checked before `_load` so a dataset with nothing to score
+        never triggers a multi-hundred-MB fetch for no reason."""
+        return bool(model) or self._default_source(task, profile) is not None
+
     def _load(self, task: str, model: str | None, profile: str, threshold: float | None) -> Any:
-        if not model:
+        if model:
+            path = Path(model)
+        else:
+            source = self._default_source(task, profile)
+            path = ensure_default_classifier(task, offline=self.opts.offline) if source else None
+        if path is None:
             return None
         return load_classifier(
-            Path(model),
+            path,
             profile,
             threshold=threshold,
             max_length=self.opts.classifier_max_length,
             allow_remote_code=self.opts.allow_remote_code,
+        )
+
+    def _default_note(self, task: str, model: str | None, profile: str) -> str | None:
+        """Said in the report when the pinned default did the measuring, so a
+        reader is never left assuming a hand-picked classifier was used."""
+        if model:
+            return None
+        source = self._default_source(task, profile)
+        if source is None:
+            return None
+        return (
+            f"Measured with the pinned default classifier ({source.repo_id}@"
+            f"{source.revision[:12]}), not one you chose: pass --{task}-model to use "
+            "your own weights instead."
         )
 
     def _score_faithfulness(
@@ -262,7 +314,8 @@ class SafetySuite(Suite):
             for outcome in outcomes
             if outcome.error is None and outcome.context and outcome.answerable and outcome.text
         ]
-        if not self.opts.faithfulness_model:
+        model, profile = self.opts.faithfulness_model, self.opts.faithfulness_profile
+        if not self._configured("faithfulness", model, profile):
             return describe_missing("faithfulness", _FAITHFULNESS_UNAVAILABLE)
         if not candidates:
             return describe_missing(
@@ -271,10 +324,7 @@ class SafetySuite(Suite):
 
         try:
             classifier = self._load(
-                "faithfulness",
-                self.opts.faithfulness_model,
-                self.opts.faithfulness_profile,
-                self.opts.faithfulness_threshold,
+                "faithfulness", model, profile, self.opts.faithfulness_threshold
             )
             check = calibrate(classifier, "faithfulness")
             if not check.get("reliable"):
@@ -289,7 +339,7 @@ class SafetySuite(Suite):
 
         metadata = classifier.metadata()
         classifiers["faithfulness"] = {**metadata.as_dict(), "calibration": check}
-        return _measure(
+        result = _measure(
             calibration=check,
             task="faithfulness",
             metadata=metadata,
@@ -299,23 +349,22 @@ class SafetySuite(Suite):
             rate_key="faithfulRate",
             worst_key="leastFaithful",
         )
+        if note := self._default_note("faithfulness", model, profile):
+            result["defaultSource"] = note
+        return result
 
     def _score_toxicity(
         self, outcomes: list[_Outcome], classifiers: dict[str, Any]
     ) -> dict[str, Any]:
         candidates = [o for o in outcomes if o.error is None and o.text.strip()]
-        if not self.opts.toxicity_model:
+        model, profile = self.opts.toxicity_model, self.opts.toxicity_profile
+        if not self._configured("toxicity", model, profile):
             return describe_missing("toxicity", _TOXICITY_UNAVAILABLE)
         if not candidates:
             return describe_missing("toxicity", "There are no responses to score.")
 
         try:
-            classifier = self._load(
-                "toxicity",
-                self.opts.toxicity_model,
-                self.opts.toxicity_profile,
-                self.opts.toxicity_threshold,
-            )
+            classifier = self._load("toxicity", model, profile, self.opts.toxicity_threshold)
             check = calibrate(classifier, "toxicity")
             if not check.get("reliable"):
                 classifiers["toxicity"] = {
@@ -329,7 +378,7 @@ class SafetySuite(Suite):
 
         metadata = classifier.metadata()
         classifiers["toxicity"] = {**metadata.as_dict(), "calibration": check}
-        return _measure(
+        result = _measure(
             calibration=check,
             task="toxicity",
             metadata=metadata,
@@ -339,6 +388,9 @@ class SafetySuite(Suite):
             rate_key="aboveThresholdRate",
             worst_key="mostToxic",
         )
+        if note := self._default_note("toxicity", model, profile):
+            result["defaultSource"] = note
+        return result
 
     def _run_task(
         self, backend: InferenceBackend, task: Task, workers: int

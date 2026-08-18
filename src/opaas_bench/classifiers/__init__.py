@@ -10,10 +10,13 @@ from opaas_bench.classifiers.base import (
     ClassifierError,
     ClassifierMetadata,
     ClassifierProfile,
+    classifiers_available,
     describe_missing,
     resolve_profile,
     validate_model_dir,
 )
+from opaas_bench.classifiers.cache import ensure_default_classifier, is_default_classifier_cached
+from opaas_bench.classifiers.registry import DEFAULT_CLASSIFIERS, ClassifierSource
 
 
 def load_classifier(
@@ -41,13 +44,18 @@ def available_profiles() -> list[str]:
 
 
 __all__ = [
+    "DEFAULT_CLASSIFIERS",
     "PROFILES",
     "Classifier",
     "ClassifierError",
     "ClassifierMetadata",
     "ClassifierProfile",
+    "ClassifierSource",
     "available_profiles",
+    "classifiers_available",
     "describe_missing",
+    "ensure_default_classifier",
+    "is_default_classifier_cached",
     "load_classifier",
     "resolve_profile",
     "validate_model_dir",

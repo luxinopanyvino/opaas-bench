@@ -19,8 +19,6 @@ evaluation that can take an hour.
 
 from __future__ import annotations
 
-from importlib.util import find_spec
-
 from rich.console import Console, Group, RenderableType
 from rich.panel import Panel
 from rich.style import Style
@@ -69,6 +67,7 @@ MIN_HEIGHT_SPRITE = SPRITE_HEIGHT + 2
 
 def status_lines() -> list[tuple[str, str, str]]:
     """Environment status: (mark, text, style). It checks, it does not decorate."""
+    from opaas_bench.classifiers import classifiers_available
     from opaas_bench.datasets import available_sources, cache_dir, source_is_downloaded
     from opaas_bench.suites import BLOCKS, available_suites
 
@@ -92,8 +91,22 @@ def status_lines() -> list[tuple[str, str, str]]:
             ("○", "datasets not downloaded — fetched on first use", PALETTE.pending)
         )
 
-    if find_spec("torch") and find_spec("transformers"):
-        lines.append(("✓", "classifiers available for block D", PALETTE.ok))
+    if classifiers_available():
+        from opaas_bench.classifiers import DEFAULT_CLASSIFIERS, is_default_classifier_cached
+
+        ready = [task for task in DEFAULT_CLASSIFIERS if is_default_classifier_cached(task)]
+        if len(ready) == len(DEFAULT_CLASSIFIERS):
+            lines.append(("✓", "classifiers ready: faithfulness, toxicity", PALETTE.ok))
+        elif ready:
+            lines.append(
+                ("○", f"classifiers ready: {', '.join(ready)} — the rest download on "
+                 "first use", PALETTE.pending)
+            )
+        else:
+            lines.append(
+                ("○", "classifiers installed — weights download on first use",
+                 PALETTE.pending)
+            )
     else:
         lines.append(
             ("○", "no classifiers — faithfulness and toxicity unmeasured", PALETTE.pending)

@@ -40,6 +40,11 @@ dev = [
 classifiers = [
     "torch>=2.2",
     "transformers>=4.40",
+    # Fetches the pinned default classifiers into the cache on first use, the
+    # same way datasets download themselves. transformers already pulls this
+    # in transitively; pinned here because classifiers/cache.py calls its API
+    # directly.
+    "huggingface-hub>=0.24",
 ]
 
 [project.scripts]

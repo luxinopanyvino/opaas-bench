@@ -7,10 +7,16 @@ local weights, hashed, with its threshold declared, all recorded in the report.
 
 Three rules, inherited from how datasets are handled:
 
-1. **Nothing is downloaded at run time.** The weights are supplied by whoever
-   evaluates. An air-gapped deployment cannot go to HuggingFace mid-run.
+1. **An explicit path never downloads anything.** `--toxicity-model` /
+   `--faithfulness-model` point at weights the operator already has, exactly
+   as before. Without one, and only if the classifiers extra is installed, a
+   pinned default is fetched once into the cache and reused from then on —
+   see `classifiers.cache` — the same revision as datasets get a pinned
+   sha256 for (D20/D21 in docs/decisions.md). `--offline` forbids that
+   download too and fails saying what is missing.
 2. **The weights hash travels in the report.** Two runs with different
-   classifiers are not comparable, and that has to be visible.
+   classifiers are not comparable, and that has to be visible — whether the
+   weights were pointed at by hand or fetched automatically.
 3. **The threshold is a methodological decision, not a detail.** Changing it
    changes the figure, so it is declared alongside it.
 """
@@ -18,12 +24,23 @@ Three rules, inherited from how datasets are handled:
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
+from importlib.util import find_spec
 from pathlib import Path
 from typing import Any, Protocol
 
 
 class ClassifierError(RuntimeError):
     """The classifier could not be loaded or run."""
+
+
+def classifiers_available() -> bool:
+    """Whether the classifiers extra (torch + transformers) is installed.
+
+    A cheap, import-free check: it is called before deciding whether it is
+    even worth trying to resolve a default classifier, without paying for
+    torch's own import cost just to find out it is not there.
+    """
+    return find_spec("torch") is not None and find_spec("transformers") is not None
 
 
 @dataclass(frozen=True, slots=True)
@@ -153,8 +170,8 @@ def validate_model_dir(path: Path) -> None:
     if not path.exists():
         raise ClassifierError(
             f"The classifier weights do not exist at {path}. "
-            "Download them once and point here: they are not downloaded at run time "
-            "so the run works without internet access."
+            "An explicit path is used as-is and never downloaded: check it, or drop the "
+            "flag to use the pinned default instead."
         )
     if not path.is_dir():
         raise ClassifierError(f"Expected a model directory, not a file: {path}")

@@ -30,7 +30,7 @@ The meerkat is the group's sentinel: it stands on its hind legs and keeps watch 
 ## Requirements
 
 - **Python 3.11 or later**
-- **An inference server already running** with the model loaded. OPAAS-Bench evaluates a deployment; it does not deploy anything and never downloads weights.
+- **An inference server already running** with the model loaded. OPAAS-Bench evaluates a deployment; it does not deploy anything and never downloads the model under evaluation.
 - Supported engines: **vLLM**, **Ollama**, and **`openai`** — a generic OpenAI-compatible adapter that covers local NVIDIA NIM, `llama-server`, TGI and LM Studio with no new code.
 - An NVIDIA GPU is not required, but without `nvidia-smi` there are no VRAM or power figures, and the report says so.
 
@@ -78,7 +78,7 @@ pip install .
 opaas-bench
 ```
 
-**Optional — block D classifiers** (faithfulness and toxicity). They are a separate extra because torch weighs more than everything else combined. Without them the tool works the same and declares those dimensions unmeasured. Installing and pointing at the weights is a flow of its own: [Measure faithfulness and toxicity](#7-measure-faithfulness-and-toxicity).
+**Optional — block D classifiers** (faithfulness and toxicity). A separate extra because torch weighs more than everything else combined. Installing it is enough: the pinned weights download once on first use and those two dimensions start being measured. Without it the tool works the same and declares them unmeasured. Details in [Measure faithfulness and toxicity](#7-measure-faithfulness-and-toxicity).
 
 ## Your first run
 
@@ -176,13 +176,13 @@ It warns when what you are comparing is not comparable (different hardware, anot
 
 ### 5. Run without internet access
 
-Nothing is downloaded during a run, so an air-gapped deployment is never broken mid-evaluation. Populate the cache on a connected machine:
+Datasets and classifier weights download on first use and are cached; `--offline` forbids both and fails saying what is missing, rather than breaking an evaluation halfway through. Populate the cache on a connected machine — this fetches the datasets, plus the pinned classifiers if that extra is installed:
 
 ```bash
 opaas-bench fetch
 ```
 
-Copy `~/.opaas-bench/cache` to the isolated machine and forbid the network explicitly — it then fails saying what is missing instead of trying:
+Copy `~/.opaas-bench/cache` to the isolated machine and forbid the network explicitly:
 
 ```bash
 opaas-bench run --model my-model --backend vllm --suite all --offline
@@ -200,42 +200,50 @@ A baseline **refuses** to run performance or compliance, **cannot be signed** as
 
 ### 7. Measure faithfulness and toxicity
 
-Two dimensions of block D that need a classifier. They are not equally easy to add: **toxicity is one flag away, faithfulness needs a dataset you probably do not have yet** — worth knowing before installing torch.
-
-**Install the extra.** Roughly 2.5 GB with CUDA on Windows:
+Two dimensions of block D that need a classifier. **Install the extra and they measure themselves** — the weights download once into the cache, at a pinned revision, and are reused from then on. Roughly 2.5 GB with CUDA on Windows:
 
 ```bash
 pip install "opaas-bench[classifiers] @ git+https://github.com/luxinopanyvino/opas-bench.git"
 ```
 
-**Download the weights yourself.** Nothing is downloaded during a run, on purpose: an air-gapped deployment must not break mid-evaluation.
+From there the ordinary command measures them, with no extra flags:
 
 ```bash
-huggingface-cli download unitary/toxic-bert --local-dir /models/toxic-bert
+opaas-bench run --model my-model --backend vllm --suite all
 ```
 
-```bash
-huggingface-cli download MoritzLaurer/DeBERTa-v3-base-mnli-fever-anli --local-dir /models/nli
-```
+The pinned defaults, one per dimension:
 
-No specific repository is pinned — the profiles describe families, and any model compatible with `AutoModelForSequenceClassification` works as long as the directory has a `config.json`:
+| Dimension | Default weights | License |
+|---|---|---|
+| toxicity | `unitary/toxic-bert` | Apache-2.0 |
+| faithfulness | `MoritzLaurer/DeBERTa-v3-base-mnli-fever-anli` | MIT |
 
-| `--faithfulness-profile` / model | Expects |
-|---|---|
-| `nli` (default) | A DeBERTa-MNLI or similar. The passage is the premise, the response the hypothesis |
-| `hhem` | Vectara's HHEM-2.1-Open. Needs `--allow-remote-code`: third-party code, run to measure safety |
-| `--toxicity-model` | Detoxify / toxic-bert and compatible |
+**Pinned to a commit, not to a tag**, exactly like datasets carry a pinned SHA-256: two runs of the identical command on different days must not silently use different weights. `opaas-bench datasets` shows which are cached, and the report records the repo and revision that measured, so a reader never assumes weights you chose.
 
-**Run it:**
+**Your own weights still win.** An explicit path is used as-is and downloads nothing:
 
 ```bash
 opaas-bench run --model my-model --backend vllm --suite all --toxicity-model /models/toxic-bert --faithfulness-model /models/nli
 ```
 
-**Faithfulness also needs a passage to score against.** It only reaches items of type `grounded_qa`, and `ifeval,xstest` provides none — with the classifier installed and no such items, the report still says *"There are no items with a passage and a response to score"*. Compose in a dataset of your own documents, which is the on-prem case that matters:
+Any model compatible with `AutoModelForSequenceClassification` works, as long as the directory has a `config.json`:
+
+| `--faithfulness-profile` | Expects |
+|---|---|
+| `nli` (default) | A DeBERTa-MNLI or similar. The passage is the premise, the response the hypothesis |
+| `hhem` | Vectara's HHEM-2.1-Open. Needs `--allow-remote-code`: third-party code, run to measure safety. No default is pinned for it |
+
+**Air-gapped still works.** `--offline` forbids the classifier download as firmly as the dataset one, and fails saying what to supply. Pre-populate on a connected machine and copy `~/.opaas-bench/cache`:
 
 ```bash
-opaas-bench run --model my-model --backend vllm --suite all --dataset ifeval,xstest,/data/internal-documentation --faithfulness-model /models/nli
+opaas-bench fetch
+```
+
+**Faithfulness also needs a passage to score against.** It only reaches items of type `grounded_qa`, and `ifeval,xstest` provides none — with the classifier ready and no such items, the report still says *"There are no items with a passage and a response to score"*. Compose in a dataset of your own documents, which is the on-prem case that matters:
+
+```bash
+opaas-bench run --model my-model --backend vllm --suite all --dataset ifeval,xstest,/data/internal-documentation
 ```
 
 Toxicity has no such requirement: it scores every response block D generates.
@@ -336,10 +344,10 @@ The ones you will actually reach for. Full list with `opaas-bench run --help`.
 | `--prompt-words` | `128,1024` | Prompt lengths to sweep |
 | `--quantization` | — | Declared quantization, e.g. `GGUF Q4_K_M` |
 | `--weights-path` | — | Local weights, to hash the artifact |
-| `--offline` | off | Cached datasets only |
+| `--offline` | off | Cached datasets and classifiers only |
 | `--declaration` | — | Block E declaration (JSON) |
-| `--toxicity-model` | — | Local weights of the toxicity classifier |
-| `--faithfulness-model` | — | Local weights of the faithfulness classifier |
+| `--toxicity-model` | pinned default | Your own toxicity weights, instead of the pinned default |
+| `--faithfulness-model` | pinned default | Your own faithfulness weights, instead of the pinned default |
 | `--classifier-threshold` | profile's own | Threshold for both classifiers, in [0, 1] |
 
 ## Command reference
@@ -378,8 +386,9 @@ The transparency log is **not** Certificate Transparency: there are no Merkle tr
 Stated here as plainly as the report states it:
 
 - **Bias.** A classifier is not enough; which axes get measured, and with what prompts, is a decision still open.
-- **Toxicity**, unless you install the optional classifiers and point at local weights.
-- **Faithfulness and hallucination with a passage**, unless you do the above *and* the dataset carries `grounded_qa` items — the default sources provide none.
+- **Toxicity**, unless the classifiers extra is installed — then it measures itself.
+- **Faithfulness**, unless the classifiers extra is installed *and* the dataset carries `grounded_qa` items; the default sources provide none.
+- **Hallucination with a passage**, unless the dataset carries `grounded_qa` items. No classifier can substitute for the data.
 - **Model-generated code is not executed.** Without a sandbox, running it would be the tool's problem, not the model's.
 - **Determinism under load.** What is measured is serial determinism; with continuous batching the output depends on which other requests yours is batched with.
 

@@ -27,6 +27,13 @@ from rich.table import Column, Table
 
 from opaas_bench.adapters import available_backends, get_backend
 from opaas_bench.adapters.base import DEFAULT_PROMPT_MODE, PROMPT_MODES, BackendError
+from opaas_bench.classifiers import (
+    DEFAULT_CLASSIFIERS,
+    ClassifierError,
+    classifiers_available,
+    ensure_default_classifier,
+    is_default_classifier_cached,
+)
 from opaas_bench.cli.banner import print_banner
 from opaas_bench.cli.menu import MenuItem, is_interactive, present
 from opaas_bench.compare import ComparisonError, compare, load_reports
@@ -264,14 +271,22 @@ AnswerStyle = Annotated[
 ]
 FaithfulnessModel = Annotated[
     Path | None,
-    typer.Option("--faithfulness-model", help="Local weights of the faithfulness classifier."),
+    typer.Option(
+        "--faithfulness-model",
+        help="Local weights of the faithfulness classifier. Without it, and only if the "
+        "classifiers extra is installed, the pinned default is fetched once into the cache.",
+    ),
 ]
 FaithfulnessProfile = Annotated[
     str, typer.Option("--faithfulness-profile", help="Profile: 'nli' or 'hhem'.")
 ]
 ToxicityModel = Annotated[
     Path | None,
-    typer.Option("--toxicity-model", help="Local weights of the toxicity classifier."),
+    typer.Option(
+        "--toxicity-model",
+        help="Local weights of the toxicity classifier. Without it, and only if the "
+        "classifiers extra is installed, the pinned default is fetched once into the cache.",
+    ),
 ]
 ClassifierThreshold = Annotated[
     float | None,
@@ -748,23 +763,47 @@ def publish(
 
 FetchSource = Annotated[
     str | None,
-    typer.Argument(help="Source to download; with no argument, all known ones."),
+    typer.Argument(
+        help="Dataset or classifier ('toxicity', 'faithfulness') to download; with no "
+        "argument, every dataset, plus the classifiers if that extra is installed."
+    ),
 ]
 
 
 @app.command("fetch")
 def fetch_command(source: FetchSource = None, limit: ItemLimit = None) -> None:
-    """Downloads datasets into the local cache, so as not to depend on the network later."""
-    names = [source] if source else available_sources()
-    unknown = [name for name in names if name not in available_sources()]
+    """Downloads datasets — and, with the classifiers extra installed, the pinned default
+    classifiers — into the local cache, so as not to depend on the network later."""
+    known = [*available_sources(), *DEFAULT_CLASSIFIERS]
+    if source:
+        names = [source]
+    else:
+        # Not fetched unasked unless the extra is already installed: a plain
+        # dataset-only install should not suddenly pull ~800 MB of model
+        # weights just because it ran `fetch` with no argument.
+        names = [*available_sources(), *(DEFAULT_CLASSIFIERS if classifiers_available() else [])]
+    unknown = [name for name in names if name not in known]
     if unknown:
         err_console.print(
-            f"[red]Unknown source: {', '.join(unknown)}.[/red] "
-            f"Available: {', '.join(available_sources())}"
+            f"[red]Unknown source: {', '.join(unknown)}.[/red] Available: {', '.join(known)}"
         )
         raise typer.Exit(code=2)
 
     for name in names:
+        if name in DEFAULT_CLASSIFIERS:
+            if is_default_classifier_cached(name):
+                console.print(f"[dim]{name}: already cached[/dim]")
+                continue
+            console.print(f"Downloading the default {name} classifier…")
+            try:
+                path = ensure_default_classifier(name)
+            except ClassifierError as exc:
+                # The message names 'opaas-bench[classifiers]': unescaped, Rich
+                # reads that bracket as a style tag and eats the install hint.
+                err_console.print(f"[red]{_plain(exc)}[/red]")
+                raise typer.Exit(code=1) from None
+            console.print(f"[green]{name}[/green]: cached at {path}")
+            continue
         if is_cached(name):
             console.print(f"[dim]{name}: already cached[/dim]")
             continue
@@ -855,6 +894,32 @@ def datasets_command() -> None:
             else "[green]evaluation[/green]",
         )
     console.print(local)
+
+    console.print()
+    if classifiers_available():
+        classifiers_table = Table(title="Block D classifiers (faithfulness, toxicity)")
+        classifiers_table.add_column("task", style="bold")
+        classifiers_table.add_column("pinned default")
+        classifiers_table.add_column("status")
+        for task, source in DEFAULT_CLASSIFIERS.items():
+            classifiers_table.add_row(
+                task,
+                f"{source.repo_id}@{source.revision[:12]}",
+                "[green]cached[/green]"
+                if is_default_classifier_cached(task)
+                else "[yellow]not downloaded — fetched on first use[/yellow]",
+            )
+        console.print(classifiers_table)
+        console.print(
+            "[dim]Or point --toxicity-model / --faithfulness-model at weights of your "
+            "own.[/dim]"
+        )
+    else:
+        console.print(
+            "[dim]Block D classifiers (faithfulness, toxicity): the classifiers extra is "
+            "not installed — pip install 'opaas-bench\\[classifiers]'.[/dim]"
+        )
+
     console.print(
         f"\n[dim]Cache: {cache_dir()} · downloaded on first use and reused. "
         "A run over several sources (the default, --dataset ifeval,xstest) evaluates the "

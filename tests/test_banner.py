@@ -197,6 +197,38 @@ def test_the_status_counts_sources_downloaded_inside_a_composition(monkeypatch):
     assert "not downloaded" in text
 
 
+def _with_classifiers_available(monkeypatch, *, cached):
+    import opaas_bench.classifiers as classifiers
+
+    monkeypatch.setattr(classifiers, "classifiers_available", lambda: True)
+    monkeypatch.setattr(classifiers, "is_default_classifier_cached", lambda task: task in cached)
+
+
+def test_the_status_says_classifiers_are_unavailable_without_the_extra(monkeypatch):
+    import opaas_bench.classifiers as classifiers
+
+    monkeypatch.setattr(classifiers, "classifiers_available", lambda: False)
+    text = " ".join(message for _, message, _ in status_lines())
+    assert "no classifiers" in text
+    assert "unmeasured" in text
+
+
+def test_the_status_reports_which_default_classifiers_are_cached(monkeypatch):
+    _with_classifiers_available(monkeypatch, cached=set())
+    text = " ".join(message for _, message, _ in status_lines())
+    assert "download on first use" in text
+
+    _with_classifiers_available(monkeypatch, cached={"toxicity"})
+    text = " ".join(message for _, message, _ in status_lines())
+    assert "classifiers ready: toxicity" in text
+    assert "download on first use" in text
+
+    _with_classifiers_available(monkeypatch, cached={"toxicity", "faithfulness"})
+    text = " ".join(message for _, message, _ in status_lines())
+    assert "classifiers ready: faithfulness, toxicity" in text
+    assert "download on first use" not in text
+
+
 # --------------------------------------------------------------------- SVG
 
 
