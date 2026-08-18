@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 import pytest
 from typer.testing import CliRunner
@@ -281,3 +282,121 @@ def test_verify_accepts_a_did_document(tmp_path):
         ["verify", "--credential", str(credential), "--did-document", str(keys / "did.json")],
     )
     assert result.exit_code == 0, result.output
+
+
+# ------------------------------------------------------------------- fetch
+
+
+def test_fetch_lists_classifiers_among_the_available_sources(monkeypatch):
+    """With the extra installed, 'toxicity'/'faithfulness' are valid `fetch`
+    arguments, listed alongside the dataset sources."""
+    import opaas_bench.cli.main as main_module
+
+    monkeypatch.setattr(main_module, "classifiers_available", lambda: True)
+    result = runner.invoke(app, ["fetch", "made-up-source"])
+    assert result.exit_code == 2
+    assert "toxicity" in _flat(result.output)
+    assert "faithfulness" in _flat(result.output)
+
+
+def test_fetch_downloads_a_named_classifier(monkeypatch):
+    import opaas_bench.cli.main as main_module
+
+    calls: list = []
+    monkeypatch.setattr(main_module, "is_default_classifier_cached", lambda task: False)
+    monkeypatch.setattr(
+        main_module,
+        "ensure_default_classifier",
+        lambda task, **k: calls.append(task) or Path(f"/cache/classifiers/{task}"),
+    )
+    result = runner.invoke(app, ["fetch", "toxicity"])
+    assert result.exit_code == 0, result.output
+    assert calls == ["toxicity"]
+    assert "toxicity" in _flat(result.output)
+
+
+def test_fetch_does_not_redownload_an_already_cached_classifier(monkeypatch):
+    import opaas_bench.cli.main as main_module
+
+    monkeypatch.setattr(main_module, "is_default_classifier_cached", lambda task: True)
+    monkeypatch.setattr(
+        main_module,
+        "ensure_default_classifier",
+        lambda *a, **k: pytest.fail("must not redownload an already-cached classifier"),
+    )
+    result = runner.invoke(app, ["fetch", "toxicity"])
+    assert result.exit_code == 0, result.output
+    assert "already cached" in _flat(result.output)
+
+
+def test_fetch_with_no_argument_leaves_classifiers_alone_without_the_extra(monkeypatch):
+    """A plain dataset-only install should not suddenly pull the classifier
+    weights just because `fetch` ran with no argument."""
+    import opaas_bench.cli.main as main_module
+
+    monkeypatch.setattr(main_module, "classifiers_available", lambda: False)
+    monkeypatch.setattr(main_module, "is_cached", lambda name: True)
+    monkeypatch.setattr(
+        main_module,
+        "ensure_default_classifier",
+        lambda *a, **k: pytest.fail("must not be attempted without the extra"),
+    )
+    result = runner.invoke(app, ["fetch"])
+    assert result.exit_code == 0, result.output
+
+
+def test_fetch_reports_a_classifier_download_failure(monkeypatch):
+    import opaas_bench.cli.main as main_module
+    from opaas_bench.classifiers import ClassifierError
+
+    def _boom(task, **kwargs):
+        raise ClassifierError("network unreachable")
+
+    monkeypatch.setattr(main_module, "is_default_classifier_cached", lambda task: False)
+    monkeypatch.setattr(main_module, "ensure_default_classifier", _boom)
+    result = runner.invoke(app, ["fetch", "toxicity"])
+    assert result.exit_code == 1
+    assert "network unreachable" in _flat(result.output)
+
+
+def test_a_classifier_error_keeps_its_install_hint_intact(monkeypatch):
+    """The hint names 'opaas-bench[classifiers]'. Unescaped, Rich reads that
+    bracket as a style tag and swallows the part that says what to install."""
+    import opaas_bench.cli.main as main_module
+    from opaas_bench.classifiers import ClassifierError
+
+    def _boom(task, **kwargs):
+        raise ClassifierError("huggingface-hub is missing: pip install 'opaas-bench[classifiers]'")
+
+    monkeypatch.setattr(main_module, "is_default_classifier_cached", lambda task: False)
+    monkeypatch.setattr(main_module, "ensure_default_classifier", _boom)
+    result = runner.invoke(app, ["fetch", "toxicity"])
+    assert "opaas-bench[classifiers]" in _flat(result.output)
+
+
+# ---------------------------------------------------------------- datasets
+
+
+def test_datasets_lists_the_pinned_classifiers_when_the_extra_is_installed(monkeypatch):
+    import opaas_bench.cli.main as main_module
+
+    monkeypatch.setattr(main_module, "classifiers_available", lambda: True)
+    monkeypatch.setattr(
+        main_module, "is_default_classifier_cached", lambda task: task == "toxicity"
+    )
+    result = runner.invoke(app, ["datasets"])
+
+    assert result.exit_code == 0, result.output
+    flat = _flat(result.output)
+    assert "unitary/toxic-bert" in flat
+    assert "cached" in flat
+
+
+def test_datasets_says_how_to_install_the_extra_when_it_is_missing(monkeypatch):
+    import opaas_bench.cli.main as main_module
+
+    monkeypatch.setattr(main_module, "classifiers_available", lambda: False)
+    result = runner.invoke(app, ["datasets"])
+
+    assert result.exit_code == 0, result.output
+    assert "opaas-bench[classifiers]" in _flat(result.output)

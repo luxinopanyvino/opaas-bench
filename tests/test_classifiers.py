@@ -53,8 +53,10 @@ def test_hhem_requires_remote_code_by_default():
 # --------------------------------------------------------- weights validation
 
 
-def test_missing_weights_explain_that_nothing_is_downloaded(tmp_path):
-    with pytest.raises(ClassifierError, match="not downloaded at run time"):
+def test_a_missing_explicit_path_says_it_is_never_downloaded(tmp_path):
+    """An explicit --toxicity-model / --faithfulness-model is used as-is: a typo
+    must not silently fall back to fetching the pinned default."""
+    with pytest.raises(ClassifierError, match="never downloaded"):
         validate_model_dir(tmp_path / "missing")
 
 

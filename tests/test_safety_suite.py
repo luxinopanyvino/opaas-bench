@@ -1,3 +1,7 @@
+from pathlib import Path
+
+import pytest
+
 from opaas_bench.refusal import (
     classify_abstention,
     classify_refusal,
@@ -391,6 +395,124 @@ def test_measuring_toxicity_on_own_outputs_is_declared_as_weaker(monkeypatch):
     _with_classifier(monkeypatch, StubClassifier(lambda text: 0.1))
     result = _run(lambda prompt: "ok", {"toxicity_model": "/models/tox"})
     assert any("dedicated adversarial set" in lim for lim in result.limitations)
+
+
+# ------------------------------------------------------- the pinned default
+
+
+def _with_default_available(monkeypatch, classifier, *, offline_error=None):
+    """No --toxicity-model / --faithfulness-model given: simulates the
+    classifiers extra being installed and the pinned default resolving to a
+    (fake) local path, without touching torch, transformers or the network."""
+    import opaas_bench.suites.safety as safety_module
+
+    monkeypatch.setattr(safety_module, "classifiers_available", lambda: True)
+
+    def _ensure(task, *, offline=False):
+        if offline and offline_error is not None:
+            raise offline_error
+        return Path(f"/cache/classifiers/{task}")
+
+    monkeypatch.setattr(safety_module, "ensure_default_classifier", _ensure)
+    monkeypatch.setattr(safety_module, "load_classifier", lambda *a, **k: classifier)
+    return classifier
+
+
+def test_the_pinned_default_is_used_when_no_model_path_is_given(monkeypatch):
+    """The whole point: --suite all with nothing else configured still
+    measures toxicity and faithfulness, as long as the extra is installed."""
+    _with_default_available(monkeypatch, StubClassifier(lambda item: 0.9))
+    result = _run(lambda prompt: "some response or other")
+
+    assert result.metrics["toxicity"]["available"] is True
+    assert result.metrics["faithfulness"]["available"] is True
+    assert any("unitary/toxic-bert" in lim for lim in result.limitations)
+    assert any(
+        "faithfulness" in lim and "--faithfulness-model" in lim for lim in result.limitations
+    )
+
+
+def test_an_explicit_path_is_never_swapped_for_the_default(monkeypatch):
+    """--toxicity-model wins even when the extra is installed: the operator's
+    explicit choice is not silently replaced by the pinned one. (Faithfulness
+    has no explicit path here, so it legitimately falls through to its own
+    default — this test only asserts about toxicity.)"""
+    import opaas_bench.suites.safety as safety_module
+
+    calls: list = []
+    monkeypatch.setattr(safety_module, "classifiers_available", lambda: True)
+    monkeypatch.setattr(
+        safety_module,
+        "ensure_default_classifier",
+        lambda task, **k: calls.append(task) or Path(f"/cache/classifiers/{task}"),
+    )
+    stub = _with_classifier(monkeypatch, StubClassifier(lambda item: 0.9))
+    result = _run(lambda prompt: "ok", {"toxicity_model": "/models/tox"})
+
+    assert result.metrics["toxicity"]["available"] is True
+    assert len(stub.seen) > 0
+    assert "toxicity" not in calls
+    assert not any(
+        "toxicity" in lim and "pinned default" in lim for lim in result.limitations
+    )
+
+
+def test_without_the_extra_the_default_is_never_attempted(monkeypatch):
+    """classifiers_available() False (torch/transformers not installed):
+    behaves exactly as if nothing had changed."""
+    import opaas_bench.suites.safety as safety_module
+
+    monkeypatch.setattr(safety_module, "classifiers_available", lambda: False)
+    monkeypatch.setattr(
+        safety_module,
+        "ensure_default_classifier",
+        lambda *a, **k: pytest.fail("must not be reached without the extra"),
+    )
+    result = _run(lambda prompt: "ok")
+
+    assert result.metrics["toxicity"]["available"] is False
+    assert "--toxicity-model" in result.metrics["toxicity"]["reason"]
+    assert result.metrics["faithfulness"]["available"] is False
+
+
+def test_a_profile_chosen_without_a_path_does_not_get_an_unrelated_default(monkeypatch):
+    """--faithfulness-profile hhem with no --faithfulness-model: there is no
+    pinned default for that profile, so it stays unmeasured rather than being
+    silently scored with the nli default. (Toxicity has no path either here,
+    so it legitimately gets its own default — this test only asserts about
+    faithfulness.)"""
+    import opaas_bench.suites.safety as safety_module
+
+    calls: list = []
+    monkeypatch.setattr(safety_module, "classifiers_available", lambda: True)
+    monkeypatch.setattr(
+        safety_module,
+        "ensure_default_classifier",
+        lambda task, **k: calls.append(task) or Path(f"/cache/classifiers/{task}"),
+    )
+    monkeypatch.setattr(
+        safety_module, "load_classifier", lambda *a, **k: StubClassifier(lambda item: 0.9)
+    )
+    result = _run(lambda prompt: "ok", {"faithfulness_profile": "hhem"})
+
+    assert result.metrics["faithfulness"]["available"] is False
+    assert "faithfulness" not in calls
+
+
+def test_offline_blocks_the_default_download_and_says_so(monkeypatch):
+    from opaas_bench.classifiers import ClassifierError
+
+    _with_default_available(
+        monkeypatch,
+        StubClassifier(lambda item: 0.9),
+        offline_error=ClassifierError(
+            "No 'toxicity' classifier cached ... and offline mode was requested."
+        ),
+    )
+    result = _run(lambda prompt: "ok", {"offline": True})
+
+    assert result.metrics["toxicity"]["available"] is False
+    assert "offline mode" in result.metrics["toxicity"]["reason"]
 
 
 def test_a_dataset_without_safety_tasks_fails_loudly(tmp_path):
