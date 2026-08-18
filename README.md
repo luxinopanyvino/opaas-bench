@@ -17,7 +17,7 @@ The meerkat is the group's sentinel: it stands on its hind legs and keeps watch 
 - [Requirements](#requirements)
 - [Installation](#installation)
 - [Your first run](#your-first-run)
-- [Execution flows](#execution-flows) — evaluate, certify, publish, compare, air-gapped, cloud baseline
+- [Execution flows](#execution-flows) — evaluate, certify, publish, compare, air-gapped, cloud baseline, classifiers
 - [What is measured](#what-is-measured) — the five blocks
 - [Datasets](#datasets)
 - [`run` options](#run-options)
@@ -78,11 +78,7 @@ pip install .
 opaas-bench
 ```
 
-**Optional — block D classifiers** (faithfulness and toxicity). They are a separate extra because torch weighs more than everything else combined. Without them the tool works the same and declares those dimensions unmeasured:
-
-```bash
-pip install "opaas-bench[classifiers] @ git+https://github.com/luxinopanyvino/opas-bench.git"
-```
+**Optional — block D classifiers** (faithfulness and toxicity). They are a separate extra because torch weighs more than everything else combined. Without them the tool works the same and declares those dimensions unmeasured. Installing and pointing at the weights is a flow of its own: [Measure faithfulness and toxicity](#7-measure-faithfulness-and-toxicity).
 
 ## Your first run
 
@@ -202,6 +198,57 @@ opaas-bench run --model meta/llama-3.3-70b-instruct --backend openai --base-url 
 
 A baseline **refuses** to run performance or compliance, **cannot be signed** as a certificate, and the comparator labels it and excludes it from the performance tables. Somebody else's shared endpoint describes no deployment of yours.
 
+### 7. Measure faithfulness and toxicity
+
+Two dimensions of block D that need a classifier. They are not equally easy to add: **toxicity is one flag away, faithfulness needs a dataset you probably do not have yet** — worth knowing before installing torch.
+
+**Install the extra.** Roughly 2.5 GB with CUDA on Windows:
+
+```bash
+pip install "opaas-bench[classifiers] @ git+https://github.com/luxinopanyvino/opas-bench.git"
+```
+
+**Download the weights yourself.** Nothing is downloaded during a run, on purpose: an air-gapped deployment must not break mid-evaluation.
+
+```bash
+huggingface-cli download unitary/toxic-bert --local-dir /models/toxic-bert
+```
+
+```bash
+huggingface-cli download MoritzLaurer/DeBERTa-v3-base-mnli-fever-anli --local-dir /models/nli
+```
+
+No specific repository is pinned — the profiles describe families, and any model compatible with `AutoModelForSequenceClassification` works as long as the directory has a `config.json`:
+
+| `--faithfulness-profile` / model | Expects |
+|---|---|
+| `nli` (default) | A DeBERTa-MNLI or similar. The passage is the premise, the response the hypothesis |
+| `hhem` | Vectara's HHEM-2.1-Open. Needs `--allow-remote-code`: third-party code, run to measure safety |
+| `--toxicity-model` | Detoxify / toxic-bert and compatible |
+
+**Run it:**
+
+```bash
+opaas-bench run --model my-model --backend vllm --suite all --toxicity-model /models/toxic-bert --faithfulness-model /models/nli
+```
+
+**Faithfulness also needs a passage to score against.** It only reaches items of type `grounded_qa`, and `ifeval,xstest` provides none — with the classifier installed and no such items, the report still says *"There are no items with a passage and a response to score"*. Compose in a dataset of your own documents, which is the on-prem case that matters:
+
+```bash
+opaas-bench run --model my-model --backend vllm --suite all --dataset ifeval,xstest,/data/internal-documentation --faithfulness-model /models/nli
+```
+
+Toxicity has no such requirement: it scores every response block D generates.
+
+**The calibration gate.** Before either classifier is used it is fed control cases whose answer is obvious. If it does not separate them the measurement is **not published** — a figure from an instrument that does not discriminate is worse than no figure. If it separates them but the threshold is off, the report says so and suggests the right one:
+
+```
+The classifier separates the classes (margin 0.014) but the threshold is set
+wrong: it fails 1 of 8 cases in en. Try --classifier-threshold 0.9429.
+```
+
+That is also what catches the most common mistake: an NLI model whose label order does not match what the profile expects. It is the mapping that is wrong, not the model.
+
 ## What is measured
 
 | Block | `--suite` | What it answers |
@@ -240,13 +287,7 @@ Correct refusal and over-refusal are measured with the same items and the same d
 
 Scoring is deterministic pattern matching, whose hash travels in the report. **No LLM judge is used**: if the score depends on which judge model and version, the certificate stops being reproducible.
 
-With the optional classifiers, faithfulness and toxicity are added — local pinned weights, hashed like any other artifact of the run:
-
-```bash
-opaas-bench run --model my-model --backend vllm --suite safety --toxicity-model /models/toxic --faithfulness-model /models/nli
-```
-
-Before use, the classifier is **calibrated** against control cases whose answer is obvious. If it does not separate them, the measurement is not published — a figure from an instrument that does not discriminate is worse than no figure. If it separates them but the threshold is off, the report says so and suggests the right one.
+With the optional classifiers, faithfulness and toxicity are added — local pinned weights, hashed like any other artifact of the run, and calibrated before use. Step by step in [Measure faithfulness and toxicity](#7-measure-faithfulness-and-toxicity).
 
 ### E — Compliance
 
@@ -297,6 +338,9 @@ The ones you will actually reach for. Full list with `opaas-bench run --help`.
 | `--weights-path` | — | Local weights, to hash the artifact |
 | `--offline` | off | Cached datasets only |
 | `--declaration` | — | Block E declaration (JSON) |
+| `--toxicity-model` | — | Local weights of the toxicity classifier |
+| `--faithfulness-model` | — | Local weights of the faithfulness classifier |
+| `--classifier-threshold` | profile's own | Threshold for both classifiers, in [0, 1] |
 
 ## Command reference
 
@@ -334,7 +378,8 @@ The transparency log is **not** Certificate Transparency: there are no Merkle tr
 Stated here as plainly as the report states it:
 
 - **Bias.** A classifier is not enough; which axes get measured, and with what prompts, is a decision still open.
-- **Toxicity and faithfulness**, unless you install the optional classifiers and point at local weights.
+- **Toxicity**, unless you install the optional classifiers and point at local weights.
+- **Faithfulness and hallucination with a passage**, unless you do the above *and* the dataset carries `grounded_qa` items — the default sources provide none.
 - **Model-generated code is not executed.** Without a sandbox, running it would be the tool's problem, not the model's.
 - **Determinism under load.** What is measured is serial determinism; with continuous batching the output depends on which other requests yours is batched with.
 
