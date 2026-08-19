@@ -97,6 +97,22 @@ def fake_backend() -> FakeBackend:
 
 
 @pytest.fixture(autouse=True)
+def _no_classifier_extra(monkeypatch):
+    """No test may reach the pinned default classifiers.
+
+    Once the classifiers extra is installed, block D resolves a default when no
+    model path is given — which in a test means loading real weights, running
+    real inference, and on a cold machine downloading ~800 MB in the middle of
+    `pytest`. It also makes results depend on whether torch happens to be
+    installed: the same test then passes in CI and fails on a developer's
+    machine. Tests that exercise the default opt in by patching this back.
+    """
+    import opaas_bench.suites.safety as safety_module
+
+    monkeypatch.setattr(safety_module, "classifiers_available", lambda: False)
+
+
+@pytest.fixture(autouse=True)
 def _isolate_registries():
     """The registries are global: a test that registers a backend must not leak it."""
     from opaas_bench import adapters, suites
