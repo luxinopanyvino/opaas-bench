@@ -52,8 +52,9 @@ opaas-bench = "opaas_bench.cli.main:app"
 
 [project.urls]
 Homepage = "https://onpremialabs.com"
-# The repository is still called opas-bench. If it is renamed, GitHub redirects.
-Repository = "https://github.com/luxinopanyvino/opas-bench"
+# 'opaas-bench', two a's. The old 'opas-bench' name 404s: GitHub's rename
+# redirect does not cover it, so every install command that used it failed.
+Repository = "https://github.com/luxinopanyvino/opaas-bench"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/opaas_bench"]

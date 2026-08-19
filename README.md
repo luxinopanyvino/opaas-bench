@@ -41,17 +41,17 @@ Not published on PyPI yet, so it installs from the repository.
 **With [uv](https://docs.astral.sh/uv/)** — leaves the `opaas-bench` command on your PATH, with no environment to activate:
 
 ```bash
-uv tool install git+https://github.com/luxinopanyvino/opas-bench.git
+uv tool install git+https://github.com/luxinopanyvino/opaas-bench.git
 ```
 
 **With pip**, in a virtual environment of your own:
 
 ```bash
-git clone https://github.com/luxinopanyvino/opas-bench.git
+git clone https://github.com/luxinopanyvino/opaas-bench.git
 ```
 
 ```bash
-cd opas-bench && python -m venv .venv
+cd opaas-bench && python -m venv .venv
 ```
 
 Activate it — on Windows (PowerShell):
@@ -203,7 +203,7 @@ A baseline **refuses** to run performance or compliance, **cannot be signed** as
 Two dimensions of block D that need a classifier. **Install the extra and they measure themselves** — the weights download once into the cache, at a pinned revision, and are reused from then on. Roughly 2.5 GB with CUDA on Windows:
 
 ```bash
-pip install "opaas-bench[classifiers] @ git+https://github.com/luxinopanyvino/opas-bench.git"
+pip install "opaas-bench[classifiers] @ git+https://github.com/luxinopanyvino/opaas-bench.git"
 ```
 
 From there the ordinary command measures them, with no extra flags:
@@ -440,6 +440,14 @@ pytest
 ```bash
 ruff check src tests
 ```
+
+**The dependencies are locked.** `pyproject.toml` declares what is needed (`>=`); `uv.lock` pins the exact resolved version of all 72 packages, extras included. A tool whose whole claim is that a certificate is reproducible should not be built on a stack that resolves differently depending on the day it was installed.
+
+```bash
+uv sync --extra dev --extra classifiers
+```
+
+That installs exactly what the lockfile pins. `uv lock` after changing a dependency in `pyproject.toml`; `uv lock --check` fails if the lockfile is out of date with it. Installing with plain `pip` ignores the lockfile and resolves fresh, which is fine for trying the tool and not for reproducing a run.
 
 ## License
 
