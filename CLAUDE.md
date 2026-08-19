@@ -142,13 +142,8 @@ yourself before committing.
 
 ### Known test state
 
-`uv run pytest` currently reports **2 failed, 554 passed** (~4s). Both failures are in
-`tests/test_banner.py` (`test_a_wide_terminal_uses_the_framed_layout`,
-`test_a_tall_wide_terminal_still_gets_the_frame`): they assert the square box character `┌`
-while `banner._full()` uses Rich's default `Panel` box, which is rounded (`╭`). This is
-pre-existing on `develop` and reproduces across rich 13.9/14.2/15.0 — it is a cosmetic
-assertion mismatch, not a regression from your change. Do not let it mask a new failure, and
-do not "fix" it by loosening unrelated assertions.
+`uv run pytest` reports **556 passed** in ~4s. The suite is green: treat any failure as
+yours.
 
 ### Test conventions
 

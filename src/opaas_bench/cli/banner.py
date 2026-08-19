@@ -19,6 +19,7 @@ evaluation that can take an hour.
 
 from __future__ import annotations
 
+from rich.box import SQUARE
 from rich.console import Console, Group, RenderableType
 from rich.panel import Panel
 from rich.style import Style
@@ -159,6 +160,10 @@ def _full(width: int) -> RenderableType:
 
     return Panel(
         Group(*body),
+        # Square corners, not Rich's rounded default: everything above is drawn
+        # on a pixel grid — the chunky sprite and the pixel title — and a
+        # rounded corner is the only soft edge in the whole cover.
+        box=SQUARE,
         border_style=Style(color=PALETTE.frame),
         padding=(1, 2),
         expand=False,
