@@ -381,6 +381,32 @@ def test_fetch_with_no_argument_leaves_classifiers_alone_without_the_extra(monke
     assert result.exit_code == 0, result.output
 
 
+def test_limit_is_refused_on_a_classifier_instead_of_silently_ignored(monkeypatch):
+    """--limit trims a dataset's items; a classifier has none. Accepting the
+    flag and doing nothing is the silent no-op this tool exists to catch."""
+    import opaas_bench.cli.main as main_module
+
+    monkeypatch.setattr(
+        main_module,
+        "ensure_default_classifier",
+        lambda *a, **k: pytest.fail("must not download when the flags are contradictory"),
+    )
+    result = runner.invoke(app, ["fetch", "toxicity", "--limit", "5"])
+    assert result.exit_code == 2
+    assert "does not apply" in _flat(result.output)
+
+
+def test_limit_with_everything_says_which_half_it_applies_to(monkeypatch):
+    import opaas_bench.cli.main as main_module
+
+    monkeypatch.setattr(main_module, "classifiers_available", lambda: True)
+    monkeypatch.setattr(main_module, "is_cached", lambda name: True)
+    monkeypatch.setattr(main_module, "is_default_classifier_cached", lambda task: True)
+    result = runner.invoke(app, ["fetch", "--limit", "5"])
+    assert result.exit_code == 0, result.output
+    assert "applies to the datasets" in _flat(result.output)
+
+
 def test_fetch_reports_a_classifier_download_failure(monkeypatch):
     import opaas_bench.cli.main as main_module
     from opaas_bench.classifiers import ClassifierError
