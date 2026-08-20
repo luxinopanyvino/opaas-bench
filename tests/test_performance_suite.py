@@ -115,6 +115,46 @@ def test_real_scaling_produces_no_queueing_finding():
     assert _observations([], degradation) == []
 
 
+def _queueing_degradation():
+    return [
+        {"promptWords": 128, "concurrency": 16, "throughputSpeedupVsC1": 1.03,
+         "ttftP50SlowdownVsC1": 128.2},
+    ]
+
+
+def test_a_declared_concurrency_the_engine_does_not_honour_is_a_contradiction():
+    """Declared and observed are compared, never added: if the operator says the
+    engine serves 8 at once and it demonstrably serializes, the finding is the
+    disagreement, not a vague 'check your config'."""
+    from opaas_bench.suites.performance import _observations
+
+    observation = _observations([], _queueing_degradation(), 8)[0]
+
+    assert observation["kind"] == "concurrency-contradicts-declaration"
+    assert observation["declaredMaxConcurrency"] == 8
+    assert "You declared" in observation["detail"]
+    assert "disagree" in observation["detail"]
+
+
+def test_without_a_declaration_the_finding_stays_a_plain_observation():
+    from opaas_bench.suites.performance import _observations
+
+    observation = _observations([], _queueing_degradation(), None)[0]
+
+    assert observation["kind"] == "no-concurrency-scaling"
+    assert observation["declaredMaxConcurrency"] is None
+    assert "You declared" not in observation["detail"]
+
+
+def test_declaring_a_single_stream_is_not_a_contradiction():
+    """An operator who declares the engine serves one at a time and sees it
+    serialize has an accurate declaration, not a broken deployment."""
+    from opaas_bench.suites.performance import _observations
+
+    observation = _observations([], _queueing_degradation(), 1)[0]
+    assert observation["kind"] == "no-concurrency-scaling"
+
+
 def test_vram_pressure_is_reported():
     from opaas_bench.suites.performance import _observations
 

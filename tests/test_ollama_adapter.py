@@ -193,6 +193,23 @@ def test_the_model_window_is_read_but_is_not_taken_as_the_served_one():
     assert backend.get_backend_metadata()["modelContextLength"] == 32768
 
 
+def test_the_concurrency_limit_is_unknown_unless_declared():
+    """Ollama does not expose OLLAMA_NUM_PARALLEL, and no engine publishes its
+    limit: unknown is the honest answer, never an assumed number."""
+    assert _load(_handler()).max_concurrent_requests() is None
+
+
+def test_a_declared_concurrency_limit_is_carried_as_declared():
+    assert _load(_handler(), max_concurrency=4).max_concurrent_requests() == 4
+
+
+@pytest.mark.parametrize("declared", [0, -1, "four", None])
+def test_a_meaningless_declaration_is_unknown_not_zero(declared):
+    """Zero served requests would be a claim about the deployment; garbage in
+    the flag is simply nothing declared."""
+    assert _load(_handler(), max_concurrency=declared).max_concurrent_requests() is None
+
+
 def test_a_nonsensical_num_ctx_is_rejected_at_load_time():
     with pytest.raises(BackendError, match="num_ctx"):
         _load(_handler(), num_ctx=0)
