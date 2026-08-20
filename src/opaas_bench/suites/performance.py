@@ -150,15 +150,26 @@ class PerformanceSuite(Suite):
             )
 
         degradation = _degradation(scenarios)
+        declared_concurrency = backend.max_concurrent_requests()
         metrics = {
             "options": self.opts.as_dict(),
             "idle": idle,
             "scenarios": scenarios,
             "concurrencyDegradation": degradation,
+            #: What the operator says the engine serves at once. Declared, never
+            #: measured: no engine publishes it. None = nobody said.
+            "declaredMaxConcurrency": declared_concurrency,
             # The raw ratios do not read on their own: this translates them into
             # what matters to whoever is sizing the deployment.
-            "observations": _observations(scenarios, degradation),
+            "observations": _observations(scenarios, degradation, declared_concurrency),
         }
+        if declared_concurrency is None and any(level > 1 for level in self.opts.concurrency):
+            limitations.append(
+                "The engine's concurrency limit is unknown: no engine publishes it and none was "
+                "declared. Whether a level was served in parallel or queued is inferred from the "
+                "throughput and TTFT ratios, not read from the server. Declare it with "
+                "--max-concurrency to have the report cross-check the two."
+            )
         return metrics, limitations
 
     # ------------------------------------------------------------------ internal
@@ -389,7 +400,9 @@ _VRAM_PRESSURE = 0.9
 
 
 def _observations(
-    scenarios: list[dict[str, Any]], degradation: list[dict[str, Any]]
+    scenarios: list[dict[str, Any]],
+    degradation: list[dict[str, Any]],
+    declared_concurrency: int | None = None,
 ) -> list[dict[str, Any]]:
     """Translates the metrics into findings about the evaluated deployment.
 
@@ -403,17 +416,31 @@ def _observations(
         if row["concurrency"] == 1 or speedup is None or slowdown is None:
             continue
         if speedup < _NO_SCALING_SPEEDUP and slowdown > _QUEUEING_TTFT:
+            # A declaration and an observation are compared, never added: if the
+            # operator says the engine serves N at once and it demonstrably
+            # serves them one at a time, the useful finding is the contradiction,
+            # not a vague "check your config".
+            contradicts = declared_concurrency is not None and declared_concurrency > 1
+            advice = (
+                f"You declared the engine serves {declared_concurrency} at once "
+                f"(--max-concurrency): at {row['concurrency']} requests it demonstrably does not. "
+                "The declaration and the deployment disagree."
+                if contradicts
+                else "Check the server's concurrent request limit."
+            )
             observations.append(
                 {
-                    "kind": "no-concurrency-scaling",
+                    "kind": "concurrency-contradicts-declaration"
+                    if contradicts
+                    else "no-concurrency-scaling",
                     "severity": "high",
                     "concurrency": row["concurrency"],
                     "promptWords": row["promptWords"],
+                    "declaredMaxConcurrency": declared_concurrency,
                     "detail": (
                         f"At {row['concurrency']} simultaneous requests, throughput only improves "
                         f"x{speedup} while TTFT worsens x{slowdown}. The engine is queueing, not "
-                        "serving in parallel: adding load only adds waiting. Check the server's "
-                        "concurrent request limit."
+                        f"serving in parallel: adding load only adds waiting. {advice}"
                     ),
                 }
             )

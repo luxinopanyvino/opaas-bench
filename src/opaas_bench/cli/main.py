@@ -175,6 +175,23 @@ NumCtx = Annotated[
         "server's default applies and a long prompt may be trimmed with nothing warning you.",
     ),
 ]
+MaxConcurrency = Annotated[
+    int | None,
+    typer.Option(
+        "--max-concurrency",
+        help="Requests the engine is configured to serve at once (vLLM --max-num-seqs, "
+        "OLLAMA_NUM_PARALLEL). No engine publishes it, so it is recorded as YOUR declaration "
+        "and block A cross-checks it against what it observes.",
+    ),
+]
+SuiteConcurrency = Annotated[
+    int,
+    typer.Option(
+        "--suite-concurrency",
+        help="Parallel requests the harness sends while scoring blocks B and D. Does not change "
+        "the result, only how long it takes — and only if the engine really serves them.",
+    ),
+]
 ApiKey = Annotated[
     str | None,
     typer.Option(
@@ -366,6 +383,8 @@ def run(
     base_url: BaseUrl = None,
     prompt_mode: PromptMode = DEFAULT_PROMPT_MODE,
     num_ctx: NumCtx = None,
+    max_concurrency: MaxConcurrency = None,
+    suite_concurrency: SuiteConcurrency = 4,
     api_key: ApiKey = None,
     timeout_s: Timeout = 300.0,
     concurrency: Concurrency = "1,4,16",
@@ -425,6 +444,16 @@ def run(
         )
         raise typer.Exit(code=2)
 
+    if max_concurrency is not None and max_concurrency <= 0:
+        err_console.print(
+            f"[red]--max-concurrency must be greater than 0, received {max_concurrency}.[/red]"
+        )
+        raise typer.Exit(code=2)
+    if suite_concurrency <= 0:
+        err_console.print(
+            f"[red]--suite-concurrency must be greater than 0, received {suite_concurrency}.[/red]"
+        )
+        raise typer.Exit(code=2)
     if num_ctx is not None and num_ctx <= 0:
         err_console.print(f"[red]--num-ctx must be greater than 0, received {num_ctx}.[/red]")
         raise typer.Exit(code=2)
@@ -461,6 +490,7 @@ def run(
             "dataset": dataset,
             "limit": limit,
             "offline": offline,
+            "concurrency": suite_concurrency,
             "answer_style": answer_style,
             "temperature": temperature,
             "seed": seed,
@@ -474,6 +504,7 @@ def run(
             "dataset": dataset,
             "limit": limit,
             "offline": offline,
+            "concurrency": suite_concurrency,
             "temperature": temperature,
             "seed": seed,
             "faithfulness_model": str(faithfulness_model) if faithfulness_model else None,
@@ -496,6 +527,7 @@ def run(
             "base_url": base_url,
             "prompt_mode": prompt_mode,
             "num_ctx": num_ctx,
+            "max_concurrency": max_concurrency,
             "api_key": api_key,
             "timeout_s": timeout_s,
             "quantization": quantization,

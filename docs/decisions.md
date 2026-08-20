@@ -123,6 +123,22 @@ The design asked for a quality reference against cloud endpoints, marked as `clo
 
 A rule written in the documentation gets broken; one the code rejects does not.
 
+## D27 — The engine's concurrency limit is declared, not guessed
+
+**Status:** applied · **Affects:** [`adapters/base.py`](../src/opaas_bench/adapters/base.py), [`suites/performance.py`](../src/opaas_bench/suites/performance.py)
+
+Block A could tell that an engine was queueing — flat throughput, exploding TTFT — but not why, so its advice ended at "check the server's concurrent request limit". The obvious fix was to read the limit from the engine. It cannot be done: vLLM's `/v1/models` publishes `max_model_len` but not `max_num_seqs`, its metrics expose current utilisation (`vllm:num_requests_running`) rather than the configured ceiling, and Ollama does not expose `OLLAMA_NUM_PARALLEL` at all.
+
+So `max_concurrent_requests()` follows `context_window()`: it returns what is known and `None` otherwise, where **None means unknown, never unlimited**. The default source is the operator declaring it with `--max-concurrency`, and an adapter overrides the method if its engine ever does publish the number.
+
+Being a declaration, it obeys D14: **declared and observed are never added together.** They are compared. Declaring 8 and then serializing under load produces `concurrency-contradicts-declaration` — the same shape as block E's air-gapped contradiction, and far more useful than a generic hint. Declaring 1 and serializing is just an accurate declaration, and produces the plain finding.
+
+When nothing is declared and more than one concurrency level was swept, the report says the limit is unknown and that queueing was **inferred from ratios, not read from the server**. Without that line a reader could take the finding for a measurement of the engine's configuration, which it is not.
+
+**Separately, `--suite-concurrency`.** Blocks B and D hardcoded 4 parallel requests and the CLI could not reach it: `--concurrency` only ever fed block A's sweep. It is engine-agnostic — the harness's own knob, not the engine's — and it changes how long a run takes, never what it measures.
+
+**What is deliberately not done:** OPAAS-Bench does not set `OLLAMA_NUM_PARALLEL` or any other engine setting. It evaluates a deployment that is already running; an auditor that reconfigures the system first is certifying a deployment it invented, not the customer's.
+
 ## D26 — The block D classifiers download themselves too, against a pinned revision
 
 **Status:** applied · **Revises:** D17 · **Affects:** [`classifiers/registry.py`](../src/opaas_bench/classifiers/registry.py), [`classifiers/cache.py`](../src/opaas_bench/classifiers/cache.py), [`suites/safety.py`](../src/opaas_bench/suites/safety.py)

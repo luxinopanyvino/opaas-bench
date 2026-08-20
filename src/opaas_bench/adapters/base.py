@@ -139,6 +139,36 @@ class InferenceBackend(ABC):
         """
         return None
 
+    def max_concurrent_requests(self) -> int | None:
+        """Requests the engine will really serve at once, if known.
+
+        `supports_concurrency` answers whether several can be sent; this answers
+        how many are actually served rather than queued, which is a different
+        question and the one block A needs. An engine configured for one
+        sequence accepts sixteen requests, answers all sixteen, and simply makes
+        fifteen of them wait — indistinguishable, from the client, from a slow
+        engine.
+
+        **No engine publishes this.** vLLM's `/v1/models` carries `max_model_len`
+        but not `max_num_seqs`, and its metrics expose current utilisation, not
+        the configured ceiling; Ollama does not expose `OLLAMA_NUM_PARALLEL` at
+        all. So the default source is the operator declaring it
+        (`--max-concurrency`), and an adapter overrides this when its engine
+        does publish the number. Either way it is a **declaration**, never
+        summed with what block A observes: the two are compared, and a
+        contradiction is reported.
+
+        Returns None when nobody declared it and the adapter cannot establish
+        it. As with `context_window()`, None means **unknown**, never
+        *unlimited*.
+        """
+        declared = self._config.get("max_concurrency")
+        try:
+            value = int(declared)
+        except (TypeError, ValueError):
+            return None
+        return value if value > 0 else None
+
     def server_pid(self) -> int | None:
         """PID of the process serving the model, if it runs on this machine.
 

@@ -96,6 +96,42 @@ def test_unknown_suite_lists_the_available_ones(tmp_path):
     assert "Available" in _flat(result.output)
 
 
+def test_suite_concurrency_reaches_blocks_b_and_d(tmp_path):
+    """It was hardcoded to 4 and unreachable from the CLI: --concurrency only
+    ever fed block A."""
+    result = _run(tmp_path, "--suite", "all", "--limit", "2", "--context-words", "64",
+                  "--suite-concurrency", "2")
+    assert result.exit_code == 0, result.output
+    report = json.loads((tmp_path / "result.json").read_text(encoding="utf-8"))
+    for name in ("capability", "safety"):
+        suite = next(s for s in report["suites"] if s["suite"] == name)
+        assert suite["metrics"]["options"]["concurrency"] == 2, name
+
+
+def test_a_declared_concurrency_limit_reaches_the_report(tmp_path):
+    result = _run(tmp_path, "--suite", "performance", "--max-concurrency", "4")
+    assert result.exit_code == 0, result.output
+    report = json.loads((tmp_path / "result.json").read_text(encoding="utf-8"))
+    performance = next(s for s in report["suites"] if s["suite"] == "performance")
+    assert performance["metrics"]["declaredMaxConcurrency"] == 4
+
+
+def test_without_a_declaration_the_unknown_limit_is_stated(tmp_path):
+    result = _run(tmp_path, "--suite", "performance", "--concurrency", "1,2")
+    assert result.exit_code == 0, result.output
+    report = json.loads((tmp_path / "result.json").read_text(encoding="utf-8"))
+    performance = next(s for s in report["suites"] if s["suite"] == "performance")
+    assert performance["metrics"]["declaredMaxConcurrency"] is None
+    assert any("--max-concurrency" in lim for lim in performance["limitations"])
+
+
+@pytest.mark.parametrize("flag,value", [("--max-concurrency", "0"), ("--suite-concurrency", "0")])
+def test_non_positive_concurrency_flags_are_rejected(tmp_path, flag, value):
+    result = _run(tmp_path, flag, value)
+    assert result.exit_code == 2
+    assert "greater than 0" in _flat(result.output)
+
+
 def test_invalid_concurrency_is_rejected(tmp_path):
     result = runner.invoke(
         app,

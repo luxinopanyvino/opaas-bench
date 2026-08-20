@@ -124,6 +124,22 @@ opaas-bench show result.json
 
 Without `--suite`, only block A (performance) runs. Without `--output`, the report goes to `runs/<run-id>/report.json`.
 
+### 1b. Make a run finish sooner
+
+A full run is dominated by generation: blocks B and D score ~960 items, and on an engine serving one request at a time that is most of the wall clock. Measured on an RTX 5060 Ti with `qwen2.5:7b` on Ollama, of a 50-minute run: capability 51%, safety 37%, performance 11%, the rest under 1%.
+
+**First, check the engine is actually serving in parallel.** Block A reports it: if throughput stays flat while TTFT grows, the engine is queueing, and no flag here will help — it is the deployment's own limit (vLLM `--max-num-seqs`, `OLLAMA_NUM_PARALLEL`). Declare what you configured and the report cross-checks it:
+
+```bash
+opaas-bench run --model my-model --backend vllm --suite all --max-concurrency 8 --suite-concurrency 8
+```
+
+`--max-concurrency` is what you say the engine serves; `--suite-concurrency` is what the harness sends. Raising the second above what the engine honours only fills a queue.
+
+**Trimming the dataset is the other lever, and it is not free.** `--limit` cuts items per task, and the confidence interval pays for it — at 69% accuracy, n=510 gives a 8.0pp interval, n=100 gives 17.8pp, n=50 gives 24.7pp. Below a few hundred items you can no longer tell two configurations apart. The report declares the trim, so it stays honest; use it while iterating, not to certify.
+
+**And run only what you need**: `--suite performance` while tuning the server, `--suite consistency` (seconds) while checking a context setting.
+
 ### 2. Issue a certificate
 
 Turns a report into a signed credential. The key pair is generated **once** and is your root of trust — see [key custody](docs/key-custody.md).
@@ -339,6 +355,8 @@ The ones you will actually reach for. Full list with `opaas-bench run --help`.
 | `--base-url` | adapter's own | Your server endpoint |
 | `--output` | `runs/<run-id>/report.json` | Report file |
 | `--num-ctx` | server's default | Context window the engine must serve (Ollama) |
+| `--max-concurrency` | — | What the engine is configured to serve at once. Declared by you, cross-checked by block A |
+| `--suite-concurrency` | `4` | Parallel requests the harness sends while scoring blocks B and D |
 | `--dataset` | `ifeval,xstest` | Sources, local paths, or `opaas-smoke` |
 | `--concurrency` | `1,4,16` | Block A concurrency levels |
 | `--prompt-words` | `128,1024` | Prompt lengths to sweep |
