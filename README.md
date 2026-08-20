@@ -110,6 +110,61 @@ You now have `result.json`: the full report, per category, with its confidence i
 
 ## Execution flows
 
+```mermaid
+flowchart TD
+    subgraph yours["YOURS — OPAAS-Bench never does this"]
+        weights["Get the weights<br/>ollama pull, HuggingFace, your registry"]
+        engine["Serve them<br/>ollama serve, vllm serve, NIM, TGI"]
+        weights --> engine
+    end
+
+    engine -->|"--base-url points here"| run
+
+    subgraph bench["OPAAS-BENCH"]
+        run["run<br/>blocks A to E"]
+        report[("report.json<br/>its SHA-256 is what gets certified")]
+        sign["sign"]
+        credential[("credential.json<br/>W3C VC, Ed25519 over JCS")]
+        ledger[("ledger.jsonl<br/>issuance hash chain")]
+        publish["publish"]
+        site[("site/<br/>static, verifies in the browser")]
+
+        run --> report
+        report --> sign
+        sign --> credential
+        sign --> ledger
+        report --> publish
+        credential --> publish
+        publish --> site
+    end
+
+    credential --> verify["verify<br/>offline, no network"]
+    report --> verify
+    verify --> auditor(["Your customer or auditor<br/>checks it without trusting you"])
+```
+
+The boundary is the point: **OPAAS-Bench evaluates a deployment that is already running.** It never pulls weights and never starts a server, because a certificate is only worth something if it describes *your* deployment — with your quantization, your context window, your concurrency limit — and not one the tool spun up with its own defaults.
+
+### 0. Deploy the model yourself first
+
+If the model is not being served yet, that step is yours. With Ollama:
+
+```bash
+ollama pull qwen2.5:7b
+```
+
+```bash
+ollama serve
+```
+
+With vLLM, the two settings that turned out to matter most are fixed here, at server start:
+
+```bash
+vllm serve Qwen/Qwen2.5-7B-Instruct --max-model-len 32768 --max-num-seqs 8
+```
+
+Then point OPAAS-Bench at it. Whatever you chose above is what gets measured and what the certificate will say.
+
 ### 1. Evaluate a deployment
 
 The common case: measure what you have and read the report.
