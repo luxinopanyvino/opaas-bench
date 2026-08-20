@@ -821,6 +821,22 @@ def fetch_command(source: FetchSource = None, limit: ItemLimit = None) -> None:
         )
         raise typer.Exit(code=2)
 
+    # `--limit` trims a dataset's items; a classifier has none. Accepting it
+    # there and quietly doing nothing is the kind of silent no-op this tool
+    # exists to catch elsewhere.
+    if limit is not None and source in DEFAULT_CLASSIFIERS:
+        err_console.print(
+            f"[red]--limit does not apply to the '{source}' classifier:[/red] it trims a "
+            "dataset's items, and a classifier has none. Drop the flag, or name a dataset "
+            f"({', '.join(available_sources())})."
+        )
+        raise typer.Exit(code=2)
+    if limit is not None and any(name in DEFAULT_CLASSIFIERS for name in names):
+        console.print(
+            f"[dim]--limit {limit} applies to the datasets; the classifiers are downloaded "
+            "whole.[/dim]"
+        )
+
     for name in names:
         if name in DEFAULT_CLASSIFIERS:
             if is_default_classifier_cached(name):
