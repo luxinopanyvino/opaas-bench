@@ -1,9 +1,9 @@
 # web/ — Publication
 
-**Implemented.** The generator lives in [`src/opaas_bench/web/`](../src/opaas_bench/web) and is invoked with `opaas-bench publish`.
+**Implemented.** The generator lives in [`src/opaas/web/`](../src/opaas/web) and is invoked with `opaas publish`.
 
 ```bash
-opaas-bench publish --report runs/20260806-001/report.json --credential credential.json --did-document keys/did.json --out site
+opaas publish --report runs/20260806-001/report.json --credential credential.json --did-document keys/did.json --out site
 ```
 
 It produces a **static site**: no server, no database, no API.

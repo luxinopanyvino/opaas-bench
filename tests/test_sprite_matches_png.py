@@ -12,13 +12,13 @@ from pathlib import Path
 
 import pytest
 
-from opaas_bench.cli.sprite import PALETTE, SURICATA
+from opaas.cli.sprite import MASCOT, PALETTE
 
 pytest.importorskip("PIL", reason="Pillow is only needed to regenerate the sprite")
 pytest.importorskip("numpy", reason="numpy is only needed to regenerate the sprite")
 
 ROOT = Path(__file__).resolve().parents[1]
-PNG = ROOT / "docs" / "img" / "suricata.png"
+PNG = ROOT / "docs" / "img" / "mascot.png"
 
 
 @pytest.fixture(scope="module")
@@ -40,9 +40,9 @@ def test_the_png_is_committed():
 
 def test_the_grid_is_the_png(extracted):
     _, rows = extracted
-    assert rows == SURICATA, (
+    assert rows == MASCOT, (
         "the sprite and the PNG do not match; regenerate with: "
-        "python scripts/sprite_from_png.py docs/img/suricata.png"
+        "python scripts/sprite_from_png.py docs/img/mascot.png"
     )
 
 

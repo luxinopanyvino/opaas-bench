@@ -3,8 +3,8 @@ from pathlib import Path
 import pytest
 from rich.console import Console
 
-from opaas_bench.cli import pixelfont
-from opaas_bench.cli.banner import (
+from opaas.cli import pixelfont
+from opaas.cli.banner import (
     MIN_FULL,
     MIN_HEIGHT_FULL,
     MIN_MEDIUM,
@@ -15,8 +15,8 @@ from opaas_bench.cli.banner import (
     print_banner,
     status_lines,
 )
-from opaas_bench.cli.menu import Menu, MenuItem, choose, present
-from opaas_bench.cli.sprite import PALETTE, SURICATA, TAGLINE, render, render_svg
+from opaas.cli.menu import Menu, MenuItem, choose, present
+from opaas.cli.sprite import MASCOT, PALETTE, TAGLINE, render, render_svg
 
 
 def _plain(width: int) -> str:
@@ -38,27 +38,27 @@ def _sized(width: int, height: int | None) -> str:
 
 def test_every_row_has_the_same_width():
     """A short row shifts half the drawing with nothing warning you."""
-    assert len({len(row) for row in SURICATA}) == 1
+    assert len({len(row) for row in MASCOT}) == 1
 
 
 def test_the_grid_has_an_even_number_of_rows():
-    assert len(SURICATA) % 2 == 0
+    assert len(MASCOT) % 2 == 0
 
 
 def test_every_pixel_uses_a_known_colour():
-    used = {pixel for row in SURICATA for pixel in row} - {"."}
+    used = {pixel for row in MASCOT for pixel in row} - {"."}
     assert used <= set(PALETTE), f"undefined colours: {used - set(PALETTE)}"
 
 
 def test_no_palette_entry_is_dead_weight():
-    used = {pixel for row in SURICATA for pixel in row}
+    used = {pixel for row in MASCOT for pixel in row}
     assert set(PALETTE) <= used, f"colours defined and unused: {set(PALETTE) - used}"
 
 
 def test_the_sprite_renders_one_line_per_two_rows():
     lines = render()
-    assert len(lines) == len(SURICATA) // 2
-    assert all(len(line.plain) == len(SURICATA[0]) for line in lines)
+    assert len(lines) == len(MASCOT) // 2
+    assert all(len(line.plain) == len(MASCOT[0]) for line in lines)
 
 
 def test_transparent_pixels_paint_nothing():
@@ -80,7 +80,7 @@ def test_the_eye_highlight_survives_the_grid():
     """
     brightest = max(PALETTE, key=lambda letter: _luma(PALETTE[letter]))
     assert _luma(PALETTE[brightest]) > 240
-    assert sum(row.count(brightest) for row in SURICATA) == 1
+    assert sum(row.count(brightest) for row in MASCOT) == 1
 
 
 # ------------------------------------------------------------------ typeface
@@ -103,7 +103,7 @@ def test_the_font_renders_half_the_rows_as_lines():
     assert len(lines) == 4  # 7 rows rounded up to 8
 
 
-@pytest.mark.parametrize("letter", list("OPAAS-BENCH"))
+@pytest.mark.parametrize("letter", list("OPAAS"))
 def test_every_letter_of_the_title_has_ink(letter):
     assert any("#" in row for row in pixelfont.rasterize(letter))
 
@@ -120,20 +120,20 @@ def test_a_wide_terminal_uses_the_framed_layout():
 def test_a_medium_terminal_drops_the_frame():
     output = _plain(MIN_MEDIUM + 2)
     assert "┌" not in output
-    assert "opaas-bench" in output
+    assert "opaas" in output
 
 
 def test_a_narrow_terminal_stacks_everything():
     output = _plain(MIN_SPRITE)
-    line = next(line for line in output.splitlines() if "opaas-bench" in line)
-    assert line.strip() == "opaas-bench"
+    line = next(line for line in output.splitlines() if "opaas" in line)
+    assert line.strip() == "opaas"
 
 
 def test_a_terminal_narrower_than_the_sprite_drops_it():
     """Rather than crop the drawing, do not show it."""
     output = _sized(MIN_SPRITE - 1, 200)
     assert "▀" not in output and "▄" not in output
-    assert "opaas-bench" in output and SUBTITLE in output
+    assert "opaas" in output and SUBTITLE in output
 
 
 def test_a_short_terminal_drops_the_sprite_too():
@@ -186,7 +186,7 @@ def test_the_status_mentions_the_cache_location():
 def test_the_status_counts_sources_downloaded_inside_a_composition(monkeypatch):
     """A source used in a composition has no converted directory of its own, and
     the cover page was calling the data being evaluated 'not downloaded'."""
-    import opaas_bench.datasets as datasets
+    import opaas.datasets as datasets
 
     monkeypatch.setattr(datasets, "source_is_downloaded", lambda name: name == "ifeval")
     text = " ".join(message for _, message, _ in status_lines())
@@ -198,14 +198,14 @@ def test_the_status_counts_sources_downloaded_inside_a_composition(monkeypatch):
 
 
 def _with_classifiers_available(monkeypatch, *, cached):
-    import opaas_bench.classifiers as classifiers
+    import opaas.classifiers as classifiers
 
     monkeypatch.setattr(classifiers, "classifiers_available", lambda: True)
     monkeypatch.setattr(classifiers, "is_default_classifier_cached", lambda task: task in cached)
 
 
 def test_the_status_says_classifiers_are_unavailable_without_the_extra(monkeypatch):
-    import opaas_bench.classifiers as classifiers
+    import opaas.classifiers as classifiers
 
     monkeypatch.setattr(classifiers, "classifiers_available", lambda: False)
     text = " ".join(message for _, message, _ in status_lines())
@@ -234,10 +234,10 @@ def test_the_status_reports_which_default_classifiers_are_cached(monkeypatch):
 
 def test_the_committed_svg_matches_the_sprite():
     """The README SVG and the terminal drawing come from the same data."""
-    committed = Path(__file__).resolve().parents[1] / "docs" / "img" / "suricata.svg"
+    committed = Path(__file__).resolve().parents[1] / "docs" / "img" / "mascot.svg"
     assert committed.read_text(encoding="utf-8") == render_svg(), (
-        "regenera con: python -c \"import pathlib; from opaas_bench.cli.sprite import "
-        "render_svg; pathlib.Path('docs/img/suricata.svg').write_text(render_svg(), "
+        "regenera con: python -c \"import pathlib; from opaas.cli.sprite import "
+        "render_svg; pathlib.Path('docs/img/mascot.svg').write_text(render_svg(), "
         'encoding=\'utf-8\', newline=\'\')"'
     )
 
@@ -308,17 +308,17 @@ def test_unknown_keys_are_ignored():
 def _chooses(monkeypatch, *picks):
     """Feeds `present` a fixed sequence of choices, cancelling once they run out."""
     remaining = iter(picks)
-    monkeypatch.setattr("opaas_bench.cli.menu.choose", lambda *a, **k: next(remaining, None))
+    monkeypatch.setattr("opaas.cli.menu.choose", lambda *a, **k: next(remaining, None))
 
 
 def test_an_entry_with_a_command_prints_it_instead_of_running_anything(monkeypatch):
     """The menu teaches the CLI, it does not replace it."""
-    item = MenuItem("x", "Evaluate", command="opaas-bench run --model X")
+    item = MenuItem("x", "Evaluate", command="opaas run --model X")
     _chooses(monkeypatch, item)
     console = Console(width=80, no_color=True)
     with console.capture() as capture:
         present(console, [item])
-    assert "opaas-bench run --model X" in capture.get()
+    assert "opaas run --model X" in capture.get()
 
 
 def test_an_entry_with_an_action_executes_it(monkeypatch):
@@ -341,13 +341,13 @@ def test_quitting_does_nothing(monkeypatch):
 def test_the_menu_comes_back_after_each_entry(monkeypatch):
     executed = []
     action = MenuItem("x", "List", action=lambda: executed.append("action"))
-    command = MenuItem("y", "Evaluate", command="opaas-bench run --model X")
+    command = MenuItem("y", "Evaluate", command="opaas run --model X")
     _chooses(monkeypatch, action, command, action)
     console = Console(width=80, no_color=True)
     with console.capture() as capture:
         present(console, [action, command])
     assert executed == ["action", "action"]
-    assert "opaas-bench run --model X" in capture.get()
+    assert "opaas run --model X" in capture.get()
 
 
 def test_an_exit_entry_stops_the_menu(monkeypatch):

@@ -1,13 +1,13 @@
 # Block B datasets
 
-OPAAS-Bench **does not download datasets at run time**. A certificate says exactly what it was evaluated against, and that requires a hashed local artifact: if the content can change under our feet, the hash means nothing and the evaluation is not reproducible by a third party. On top of that, the typical on-prem customer has no internet access.
+OPAAS **does not download datasets at run time**. A certificate says exactly what it was evaluated against, and that requires a hashed local artifact: if the content can change under our feet, the hash means nothing and the evaluation is not reproducible by a third party. On top of that, the typical on-prem customer has no internet access.
 
 **The default is real**: `ifeval,xstest`, 960 items covering blocks B and D, downloaded on first use. An unconfigured run measures something real.
 
 The bundled `opaas-smoke` dataset is **only for validating the pipeline**: 40 trivial items marked with `syntheticSmoke: true`, which makes the report declare in `limitations` that its results are not a measurement and must not be certified.
 
 ```bash
-opaas-bench datasets
+opaas datasets
 ```
 
 ---
@@ -80,7 +80,7 @@ Available constraints:
 | `no_commas` | — | absence of commas |
 | `matches_regex` | `value`, `ignore_case` | regular expression |
 
-Adding a new constraint means adding a pure function to `src/opaas_bench/constraints.py` and registering it in `CHECKERS`.
+Adding a new constraint means adding a pure function to `src/opaas/constraints.py` and registering it in `CHECKERS`.
 
 ### `refusal` items (block D)
 
@@ -111,19 +111,19 @@ No third-party datasets are distributed here: each has its own license, and GPQA
 Just naming them is enough. The first run downloads them; later ones use the cache and do not touch the network.
 
 ```bash
-opaas-bench run --model my-model --backend vllm --suite capability --dataset ifeval
+opaas run --model my-model --backend vllm --suite capability --dataset ifeval
 ```
 
 Separated by commas they compose into a single dataset, which is what you want in order to issue a certificate: **one run, one report, one credential**. With two datasets you would need two runs and two certificates for the same deployment.
 
 ```bash
-opaas-bench run --model my-model --backend vllm --suite all --dataset ifeval,xstest
+opaas run --model my-model --backend vllm --suite all --dataset ifeval,xstest
 ```
 
 The order does not matter: `ifeval,xstest` and `xstest,ifeval` produce the same artifact and the same hash.
 
 ```bash
-opaas-bench datasets
+opaas datasets
 ```
 
 | Source | Block | License | Items |
@@ -131,22 +131,22 @@ opaas-bench datasets
 | `ifeval` | B | Apache-2.0 | 541 → 510 converted (94%) |
 | `xstest` | D | CC-BY-4.0 | 450 (250 benign + 200 harmful) |
 
-A composition is cached as a **single dataset** (`ifeval+xstest`), because that is what the run evaluates and its hash is what goes in the report. `opaas-bench datasets` lists it under *Datasets built in the cache*, and marks each source as `cached (in a composition)`: the file is downloaded and verified, it simply has no converted directory of its own.
+A composition is cached as a **single dataset** (`ifeval+xstest`), because that is what the run evaluates and its hash is what goes in the report. `opaas datasets` lists it under *Datasets built in the cache*, and marks each source as `cached (in a composition)`: the file is downloaded and verified, it simply has no converted directory of its own.
 
-**What is downloaded is verified against a pinned hash.** If the source file changes, the run stops with both hashes on screen instead of certifying against something else. It may be a legitimate new version: review it and update the hash in [`datasets/sources.py`](../src/opaas_bench/datasets/sources.py).
+**What is downloaded is verified against a pinned hash.** If the source file changes, the run stops with both hashes on screen instead of certifying against something else. It may be a legitimate new version: review it and update the hash in [`datasets/sources.py`](../src/opaas/datasets/sources.py).
 
 From IFEval, 31 items are discarded, all of them `language:response_language`: checking the response's language would require an automatic identifier, and its version would become part of the result. **An item whose constraints cannot all be checked is discarded whole**; scoring it while checking only part would give an inflated score.
 
 ### Without internet access
 
-The cache lives in `~/.opaas-bench/cache` (or `$OPAAS_CACHE_DIR`). For an air-gapped machine: populate it on a connected one, copy the directory, and run with `--offline`.
+The cache lives in `~/.opaas/cache` (or `$OPAAS_CACHE_DIR`). For an air-gapped machine: populate it on a connected one, copy the directory, and run with `--offline`.
 
 ```bash
-opaas-bench fetch
+opaas fetch
 ```
 
 ```bash
-opaas-bench run --model my-model --backend vllm --suite all --dataset ifeval --offline
+opaas run --model my-model --backend vllm --suite all --dataset ifeval --offline
 ```
 
 With `--offline` no download is attempted: if something is missing, it fails saying what and how to get it, before loading the model.
@@ -156,7 +156,7 @@ With `--offline` no download is attempted: if something is missing, it fails say
 Here is the differentiator the design asked for. An on-prem deployment cares far more about whether the model **makes things up about its internal documentation** than about whether it gets a Wikipedia passage right. You write a dataset with your passages in the `grounded_qa` format above and compose it with the public sources:
 
 ```bash
-opaas-bench run --model my-model --backend vllm --suite all --dataset ifeval,xstest,/data/internal-documentation
+opaas run --model my-model --backend vllm --suite all --dataset ifeval,xstest,/data/internal-documentation
 ```
 
 Your documents never leave your network: only the metrics and the dataset hash are published, never its content. Each part's license accumulates in the manifest, and if any of them is a smoke set the whole thing is flagged as such.
@@ -168,11 +168,11 @@ Two tasks with the same name make the composition fail before anything is writte
 If you prefer to control the subset, or to combine several sources into a single dataset covering blocks B and D in one run:
 
 ```bash
-opaas-bench import ifeval --input ifeval_input_data.jsonl --out /data/eval --limit 300
+opaas import ifeval --input ifeval_input_data.jsonl --out /data/eval --limit 300
 ```
 
 ```bash
-opaas-bench import xstest --input xstest_prompts.csv --out /data/eval --limit 300 --append
+opaas import xstest --input xstest_prompts.csv --out /data/eval --limit 300 --append
 ```
 
 | Dataset | License | Items | Converted |
@@ -189,7 +189,7 @@ From IFEval, 31 items are discarded, all of them `language:response_language`: c
 3. Keep it outside the repository and point at it:
 
 ```bash
-opaas-bench run --model my-model --backend vllm --suite capability --dataset /data/mmlu-pro-subset
+opaas run --model my-model --backend vllm --suite capability --dataset /data/mmlu-pro-subset
 ```
 
 ### Sampling

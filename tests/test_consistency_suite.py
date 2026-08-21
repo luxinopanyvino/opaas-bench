@@ -1,6 +1,6 @@
 import itertools
 
-from opaas_bench.suites.consistency import (
+from opaas.suites.consistency import (
     ConsistencySuite,
     _canary_prompt,
     _first_divergence,

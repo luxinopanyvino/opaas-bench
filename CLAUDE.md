@@ -4,7 +4,7 @@ Guidance for AI assistants working in this repository.
 
 ## What this project is
 
-**OPAAS-Bench** (On-Prem AI Audit Suite, by onpremIALabs) evaluates an LLM **deployment**
+**OPAAS** (On-Prem AI Audit Suite, by onpremIALabs) evaluates an LLM **deployment**
 that is already running — it never deploys or downloads the model under evaluation — and
 turns the result into a signed, third-party-verifiable digital certificate.
 
@@ -47,7 +47,7 @@ Most are recorded, with what each one costs, in [`docs/decisions.md`](docs/decis
    outside the interoperably canonicalizable range raise rather than get signed (D5). Do not
    substitute `json.dumps(sort_keys=True)`.
 6. **`verify` never takes the public key from the credential.** Resolution order is
-   `--key`/`--did-document` → `~/.opaas-bench/anchors/` (or `$OPAAS_ANCHOR_DIR`) → anchors
+   `--key`/`--did-document` → `~/.opaas/anchors/` (or `$OPAAS_ANCHOR_DIR`) → anchors
    bundled with the tool; if none, it fails saying what is missing (D4).
 7. **External artifacts are pinned.** Datasets carry a SHA-256 verified at registration
    (`datasets/sources.py`); default classifiers carry a full commit revision, never a tag
@@ -74,8 +74,8 @@ Most are recorded, with what each one costs, in [`docs/decisions.md`](docs/decis
 ## Layout
 
 ```
-src/opaas_bench/
-├── __init__.py         __version__ + OPAAS_BENCH_SPEC_VERSION (methodology version)
+src/opaas/
+├── __init__.py         __version__ + OPAAS_SPEC_VERSION (methodology version)
 ├── canonical.py        RFC 8785 JCS serialization — everything signed passes through here
 ├── hashing.py          config/weights/file hashes, run ids (YYYYMMDD-NNN), slugify
 ├── report.py           Pydantic report models, canonical write, content_hash
@@ -102,7 +102,7 @@ src/opaas_bench/
 docs/     design.md, methodology.md, decisions.md, datasets.md, key-custody.md,
           self-evaluation.md, implementation-plan.md, mitigation-plan.md
 tests/    556 tests, one file per module, plus conftest.py with the fake backends
-scripts/  sprite_from_png.py — regenerates cli/_sprite_data.py from docs/img/suricata.png
+scripts/  sprite_from_png.py — regenerates cli/_sprite_data.py from docs/img/mascot.png
 web/      README describing the published site layout (the generator lives in src/)
 ```
 
@@ -210,7 +210,7 @@ what was dropped, and why, is recorded in `Task.excluded`.
 commit SHA resolved by hand, the license, and minimal `allow_patterns`. Add the matching
 profile in `classifiers/base.py::PROFILES` and calibration cases if the task is new.
 
-**Cache layout** (rooted at `$OPAAS_CACHE_DIR` or `~/.opaas-bench/cache`):
+**Cache layout** (rooted at `$OPAAS_CACHE_DIR` or `~/.opaas/cache`):
 `sources/<source>/<file>` raw verified download, `datasets/<source>/` converted,
 `classifiers/<task>/` pinned weights. `--offline` forbids every network fetch and fails
 naming what is missing, rather than breaking mid-evaluation.
@@ -219,8 +219,8 @@ naming what is missing, rather than breaking mid-evaluation.
 
 | Variable | Effect |
 |---|---|
-| `OPAAS_CACHE_DIR` | Overrides `~/.opaas-bench/cache` (datasets, sources, classifiers) |
-| `OPAAS_ANCHOR_DIR` | Overrides `~/.opaas-bench/anchors` for `verify` trust anchors |
+| `OPAAS_CACHE_DIR` | Overrides `~/.opaas/cache` (datasets, sources, classifiers) |
+| `OPAAS_ANCHOR_DIR` | Overrides `~/.opaas/anchors` for `verify` trust anchors |
 | `OPAAS_KEY_PASSPHRASE` | Non-interactive passphrase for `keygen`/`sign` |
 
 ## Documentation duties
@@ -233,8 +233,8 @@ naming what is missing, rather than breaking mid-evaluation.
   with what the suites actually compute.
 - `README.md` is organized around what a user actually runs. Update the command reference,
   the `run` options table, and the "What is not measured" section when behaviour changes.
-- `src/opaas_bench/cli/_sprite_data.py` is generated — regenerate with
-  `python scripts/sprite_from_png.py docs/img/suricata.png` (needs pillow + numpy, dev extra)
+- `src/opaas/cli/_sprite_data.py` is generated — regenerate with
+  `python scripts/sprite_from_png.py docs/img/mascot.png` (needs pillow + numpy, dev extra)
   and never hand-edit it; `tests/test_sprite_matches_png.py` re-reads the PNG and will catch
   a manual touch-up.
 - `.gitattributes` forces LF on `*.jsonl`, `*.json`, `*.py`, `*.md`, `*.toml`, `*.yml`

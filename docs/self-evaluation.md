@@ -11,7 +11,7 @@ This document says how to do it and, more importantly, **what onpremIALabs can a
 **1. You run the evaluation in your environment.**
 
 ```bash
-opaas-bench run --model <your-model> --backend vllm --base-url http://your-gpu:8000/v1 --suite all --dataset ifeval --declaration declaration.json --quantization "<yours>" --weights-path /models/your-model --output report.json
+opaas run --model <your-model> --backend vllm --base-url http://your-gpu:8000/v1 --suite all --dataset ifeval --declaration declaration.json --quantization "<yours>" --weights-path /models/your-model --output report.json
 ```
 
 `--weights-path` matters: it hashes the weights artifact. Without it, the certificate cannot state *which* model was evaluated, only what it was called.
@@ -21,13 +21,13 @@ opaas-bench run --model <your-model> --backend vllm --base-url http://your-gpu:8
 **3. We verify what is verifiable, sign and publish.**
 
 ```bash
-opaas-bench sign --input report.json --key <root-key> --out credential.json --log ledger.jsonl
+opaas sign --input report.json --key <root-key> --out credential.json --log ledger.jsonl
 ```
 
 **4. You verify, and so can anyone, without depending on us.**
 
 ```bash
-opaas-bench verify --credential credential.json --report report.json --log ledger.jsonl
+opaas verify --credential credential.json --report report.json --log ledger.jsonl
 ```
 
 ---
@@ -72,7 +72,7 @@ That is why `configuration.configHash` and `model.weightsHash` are in the creden
 The whole harness is MIT and published. Anyone can repeat the evaluation:
 
 ```bash
-opaas-bench verify --credential credential.json --report report.json
+opaas verify --credential credential.json --report report.json
 ```
 
 ```bash
@@ -82,7 +82,7 @@ sha256sum report.json
 And compare your deployment against other configurations, or against a cloud reference for the same model:
 
 ```bash
-opaas-bench compare --report report.json --report cloud-baseline.json
+opaas compare --report report.json --report cloud-baseline.json
 ```
 
 If you repeat the run and get different figures from the certified ones, that is not necessarily fraud: the report declares its sources of variance — determinism, sampling, hardware — and the comparator will tell you whether the difference is statistically supportable or noise.

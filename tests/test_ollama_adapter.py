@@ -3,9 +3,9 @@ import json
 import httpx
 import pytest
 
-from opaas_bench.adapters import get_backend
-from opaas_bench.adapters.base import BackendError
-from opaas_bench.adapters.ollama import OllamaBackend
+from opaas.adapters import get_backend
+from opaas.adapters.base import BackendError
+from opaas.adapters.ollama import OllamaBackend
 
 MODEL = "llama3.3:70b"
 

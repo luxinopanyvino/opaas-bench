@@ -1,4 +1,4 @@
-# OPAAS-Bench — On-Prem AI Audit Suite
+# OPAAS — On-Prem AI Audit Suite
 ### Evaluation and digital credential system for on-prem LLM models — onpremIALabs
 
 ---
@@ -34,7 +34,7 @@ A format based on W3C Verifiable Credentials, designed to be verifiable without 
     },
     "evalRun": {
       "runId": "20260806-001",
-      "opaasBenchVersion": "1.0",
+      "opaasVersion": "1.0",
       "reportUrl": "https://onpremialabs.com/reports/20260806-001",
       "status": "evaluated"
     }
@@ -63,7 +63,7 @@ Expiry (6 months suggested) forces re-certification — important because the sa
 
 ---
 
-## 2. OPAAS-Bench parameters
+## 2. OPAAS parameters
 
 ### A. Performance
 - Throughput: tokens/second (prompt processing + generation, separately)
@@ -100,7 +100,7 @@ Expiry (6 months suggested) forces re-certification — important because the sa
 
 ## 2bis. Engine-agnostic inference architecture
 
-OPAAS-Bench does not talk directly to each engine — it uses a common interface (`InferenceBackend`) and each engine implements its own adapter. That way modules A–E run the same regardless of the backend.
+OPAAS does not talk directly to each engine — it uses a common interface (`InferenceBackend`) and each engine implements its own adapter. That way modules A–E run the same regardless of the backend.
 
 ```python
 class InferenceBackend(ABC):
@@ -135,7 +135,7 @@ The backend used is recorded in `configuration.backend` inside the credential (s
 
 ```
 1. Model + config selection → hash of both
-2. OPAAS-Bench execution (harness over lm-evaluation-harness / Inspect AI + our own A-E modules)
+2. OPAAS execution (harness over lm-evaluation-harness / Inspect AI + our own A-E modules)
 3. Aggregation of results into a per-category structured report (no aggregate score, for now)
 4. Generation of a signed VC credential (onpremIALabs Ed25519 key)
 5. Publication: certificate page + badge + entry in a public registry (Certificate Transparency-style log)

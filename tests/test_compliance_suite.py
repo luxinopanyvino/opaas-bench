@@ -2,14 +2,14 @@ import json
 
 import pytest
 
-from opaas_bench.declaration import (
+from opaas.declaration import (
     DECLARED_REQUIREMENTS,
     DeclarationError,
     load_declaration,
     template,
 )
-from opaas_bench.suites.compliance import ComplianceSuite
-from opaas_bench.telemetry.network import EXTERNAL, LOOPBACK, PRIVATE, classify
+from opaas.suites.compliance import ComplianceSuite
+from opaas.telemetry.network import EXTERNAL, LOOPBACK, PRIVATE, classify
 
 from .conftest import ScriptedBackend
 
@@ -88,7 +88,7 @@ def test_the_suggested_command_is_one_that_exists():
     was never implemented: following the report's own advice failed."""
     from typer.testing import CliRunner
 
-    from opaas_bench.cli.main import app
+    from opaas.cli.main import app
 
     advice = next(lim for lim in _run().limitations if "No compliance declaration" in lim)
     assert "--template" not in advice

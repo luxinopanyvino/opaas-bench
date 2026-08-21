@@ -1,6 +1,6 @@
 import pytest
 
-from opaas_bench.constraints import CHECKERS, ConstraintError, check, check_all
+from opaas.constraints import CHECKERS, ConstraintError, check, check_all
 
 
 def _check(kind, text, **params):

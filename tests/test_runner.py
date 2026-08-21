@@ -3,9 +3,9 @@ from pathlib import Path
 
 import pytest
 
-from opaas_bench.adapters import register_backend
-from opaas_bench.hashing import file_digest
-from opaas_bench.runner import RunRequest, _publishable_config, execute
+from opaas.adapters import register_backend
+from opaas.hashing import file_digest
+from opaas.runner import RunRequest, _publishable_config, execute
 
 from .conftest import FakeBackend
 
@@ -81,7 +81,7 @@ def test_an_implemented_but_unrequested_block_still_counts_as_not_evaluated(tmp_
 
 def test_a_planned_but_unimplemented_block_is_labelled_differently(monkeypatch):
     """If a block is ever designed before being implemented, it is distinguished."""
-    from opaas_bench import suites
+    from opaas import suites
 
     monkeypatch.setitem(
         suites.PLANNED_SUITES,
@@ -126,7 +126,7 @@ def test_backend_is_closed_after_run(tmp_path, monkeypatch):
         created.append(backend)
         return backend
 
-    monkeypatch.setattr("opaas_bench.runner.get_backend", lambda name: _factory())
+    monkeypatch.setattr("opaas.runner.get_backend", lambda name: _factory())
     execute(_request(tmp_path))
     assert created[0].closed is True
 

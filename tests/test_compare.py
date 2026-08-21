@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from opaas_bench.compare import ComparisonError, compare, load_reports
+from opaas.compare import ComparisonError, compare, load_reports
 
 
 def _report(tmp_path, name, *, quantization, accuracy, hardware="1x RTX 4090 24GB", **overrides):
@@ -66,7 +66,7 @@ def test_a_file_that_is_not_a_report_is_rejected(tmp_path):
     bad = tmp_path / "whatever.json"
     bad.write_text(json.dumps({"hello": 1}), encoding="utf-8")
     good = _report(tmp_path, "a", quantization="FP16", accuracy=(0.8, 0.75, 200, 0.85))
-    with pytest.raises(ComparisonError, match="does not look like an OPAAS-Bench report"):
+    with pytest.raises(ComparisonError, match="does not look like an OPAAS report"):
         load_reports([good, bad])
 
 

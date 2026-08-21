@@ -2,9 +2,9 @@ import json
 
 import pytest
 
-from opaas_bench.constraints import check_all
-from opaas_bench.datasets import load_dataset
-from opaas_bench.datasets.importers import (
+from opaas.constraints import check_all
+from opaas.datasets import load_dataset
+from opaas.datasets.importers import (
     ImporterError,
     available_importers,
     ifeval,
@@ -145,7 +145,7 @@ def test_a_source_imported_whole_says_so(tmp_path):
 
 
 def test_the_exclusions_reach_the_report_as_a_limitation(tmp_path):
-    from opaas_bench.datasets import exclusion_limitations
+    from opaas.datasets import exclusion_limitations
 
     result = import_dataset("ifeval", _write_ifeval(tmp_path), tmp_path / "out")
     dataset = load_dataset(str(result.dataset_dir))
@@ -160,7 +160,7 @@ def test_only_the_tasks_a_block_scored_are_declared():
     """Blocks B and D share one composed dataset. Handed the whole dataset, each
     block declared the other's exclusions as if they were its own, and the same
     limitation reached the report twice."""
-    from opaas_bench.datasets import Task, exclusion_limitations
+    from opaas.datasets import Task, exclusion_limitations
 
     instructions = Task(
         name="ifeval",

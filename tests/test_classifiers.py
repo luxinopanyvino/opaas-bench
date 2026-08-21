@@ -3,15 +3,15 @@ from types import SimpleNamespace
 
 import pytest
 
-from opaas_bench.classifiers import (
+from opaas.classifiers import (
     ClassifierError,
     available_profiles,
     describe_missing,
     resolve_profile,
     validate_model_dir,
 )
-from opaas_bench.classifiers.base import ClassifierMetadata
-from opaas_bench.classifiers.transformers_backend import (
+from opaas.classifiers.base import ClassifierMetadata
+from opaas.classifiers.transformers_backend import (
     SequenceClassifier,
     _resolve_activation,
     _resolve_labels,
@@ -188,7 +188,7 @@ def test_describe_missing_states_the_reason():
 def test_load_classifier_without_transformers_is_actionable(tmp_path, monkeypatch):
     """Without torch installed, the message says how to install it, not a raw ImportError."""
     (tmp_path / "config.json").write_text("{}", encoding="utf-8")
-    import opaas_bench.classifiers.transformers_backend as backend
+    import opaas.classifiers.transformers_backend as backend
 
     def _boom():
         raise ClassifierError(

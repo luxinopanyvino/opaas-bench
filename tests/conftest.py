@@ -5,7 +5,7 @@ from typing import Any, ClassVar
 
 import pytest
 
-from opaas_bench.adapters.base import GenerationResult, InferenceBackend, ResourceMetrics
+from opaas.adapters.base import GenerationResult, InferenceBackend, ResourceMetrics
 
 
 class FakeBackend(InferenceBackend):
@@ -115,7 +115,7 @@ def _no_classifier_extra(monkeypatch):
     installed: the same test then passes in CI and fails on a developer's
     machine. Tests that exercise the default opt in by patching this back.
     """
-    import opaas_bench.suites.safety as safety_module
+    import opaas.suites.safety as safety_module
 
     monkeypatch.setattr(safety_module, "classifiers_available", lambda: False)
 
@@ -123,7 +123,7 @@ def _no_classifier_extra(monkeypatch):
 @pytest.fixture(autouse=True)
 def _isolate_registries():
     """The registries are global: a test that registers a backend must not leak it."""
-    from opaas_bench import adapters, suites
+    from opaas import adapters, suites
 
     backends = dict(adapters._REGISTRY)
     suite_registry = dict(suites._REGISTRY)

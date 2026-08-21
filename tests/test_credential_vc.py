@@ -3,7 +3,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from opaas_bench.credential import (
+from opaas.credential import (
     CredentialError,
     TrustAnchorError,
     build_credential,
@@ -21,7 +21,7 @@ KEY_ID = f"{ISSUER}#key-1"
 
 REPORT = {
     "runId": "20260806-001",
-    "opaasBenchVersion": "1.0-draft",
+    "opaasVersion": "1.0-draft",
     "status": "evaluated-partial",
     "model": {
         "name": "Llama-3.3-70B-Instruct",

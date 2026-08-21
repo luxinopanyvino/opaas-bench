@@ -1,4 +1,4 @@
-# Implementation plan — OPAAS-Bench
+# Implementation plan — OPAAS
 ### onpremIALabs
 
 This plan assumes solo development (or a small team) alongside a full-time job, so it is phased to deliver usable value as early as possible instead of building the whole system before shipping anything.
@@ -17,7 +17,7 @@ This plan assumes solo development (or a small team) alongside a full-time job, 
 **Goal: validate the architecture before investing in coverage**
 - Implement the abstract `InferenceBackend` class
 - Adapter 1: **vLLM** (OpenAI-compatible API, the most direct)
-- Minimal CLI: `opaas-bench run --model <id> --backend vllm --suite performance`
+- Minimal CLI: `opaas run --model <id> --backend vllm --suite performance`
 - Output: structured JSON with raw metrics, publishing nothing yet
 
 **Phase exit criterion:** one complete end-to-end run, against a real model, with reproducible results.
@@ -40,14 +40,14 @@ This plan assumes solo development (or a small team) alongside a full-time job, 
 - **D (Behavior and safety):** integrate Inspect AI for RAGAS (hallucination), XSTest (over-refusal), a reduced jailbreak subset, RealToxicityPrompts
 - **E (Compliance readiness):** audited checklist (not executable) + detection of external network calls during the run (`mitmproxy`/`tcpdump`) to verify air-gapped operation
 
-**Phase exit criterion:** `opaas-bench run --suite all` generates a complete per-category report for at least one model on at least two backends.
+**Phase exit criterion:** `opaas run --suite all` generates a complete per-category report for at least one model on at least two backends.
 
 ---
 
 ## Phase 4 — Digital credential
 - Implement credential generation following the already-designed VC schema (section 1 of the design document)
 - Signing with the root Ed25519 key
-- `opaas-bench sign --run-id <id>` command
+- `opaas sign --run-id <id>` command
 - Standalone verifier (script or library) that anyone can use to validate a credential without depending on your infrastructure
 
 ---
@@ -55,7 +55,7 @@ This plan assumes solo development (or a small team) alongside a full-time job, 
 ## Phase 5 — Web publication (onpremialabs.com)
 - Individual certificate page (methodology, per-category report, hash, "verify signature" button)
 - Public listing/registry of issued certificates
-- `opaas-bench publish --run-id <id>` command that uploads the result
+- `opaas publish --run-id <id>` command that uploads the result
 - Embeddable badge (SVG or image) with a verification link
 
 ---

@@ -4,8 +4,8 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
-from opaas_bench.adapters import register_backend
-from opaas_bench.cli.main import app
+from opaas.adapters import register_backend
+from opaas.cli.main import app
 
 from .conftest import FakeBackend
 
@@ -54,7 +54,7 @@ def _run(tmp_path, *extra):
 def test_version_reports_tool_and_methodology():
     result = runner.invoke(app, ["version"])
     assert result.exit_code == 0
-    assert "opaas-bench" in result.output
+    assert "opaas" in result.output
     assert "methodology" in result.output
 
 
@@ -356,7 +356,7 @@ def test_verify_accepts_a_did_document(tmp_path):
 def test_fetch_lists_classifiers_among_the_available_sources(monkeypatch):
     """With the extra installed, 'toxicity'/'faithfulness' are valid `fetch`
     arguments, listed alongside the dataset sources."""
-    import opaas_bench.cli.main as main_module
+    import opaas.cli.main as main_module
 
     monkeypatch.setattr(main_module, "classifiers_available", lambda: True)
     result = runner.invoke(app, ["fetch", "made-up-source"])
@@ -366,7 +366,7 @@ def test_fetch_lists_classifiers_among_the_available_sources(monkeypatch):
 
 
 def test_fetch_downloads_a_named_classifier(monkeypatch):
-    import opaas_bench.cli.main as main_module
+    import opaas.cli.main as main_module
 
     calls: list = []
     monkeypatch.setattr(main_module, "is_default_classifier_cached", lambda task: False)
@@ -382,7 +382,7 @@ def test_fetch_downloads_a_named_classifier(monkeypatch):
 
 
 def test_fetch_does_not_redownload_an_already_cached_classifier(monkeypatch):
-    import opaas_bench.cli.main as main_module
+    import opaas.cli.main as main_module
 
     monkeypatch.setattr(main_module, "is_default_classifier_cached", lambda task: True)
     monkeypatch.setattr(
@@ -398,7 +398,7 @@ def test_fetch_does_not_redownload_an_already_cached_classifier(monkeypatch):
 def test_fetch_with_no_argument_leaves_classifiers_alone_without_the_extra(monkeypatch):
     """A plain dataset-only install should not suddenly pull the classifier
     weights just because `fetch` ran with no argument."""
-    import opaas_bench.cli.main as main_module
+    import opaas.cli.main as main_module
 
     monkeypatch.setattr(main_module, "classifiers_available", lambda: False)
     monkeypatch.setattr(main_module, "is_cached", lambda name: True)
@@ -414,7 +414,7 @@ def test_fetch_with_no_argument_leaves_classifiers_alone_without_the_extra(monke
 def test_limit_is_refused_on_a_classifier_instead_of_silently_ignored(monkeypatch):
     """--limit trims a dataset's items; a classifier has none. Accepting the
     flag and doing nothing is the silent no-op this tool exists to catch."""
-    import opaas_bench.cli.main as main_module
+    import opaas.cli.main as main_module
 
     monkeypatch.setattr(
         main_module,
@@ -427,7 +427,7 @@ def test_limit_is_refused_on_a_classifier_instead_of_silently_ignored(monkeypatc
 
 
 def test_limit_with_everything_says_which_half_it_applies_to(monkeypatch):
-    import opaas_bench.cli.main as main_module
+    import opaas.cli.main as main_module
 
     monkeypatch.setattr(main_module, "classifiers_available", lambda: True)
     monkeypatch.setattr(main_module, "is_cached", lambda name: True)
@@ -438,8 +438,8 @@ def test_limit_with_everything_says_which_half_it_applies_to(monkeypatch):
 
 
 def test_fetch_reports_a_classifier_download_failure(monkeypatch):
-    import opaas_bench.cli.main as main_module
-    from opaas_bench.classifiers import ClassifierError
+    import opaas.cli.main as main_module
+    from opaas.classifiers import ClassifierError
 
     def _boom(task, **kwargs):
         raise ClassifierError("network unreachable")
@@ -452,25 +452,25 @@ def test_fetch_reports_a_classifier_download_failure(monkeypatch):
 
 
 def test_a_classifier_error_keeps_its_install_hint_intact(monkeypatch):
-    """The hint names 'opaas-bench[classifiers]'. Unescaped, Rich reads that
+    """The hint names 'opaas[classifiers]'. Unescaped, Rich reads that
     bracket as a style tag and swallows the part that says what to install."""
-    import opaas_bench.cli.main as main_module
-    from opaas_bench.classifiers import ClassifierError
+    import opaas.cli.main as main_module
+    from opaas.classifiers import ClassifierError
 
     def _boom(task, **kwargs):
-        raise ClassifierError("huggingface-hub is missing: pip install 'opaas-bench[classifiers]'")
+        raise ClassifierError("huggingface-hub is missing: pip install 'opaas[classifiers]'")
 
     monkeypatch.setattr(main_module, "is_default_classifier_cached", lambda task: False)
     monkeypatch.setattr(main_module, "ensure_default_classifier", _boom)
     result = runner.invoke(app, ["fetch", "toxicity"])
-    assert "opaas-bench[classifiers]" in _flat(result.output)
+    assert "opaas[classifiers]" in _flat(result.output)
 
 
 # ---------------------------------------------------------------- datasets
 
 
 def test_datasets_lists_the_pinned_classifiers_when_the_extra_is_installed(monkeypatch):
-    import opaas_bench.cli.main as main_module
+    import opaas.cli.main as main_module
 
     monkeypatch.setattr(main_module, "classifiers_available", lambda: True)
     monkeypatch.setattr(
@@ -485,10 +485,10 @@ def test_datasets_lists_the_pinned_classifiers_when_the_extra_is_installed(monke
 
 
 def test_datasets_says_how_to_install_the_extra_when_it_is_missing(monkeypatch):
-    import opaas_bench.cli.main as main_module
+    import opaas.cli.main as main_module
 
     monkeypatch.setattr(main_module, "classifiers_available", lambda: False)
     result = runner.invoke(app, ["datasets"])
 
     assert result.exit_code == 0, result.output
-    assert "opaas-bench[classifiers]" in _flat(result.output)
+    assert "opaas[classifiers]" in _flat(result.output)

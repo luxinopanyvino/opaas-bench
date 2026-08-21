@@ -5,7 +5,7 @@ The root Ed25519 private key is the system's only secret. Every credential is si
 ## Generation
 
 ```bash
-opaas-bench keygen --out keys --passphrase "<long passphrase>"
+opaas keygen --out keys --passphrase "<long passphrase>"
 ```
 
 It produces three files:
@@ -23,15 +23,15 @@ It produces three files:
 1. **Generate it on a trusted machine**, preferably offline, not in CI and not on a production server.
 2. **Always with a passphrase.** An unencrypted key on disk is a key compromised the moment the machine is.
 3. **Two backups on different media in different locations** (for example, two encrypted devices). The passphrase is kept separately from the key.
-4. **The key does not travel**: signing happens where the key lives. `opaas-bench sign` (Phase 4) receives the report, not the other way round.
+4. **The key does not travel**: signing happens where the key lives. `opaas sign` (Phase 4) receives the report, not the other way round.
 5. **Usage log**: every issued credential records the signed `runId` and `reportHash`, so it is possible to audit what was signed and when.
 
 ## Public key distribution
 
-For `opaas-bench verify` to work without a network, the verifier needs the key beforehand. Three routes, from most to least convenient for them:
+For `opaas verify` to work without a network, the verifier needs the key beforehand. Three routes, from most to least convenient for them:
 
-1. **Bundled anchor**: the `did.json` is included in the OPAAS-Bench package (`credential/anchors/`). It works out of the box. Empty until the production key exists.
-2. **Installed anchor**: the verifier copies `did.json` into `~/.opaas-bench/anchors/` once.
+1. **Bundled anchor**: the `did.json` is included in the OPAAS package (`credential/anchors/`). It works out of the box. Empty until the production key exists.
+2. **Installed anchor**: the verifier copies `did.json` into `~/.opaas/anchors/` once.
 3. **Explicit**: `--did-document did.json` or `--key opaas-root-ed25519.pub.pem` on every verification.
 
 The key is never distributed inside the credential: a credential that carries its own key verifies itself.
