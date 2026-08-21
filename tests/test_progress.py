@@ -13,11 +13,11 @@ import re
 import pytest
 from rich.console import Console
 
-from opaas_bench.adapters import register_backend
-from opaas_bench.cli import main
-from opaas_bench.runner import RunEvent, RunRequest, execute, format_elapsed
-from opaas_bench.suites import register_suite
-from opaas_bench.suites.base import Suite
+from opaas.adapters import register_backend
+from opaas.cli import main
+from opaas.runner import RunEvent, RunRequest, execute, format_elapsed
+from opaas.suites import register_suite
+from opaas.suites.base import Suite
 
 from .conftest import FakeBackend
 

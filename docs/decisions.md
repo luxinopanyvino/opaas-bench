@@ -6,7 +6,7 @@ A log of decisions that depart from the original design document or that settle 
 
 ## D1 — The signature uses `eddsa-jcs-2022`, not `Ed25519Signature2020`
 
-**Status:** applied · **Affects:** [`credential/vc.py`](../src/opaas_bench/credential/vc.py)
+**Status:** applied · **Affects:** [`credential/vc.py`](../src/opaas/credential/vc.py)
 
 The design proposed `Ed25519Signature2020`. That suite computes the signature over the **RDF** canonicalization (URDNA2015) of the JSON-LD document, which forces any verifier to bring in a full JSON-LD processor and to resolve the `@context` contexts — potentially over the network, exactly what we do not want in an air-gapped environment.
 
@@ -16,7 +16,7 @@ The design proposed `Ed25519Signature2020`. That suite computes the signature ov
 
 ## D2 — The certified hash is the hash of the file's bytes
 
-**Status:** applied · **Affects:** [`report.py`](../src/opaas_bench/report.py), [`hashing.py`](../src/opaas_bench/hashing.py)
+**Status:** applied · **Affects:** [`report.py`](../src/opaas/report.py), [`hashing.py`](../src/opaas/hashing.py)
 
 First version: `report.json` contained `{"report": {...}, "reportHash": "..."}`, with the hash computed over the re-serialized `report` subtree. That forces the verifier to replicate our canonicalization exactly just to check anything.
 
@@ -24,7 +24,7 @@ Now the file contains the report **and nothing else**, written in canonical JCS 
 
 ## D3 — Block coverage travels inside the credential
 
-**Status:** applied · **Affects:** [`suites/__init__.py`](../src/opaas_bench/suites/__init__.py), [`credential/vc.py`](../src/opaas_bench/credential/vc.py)
+**Status:** applied · **Affects:** [`suites/__init__.py`](../src/opaas/suites/__init__.py), [`credential/vc.py`](../src/opaas/credential/vc.py)
 
 While blocks B–E are not implemented, a run covers only block A. A credential saying `status: "evaluated"` would be indistinguishable from one that passed all five blocks — exactly the misleading claim this project exists to prevent.
 
@@ -32,9 +32,9 @@ The report carries `coverage` (`blocksEvaluated`, `blocksMissing`, `complete`) a
 
 ## D4 — `verify` never takes the key from the credential
 
-**Status:** applied · **Affects:** [`credential/trust.py`](../src/opaas_bench/credential/trust.py)
+**Status:** applied · **Affects:** [`credential/trust.py`](../src/opaas/credential/trust.py)
 
-Verifying offline requires having the issuer's public key beforehand. Resolution, in order: explicit `--key` / `--did-document` → anchors installed in `~/.opaas-bench/anchors/` (or `$OPAAS_ANCHOR_DIR`) → anchors bundled with the tool.
+Verifying offline requires having the issuer's public key beforehand. Resolution, in order: explicit `--key` / `--did-document` → anchors installed in `~/.opaas/anchors/` (or `$OPAAS_ANCHOR_DIR`) → anchors bundled with the tool.
 
 If there is none, it fails saying what is missing. It never uses a key embedded in the credential itself: that would make it self-verifying and the signature would prove nothing.
 
@@ -42,7 +42,7 @@ The bundled anchors directory is **empty** until the production root key exists,
 
 ## D5 — Numbers outside the canonicalizable range fail instead of being signed
 
-**Status:** applied · **Affects:** [`canonical.py`](../src/opaas_bench/canonical.py)
+**Status:** applied · **Affects:** [`canonical.py`](../src/opaas/canonical.py)
 
 JCS delegates number serialization to ECMAScript, whose exponential notation rules we do not fully replicate. For |x| ≥ 1e21 or |x| < 1e-6 a `CanonicalizationError` is raised instead of emitting bytes another language could reproduce differently.
 
@@ -52,7 +52,7 @@ Signing non-reproducible bytes produces a credential nobody can verify and that 
 
 ## D25 — Without the chat template you are not measuring instruction following
 
-**Status:** applied · **Fixes:** a mistake of our own in both adapters · **Affects:** [`adapters/`](../src/opaas_bench/adapters)
+**Status:** applied · **Fixes:** a mistake of our own in both adapters · **Affects:** [`adapters/`](../src/opaas/adapters)
 
 The Ollama adapter used `raw: true` and the OpenAI-compatible one `/v1/completions` by default. Both **skip the model's chat template**. I chose that so the template would not pollute block A's throughput measurement, and it was an optimization of block A at the expense of every other one.
 
@@ -78,7 +78,7 @@ The breakdown gave it away from the start — `starts_with 2/12`, `paragraph_cou
 
 ## D24 — The default dataset is real, and whatever is missing is declared
 
-**Status:** applied · **Affects:** [`datasets/sources.py`](../src/opaas_bench/datasets/sources.py), [`suites/safety.py`](../src/opaas_bench/suites/safety.py)
+**Status:** applied · **Affects:** [`datasets/sources.py`](../src/opaas/datasets/sources.py), [`suites/safety.py`](../src/opaas/suites/safety.py)
 
 The default was `opaas-smoke`, so an unconfigured run produced a report that declared itself useless. With automatic downloading already solved (D20), that stopped making sense: the default becomes `ifeval,xstest`. `opaas-smoke` is still available to check that the pipeline works.
 
@@ -88,7 +88,7 @@ The `CapabilityOptions` and `SafetyOptions` defaults still point at the smoke da
 
 ## D23 — A certificate is issued from one run, so the dataset is composed
 
-**Status:** applied · **Extends:** D20 · **Affects:** [`datasets/cache.py`](../src/opaas_bench/datasets/cache.py)
+**Status:** applied · **Extends:** D20 · **Affects:** [`datasets/cache.py`](../src/opaas/datasets/cache.py)
 
 `--dataset ifeval,xstest` composes the sources into a single dataset. If block B and block D needed different datasets, two runs and two certificates would be required for the same deployment, which is the opposite of what is wanted.
 
@@ -103,7 +103,7 @@ Two safeguards that came out of testing it:
 
 ## D21 — The log is a hash chain, and it is not called Certificate Transparency
 
-**Status:** applied · **Affects:** [`transparency.py`](../src/opaas_bench/transparency.py)
+**Status:** applied · **Affects:** [`transparency.py`](../src/opaas/transparency.py)
 
 Every issuance chains to the previous one. Altering, deleting or reordering an entry breaks the chain detectably, and a certificate missing from the log gives away an out-of-process issuance. `verify --log` adds the inclusion check.
 
@@ -113,7 +113,7 @@ What it does provide: anyone keeping an earlier copy detects the rewrite, and pu
 
 ## D22 — The cloud baseline cannot contaminate the certificate
 
-**Status:** applied · **Affects:** [`runner.py`](../src/opaas_bench/runner.py), [`credential/vc.py`](../src/opaas_bench/credential/vc.py), [`compare.py`](../src/opaas_bench/compare.py)
+**Status:** applied · **Affects:** [`runner.py`](../src/opaas/runner.py), [`credential/vc.py`](../src/opaas/credential/vc.py), [`compare.py`](../src/opaas/compare.py)
 
 The design asked for a quality reference against cloud endpoints, marked as `cloud-baseline` and **never** mixed with block A. It is implemented with three barriers, not with a footnote:
 
@@ -125,7 +125,7 @@ A rule written in the documentation gets broken; one the code rejects does not.
 
 ## D27 — The engine's concurrency limit is declared, not guessed
 
-**Status:** applied · **Affects:** [`adapters/base.py`](../src/opaas_bench/adapters/base.py), [`suites/performance.py`](../src/opaas_bench/suites/performance.py)
+**Status:** applied · **Affects:** [`adapters/base.py`](../src/opaas/adapters/base.py), [`suites/performance.py`](../src/opaas/suites/performance.py)
 
 Block A could tell that an engine was queueing — flat throughput, exploding TTFT — but not why, so its advice ended at "check the server's concurrent request limit". The obvious fix was to read the limit from the engine. It cannot be done: vLLM's `/v1/models` publishes `max_model_len` but not `max_num_seqs`, its metrics expose current utilisation (`vllm:num_requests_running`) rather than the configured ceiling, and Ollama does not expose `OLLAMA_NUM_PARALLEL` at all.
 
@@ -137,47 +137,47 @@ When nothing is declared and more than one concurrency level was swept, the repo
 
 **Separately, `--suite-concurrency`.** Blocks B and D hardcoded 4 parallel requests and the CLI could not reach it: `--concurrency` only ever fed block A's sweep. It is engine-agnostic — the harness's own knob, not the engine's — and it changes how long a run takes, never what it measures.
 
-**What is deliberately not done:** OPAAS-Bench does not set `OLLAMA_NUM_PARALLEL` or any other engine setting. It evaluates a deployment that is already running; an auditor that reconfigures the system first is certifying a deployment it invented, not the customer's.
+**What is deliberately not done:** OPAAS does not set `OLLAMA_NUM_PARALLEL` or any other engine setting. It evaluates a deployment that is already running; an auditor that reconfigures the system first is certifying a deployment it invented, not the customer's.
 
 ## D26 — The block D classifiers download themselves too, against a pinned revision
 
-**Status:** applied · **Revises:** D17 · **Affects:** [`classifiers/registry.py`](../src/opaas_bench/classifiers/registry.py), [`classifiers/cache.py`](../src/opaas_bench/classifiers/cache.py), [`suites/safety.py`](../src/opaas_bench/suites/safety.py)
+**Status:** applied · **Revises:** D17 · **Affects:** [`classifiers/registry.py`](../src/opaas/classifiers/registry.py), [`classifiers/cache.py`](../src/opaas/classifiers/cache.py), [`suites/safety.py`](../src/opaas/suites/safety.py)
 
 D17 rule 1 said nothing is downloaded at run time, and the weights are supplied by whoever evaluates. The reasoning was D9's, and D20 already revised it for datasets and left classifiers behind — inconsistently, because the argument is identical. The consequence was the one D20 named: `--suite all` ran the five blocks and quietly declared two dimensions unmeasured, and the fix was a documentation page telling you to go download two models by hand. Most people never did, so most reports never measured toxicity.
 
-Revised: with the classifiers extra installed and no `--toxicity-model` / `--faithfulness-model` given, the pinned default is fetched once into `~/.opaas-bench/cache/classifiers/<task>/` and reused. What is **not** given up:
+Revised: with the classifiers extra installed and no `--toxicity-model` / `--faithfulness-model` given, the pinned default is fetched once into `~/.opaas/cache/classifiers/<task>/` and reused. What is **not** given up:
 
 - **The revision is a full commit SHA, not a branch.** `main` would mean two runs of the identical command on different days silently using different weights — the exact failure the dataset SHA-256 exists to prevent. Bumping it is a reviewed change to the registry, and a cached directory whose recorded revision does not match the pinned one is re-downloaded rather than trusted.
 - **An explicit path still wins and downloads nothing.** The operator's choice is never silently replaced.
-- **`--offline` forbids this download as firmly as the dataset one**, failing with what to supply instead of trying. `opaas-bench fetch` pre-populates both.
+- **`--offline` forbids this download as firmly as the dataset one**, failing with what to supply instead of trying. `opaas fetch` pre-populates both.
 - **Calibration (D18) still gates everything.** A default that fails the control set publishes no figure, exactly like one you picked yourself. The default is a convenience, not a promise that it discriminates.
 - **The report says which weights measured.** When the pinned default did the work, the repo and revision go into `limitations`, so a reader never assumes weights the operator chose. The weights hash travels as before.
 
-**What it costs.** A first run on a fresh machine now pulls ~800 MB it did not pull before, and the operator did not ask for it explicitly — the trade D20 already made for datasets, with a bigger number. It is gated on the extra being installed, which is itself an explicit `pip install`, and `opaas-bench datasets` shows what is cached before a run starts.
+**What it costs.** A first run on a fresh machine now pulls ~800 MB it did not pull before, and the operator did not ask for it explicitly — the trade D20 already made for datasets, with a bigger number. It is gated on the extra being installed, which is itself an explicit `pip install`, and `opaas datasets` shows what is cached before a run starts.
 
 **What is deliberately not automated.** Block E's seven declared requirements are claims the operator makes under their own responsibility, with evidence; auto-filling them would let a certificate assert compliance nobody verified, which is the failure mode this project exists to prevent. And `grounded_qa` items have no generic artifact to download: the point is whether the model invents things about *your* documents.
 
 ## D20 — Datasets download themselves, but against a pinned hash
 
-**Status:** applied · **Revises:** D9 and D15 · **Affects:** [`datasets/sources.py`](../src/opaas_bench/datasets/sources.py), [`datasets/cache.py`](../src/opaas_bench/datasets/cache.py)
+**Status:** applied · **Revises:** D9 and D15 · **Affects:** [`datasets/sources.py`](../src/opaas/datasets/sources.py), [`datasets/cache.py`](../src/opaas/datasets/cache.py)
 
 D9 and D15 established that nothing is downloaded at run time. The reason was good — air-gapped operation and reproducibility — but the consequence was bad: the first run required preparing files by hand before seeing anything work.
 
 Revised: `--dataset ifeval` downloads on first use and reuses the cache from then on. What is **not** given up is what made the original decision valuable:
 
 - **Every source carries its verified SHA-256.** If what is downloaded does not match, the run stops showing both hashes. "Download if it is not cached" is convenient; "trust whatever comes down the wire" would make the certificate non-reproducible. A legitimate upstream change is reviewed and the hash updated by hand.
-- **The cache is persistent and the second run does not touch the network.** `opaas-bench fetch` populates it on a connected machine and the directory is copied; `--offline` forbids the network and fails saying what is missing, before loading the model.
+- **The cache is persistent and the second run does not touch the network.** `opaas fetch` populates it on a connected machine and the directory is copied; `--offline` forbids the network and fails saying what is missing, before loading the model.
 - **The dataset version is the source hash**, not the download date: two people downloading the same thing get the same version in the manifest and in the certificate.
 
 A side effect that came out of testing it: the importer wrote its own fixed license and ignored the one the source declared. Today they match, but a registered source pointing at a different file would have lied in the manifest. Now the license and the URL come from whoever supplies the file.
 
 ## D19 — Publication is a static site verified client-side
 
-**Status:** applied · **Affects:** [`web/`](../src/opaas_bench/web)
+**Status:** applied · **Affects:** [`web/`](../src/opaas/web)
 
 The plan asked for a `publish` command that "uploads the result". It is implemented as a **static site generator**, not as an upload to an API. No server, no database, no backend that could lie: the site copies to any hosting and the public registry is audited with a `git diff`. Deploying is a separate step, with everyone's own tooling.
 
-**Verification happens in the browser.** The page carries the credential and the DID document embedded and reimplements in JavaScript the same algorithm as `opaas-bench verify`: JCS canonicalization, SHA-256 of the proof configuration and of the document, and Ed25519 via WebCrypto. If the page asked a server whether the certificate is good, verifying would mean trusting the issuer — exactly what the signature exists to avoid.
+**Verification happens in the browser.** The page carries the credential and the DID document embedded and reimplements in JavaScript the same algorithm as `opaas verify`: JCS canonicalization, SHA-256 of the proof configuration and of the document, and Ed25519 via WebCrypto. If the page asked a server whether the certificate is good, verifying would mean trusting the issuer — exactly what the signature exists to avoid.
 
 JCS in JavaScript turns out to be almost free: `Array.sort()` already sorts by UTF-16 code units and `JSON.stringify` serializes numbers and strings as the specification requires. The complete verifier fits in about 60 dependency-free lines.
 
@@ -189,7 +189,7 @@ Validated in the browser: valid signature over the real certificate, and `Creden
 
 ## D18 — A classifier is calibrated before it is believed
 
-**Status:** applied · **Affects:** [`classifiers/calibration.py`](../src/opaas_bench/classifiers/calibration.py)
+**Status:** applied · **Affects:** [`classifiers/calibration.py`](../src/opaas/classifiers/calibration.py)
 
 A classifier loaded and nothing more is a black box that returns numbers. Before letting it decide whether a response is faithful or toxic, it is fed control cases whose correct answer is obvious. If it does not separate them, the measurement **is not published**. It is the same principle as block C's trivial-context control (D13): do not trust the instrument without verifying that it discriminates.
 
@@ -206,7 +206,7 @@ Every control case records the language it is written in, so the verdict can nam
 
 ## D17 — Classifiers are pinned artifacts, not dependencies
 
-**Status:** applied, rule 1 revised by [D26](#d26--the-block-d-classifiers-download-themselves-too-against-a-pinned-revision) · **Affects:** [`classifiers/`](../src/opaas_bench/classifiers), [`suites/safety.py`](../src/opaas_bench/suites/safety.py)
+**Status:** applied, rule 1 revised by [D26](#d26--the-block-d-classifiers-download-themselves-too-against-a-pinned-revision) · **Affects:** [`classifiers/`](../src/opaas/classifiers), [`suites/safety.py`](../src/opaas/suites/safety.py)
 
 D11 closed toxicity and faithfulness-with-a-judge as unmeasurable. That was true for a general-purpose LLM and false for a **small, open classifier**, which can be treated as an artifact: local weights, hashed, with its threshold declared and everything recorded in the report. The same three rules that govern datasets:
 
@@ -214,7 +214,7 @@ D11 closed toxicity and faithfulness-with-a-judge as unmeasurable. That was true
 2. **The weights hash travels in the report.** Two runs with different classifiers are not comparable.
 3. **The threshold is a methodological decision.** Changing it changes the figure, so it is declared alongside it, and the full score distribution is published in addition to the rate.
 
-`torch` and `transformers` are **optional** (`pip install 'opaas-bench[classifiers]'`): they weigh more than everything else combined, and without them block D works just the same, declaring what it did not measure.
+`torch` and `transformers` are **optional** (`pip install 'opaas[classifiers]'`): they weigh more than everything else combined, and without them block D works just the same, declaring what it did not measure.
 
 **Running third-party code requires opt-in.** HHEM-2.1-Open requires `trust_remote_code`. In a tool that measures safety, running arbitrary code from a model's repository deserves a conscious decision: `--allow-remote-code` is needed. The generic `nli` profile does not need it.
 
@@ -226,7 +226,7 @@ After the fix, the same sentence scores 0.95. But another equally insulting one 
 
 ## D15 — The importers download nothing and discard whole items
 
-**Status:** applied · **Affects:** [`datasets/importers/`](../src/opaas_bench/datasets/importers)
+**Status:** applied · **Affects:** [`datasets/importers/`](../src/opaas/datasets/importers)
 
 There is an importer for IFEval (Apache-2.0) and XSTest (CC-BY-4.0), the two that fit the existing machinery with no pending methodological decisions. Two rules:
 
@@ -240,7 +240,7 @@ The sampling, both at import time and at run time, is **stratified by category w
 
 ## D16 — When the detector cannot decide, the band is reported
 
-**Status:** applied · **Affects:** [`refusal.py`](../src/opaas_bench/refusal.py), [`suites/safety.py`](../src/opaas_bench/suites/safety.py)
+**Status:** applied · **Affects:** [`refusal.py`](../src/opaas/refusal.py), [`suites/safety.py`](../src/opaas/suites/safety.py)
 
 Running real XSTest against `qwen2.5:7b` produced a 25% correct refusal rate. Looking at the responses, the model **was** refusing, but by dissuading — *"identity theft is a serious crime and should not be committed"* — without ever using an explicit refusal. The pattern detector counted it as compliance.
 
@@ -253,9 +253,9 @@ For that run: between 25% and 50%. The band is the honest measure of what the me
 
 ## D11 — Block D does not use an LLM judge
 
-**Status:** applied · **Affects:** [`refusal.py`](../src/opaas_bench/refusal.py), [`suites/safety.py`](../src/opaas_bench/suites/safety.py)
+**Status:** applied · **Affects:** [`refusal.py`](../src/opaas/refusal.py), [`suites/safety.py`](../src/opaas/suites/safety.py)
 
-Hallucination, refusal and toxicity are usually scored with another model acting as judge. Not here, and the reason is structural: if a certificate's score depends on which judge model, which version and which quantization were used, the certificate stops being reproducible by a third party — which is exactly what OPAAS-Bench sells.
+Hallucination, refusal and toxicity are usually scored with another model acting as judge. Not here, and the reason is structural: if a certificate's score depends on which judge model, which version and which quantization were used, the certificate stops being reproducible by a third party — which is exactly what OPAAS sells.
 
 Scoring uses deterministic patterns whose hash travels in the report. **What is lost:** precision. A refusal worded in an unusual way slips through. It is mitigated by counting ambiguous cases separately — empty responses and partial refusals — instead of assigning them wherever convenient.
 
@@ -267,15 +267,15 @@ Consequences of the same decision:
 
 ## D12 — Comparison across quantizations is between runs, not within one
 
-**Status:** applied · **Affects:** [`compare.py`](../src/opaas_bench/compare.py)
+**Status:** applied · **Affects:** [`compare.py`](../src/opaas/compare.py)
 
-FP16 and Q4 of the same model do not fit on one GPU at the same time. Putting the comparison inside a run would have required re-architecting the runner to orchestrate several models; and it would be a fiction, because physically they are different deployments. Each configuration is evaluated separately and `opaas-bench compare` cross-references the reports.
+FP16 and Q4 of the same model do not fit on one GPU at the same time. Putting the comparison inside a run would have required re-architecting the runner to orchestrate several models; and it would be a fiction, because physically they are different deployments. Each configuration is evaluated separately and `opaas compare` cross-references the reports.
 
 The rule that governs the comparison: **a difference whose confidence intervals overlap is not a difference**. Measured with the smoke dataset (n=8), 50 points of difference between two models comes out declared non-significant — and that is correct. The comparator also warns when what is being compared is not comparable: different hardware, another engine, another dataset or another answer style.
 
 ## D13 — The context probe does not accuse without being able to prove it
 
-**Status:** applied · **Affects:** [`suites/consistency.py`](../src/opaas_bench/suites/consistency.py)
+**Status:** applied · **Affects:** [`suites/consistency.py`](../src/opaas/suites/consistency.py)
 
 A canary at the start of the prompt that is not recovered at the end can mean three very different things, and the first version conflated them all under "silent truncation" — a serious accusation against the engine. Against `llama3.2:1b`, the tool reported that defect when the model simply could not follow the instruction.
 
@@ -288,7 +288,7 @@ In a certification product, a false accusation does more damage than a missed de
 
 ## D14 — In block E, what is declared and what is probed are not added together
 
-**Status:** applied · **Affects:** [`declaration.py`](../src/opaas_bench/declaration.py), [`suites/compliance.py`](../src/opaas_bench/suites/compliance.py)
+**Status:** applied · **Affects:** [`declaration.py`](../src/opaas/declaration.py), [`suites/compliance.py`](../src/opaas/suites/compliance.py)
 
 Block E is largely documentary and not executable, as the design said. What can be required is that every claim come with evidence and be kept **separate** from what the tool verifies by itself. A report that mixes "the provider documents its training data" (the operator says so) with "the engine exposes logprobs" (I checked it myself) is no use to an auditor.
 
@@ -298,7 +298,7 @@ Three probes are executable: logprobs, exposed reasoning and **outbound traffic 
 
 ## D10 — Block A measures real RAM, idle and findings
 
-**Status:** applied · **Affects:** [`telemetry/`](../src/opaas_bench/telemetry), [`suites/performance.py`](../src/opaas_bench/suites/performance.py)
+**Status:** applied · **Affects:** [`telemetry/`](../src/opaas/telemetry), [`suites/performance.py`](../src/opaas/suites/performance.py)
 
 The standard asks for "peak **and idle** VRAM/RAM". The first version measured one of those four things: `ram_used_mb` was declared in `ResourceMetrics` and never filled in, and there was no idle measurement. Closed:
 
@@ -311,7 +311,7 @@ Validated with the full 1/4/16 sweep against Ollama: idle 5719 MB of VRAM and 98
 
 ## D7 — Block B does not use lm-evaluation-harness
 
-**Status:** applied · **Affects:** [`suites/capability.py`](../src/opaas_bench/suites/capability.py), [`datasets/`](../src/opaas_bench/datasets)
+**Status:** applied · **Affects:** [`suites/capability.py`](../src/opaas/suites/capability.py), [`datasets/`](../src/opaas/datasets)
 
 The plan proposed integrating `lm-evaluation-harness`. It has three problems for this product:
 
@@ -325,7 +325,7 @@ A runner of our own is implemented over versioned and hashed local datasets, run
 
 ## D8 — The default answer style is chain of thought
 
-**Status:** applied · **Affects:** [`scoring.py`](../src/opaas_bench/scoring.py)
+**Status:** applied · **Affects:** [`scoring.py`](../src/opaas/scoring.py)
 
 The first version demanded the bare letter. Measured on `opaas-smoke` with `qwen2.5:7b` Q4_K_M, reasoning category: **50% with `direct` against 87.5% with `cot`**. The model answered "A" to "120 km in 2 hours" — not from not knowing the arithmetic, but from having nowhere to do it.
 
@@ -347,13 +347,13 @@ The style is part of `promptTemplateHash`, so two runs with different styles do 
 
 AGPL is ruled out. Phase 6 rests on a third party being able to run their own evaluation and audit the methodology; a strong copyleft creates friction on exactly that use, which is the one that gives the certificate credibility.
 
-**What is lost:** nothing stops someone from taking the harness and setting up a competing certification service. That is accepted, because the defensible asset is not the code but the root key and trust in the issuer: anyone can run OPAAS-Bench, but nobody else can issue credentials signed by `did:web:onpremialabs.com`.
+**What is lost:** nothing stops someone from taking the harness and setting up a competing certification service. That is accepted, because the defensible asset is not the code but the root key and trust in the issuer: anyone can run OPAAS, but nobody else can issue credentials signed by `did:web:onpremialabs.com`.
 
 ## D10 — The mascot is read from the PNG, not redrawn
 
-**Status:** applied · **Affects:** [`scripts/sprite_from_png.py`](../scripts/sprite_from_png.py), [`src/opaas_bench/cli/_sprite_data.py`](../src/opaas_bench/cli/_sprite_data.py)
+**Status:** applied · **Affects:** [`scripts/sprite_from_png.py`](../scripts/sprite_from_png.py), [`src/opaas/cli/_sprite_data.py`](../src/opaas/cli/_sprite_data.py)
 
-The meerkat is drawn outside the repository. The terminal grid is generated from `docs/img/suricata.png` and `tests/test_sprite_matches_png.py` reads the PNG again to check that what is committed is still that image. That way "use the original drawing" is verifiable and not a promise.
+The meerkat is drawn outside the repository. The terminal grid is generated from `docs/img/mascot.png` and `tests/test_sprite_matches_png.py` reads the PNG again to check that what is committed is still that image. That way "use the original drawing" is verifiable and not a promise.
 
 **The grid is 40×60 and is written by hand.** The PNG comes rescaled, with smoothed edges and ±2 per-channel noise, so automatic detectors fail: by period it comes out ~31 px (most features span two cells) and by shortest run ~6 px (noise). It was measured on the smallest feature of the drawing, the eye highlight, which takes 17×18 px; with the 691×1045 crop that gives cells of 17.3 px, square. A test checks that this highlight is still a single cell: that is what distinguishes the correct grid from one that averages the eye and leaves the creature with no gaze.
 

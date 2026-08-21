@@ -12,13 +12,13 @@ import sys
 
 import pytest
 
-from opaas_bench.classifiers.base import PROFILES, ClassifierError
-from opaas_bench.classifiers.cache import (
+from opaas.classifiers.base import PROFILES, ClassifierError
+from opaas.classifiers.cache import (
     classifier_dir,
     ensure_default_classifier,
     is_default_classifier_cached,
 )
-from opaas_bench.classifiers.registry import DEFAULT_CLASSIFIERS
+from opaas.classifiers.registry import DEFAULT_CLASSIFIERS
 
 
 @pytest.fixture(autouse=True)
@@ -65,7 +65,7 @@ def test_every_default_pins_a_full_commit_sha():
 
 
 def test_classifier_dir_lives_under_the_shared_cache_root():
-    from opaas_bench.datasets.cache import cache_dir
+    from opaas.datasets.cache import cache_dir
 
     assert classifier_dir("toxicity") == cache_dir() / "classifiers" / "toxicity"
 
@@ -139,7 +139,7 @@ def test_offline_works_once_the_cache_is_populated(monkeypatch):
 
 def test_missing_huggingface_hub_is_actionable(monkeypatch):
     monkeypatch.setitem(sys.modules, "huggingface_hub", None)
-    with pytest.raises(ClassifierError, match=r"pip install 'opaas-bench\[classifiers\]'"):
+    with pytest.raises(ClassifierError, match=r"pip install 'opaas\[classifiers\]'"):
         ensure_default_classifier("toxicity")
 
 

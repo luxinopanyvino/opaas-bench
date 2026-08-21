@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from opaas_bench.datasets import DatasetError, builtin_datasets, load_dataset
+from opaas.datasets import DatasetError, builtin_datasets, load_dataset
 
 MANIFEST = {
     "name": "test",

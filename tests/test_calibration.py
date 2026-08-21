@@ -1,7 +1,7 @@
 import pytest
 
-from opaas_bench.classifiers.base import ClassifierMetadata
-from opaas_bench.classifiers.calibration import CASES, calibrate
+from opaas.classifiers.base import ClassifierMetadata
+from opaas.classifiers.calibration import CASES, calibrate
 
 
 class _Stub:

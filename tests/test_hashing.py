@@ -1,6 +1,6 @@
 from datetime import UTC, datetime
 
-from opaas_bench.hashing import (
+from opaas.hashing import (
     allocate_run_id,
     canonical_json,
     config_hash,

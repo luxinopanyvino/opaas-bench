@@ -1,14 +1,75 @@
-<img src="docs/img/suricata.svg" width="150" alt="Meerkat in pixels">
+<img src="docs/img/mascot.svg" width="120" align="right" alt="Meerkat in pixels">
 
-# opaas-bench
+# OPAAS
 
-**On-Prem AI Audit Suite** — reproducible evaluation and a verifiable digital credential for LLM models deployed **on-prem**, by [onpremIALabs](https://onpremialabs.com).
+**LLM & SLM deployment audit** · quantization · inference engines · on-prem & edge
+· reproducible evidence · no aggregate score · AI Act / ENS
 
-A run answers one concrete question: *this model, with this quantization, on this backend and on this hardware — how does it perform and how does it behave?*
+**On-Prem AI Audit Suite** — measures an LLM *deployment*, not a model, and reports
+what it found without inventing a score. By [onpremIALabs](https://onpremialabs.com).
 
-The result is a report structured by category — **with no aggregate score and no tiers**, by design — which can then be signed as a W3C Verifiable Credential and published together with its hash. What could not be measured is declared in the report, never omitted and never reported as a zero.
+```bash
+uv tool install git+https://github.com/luxinopanyvino/opaas-bench.git
+```
 
-The meerkat is the group's sentinel: it stands on its hind legs and keeps watch while the others eat. That is what this tool does with a deployment.
+A run answers one concrete question: *this model, at this quantization, on this
+engine, on this hardware — how does it perform and how does it behave?* Leaderboards
+cannot answer it. They measure weights, and most of what goes wrong lives between the
+weights and the server — an engine silently trimming prompts to a quarter of the
+window you configured, a default that serves one request at a time, a chat template
+that never gets applied.
+
+```
+│ prompt (words) │ conc. │ out tok/s │ TTFT p50 / p95 / p99 (s) │ VRAM peak │ Wh / 1M tok │
+│            128 │     1 │      79.4 │  0.102 / 0.113 / 0.117   │      7671 │       571.8 │
+│            128 │    16 │      82.4 │ 37.883 / 38.200 / 38.322 │      7860 │       602.0 │
+
+▲ no-concurrency-scaling (prompt 128, concurrency 16)
+  At 16 simultaneous requests, throughput only improves x1.038 while TTFT worsens
+  x372.868. The engine is queueing, not serving in parallel.
+```
+
+*A real run: qwen2.5:7b, Q4_K_M, Ollama, RTX 5060 Ti. The model is fine — the
+deployment serves one request at a time, and no model benchmark would ever say so.*
+
+Three rules make the numbers worth keeping: results are **per category, with no
+aggregate score and no tiers**; **what could not be measured is declared**, never
+omitted and never reported as a zero; and **no LLM judge takes part in scoring**, so
+a third party can recompute a figure instead of trusting it.
+
+Nothing you evaluate leaves your network: your documents stay local and only metrics
+and hashes are published, no external service takes part in scoring, and `--offline`
+forbids the network outright. The one sovereignty claim the tool will not take your
+word for is air-gapped operation — it probes your deployment and reports the
+contradiction if it calls out.
+
+## What it answers
+
+| your question | command | the number that decides |
+|---|---|---|
+| Does it fit in my GPU? | `--suite performance` | `vramPeakMb` against idle |
+| How many users before it hurts? | `--concurrency 1,4,16` | `ttftP99` |
+| Does Q4 cost me accuracy? | `compare` | whether the 95% intervals overlap |
+| Which engine for this workload? | same model, another `--backend` | throughput, trimming, logprobs |
+| Did the upgrade break anything? | `--suite consistency` | verified window, determinism |
+| Can I defend this in an audit? | `--suite compliance` | AI Act / ENS, declared vs probed |
+
+## Who it is for
+
+R&D groups, research labs, universities, startups and small teams running their own
+inference — anyone who has to justify a model, an engine, a quantization or a GPU
+purchase with something better than a vendor benchmark.
+
+## Scope
+
+**LLMs and SLMs served over HTTP**, on servers or on edge devices. Vision, detection
+and other modalities are out of scope: every measurement here assumes tokens, prompts
+and generated text. Agentic behaviour — tool calling, multi-turn state — is not
+measured either; the concurrency sweep and the real context window are the closest
+proxies.
+
+The meerkat is the group's sentinel: it stands on its hind legs and keeps watch while
+the others eat. That is what this tool does with a deployment.
 
 ---
 
@@ -30,7 +91,7 @@ The meerkat is the group's sentinel: it stands on its hind legs and keeps watch 
 ## Requirements
 
 - **Python 3.11 or later**
-- **An inference server already running** with the model loaded. OPAAS-Bench evaluates a deployment; it does not deploy anything and never downloads the model under evaluation.
+- **An inference server already running** with the model loaded. OPAAS evaluates a deployment; it does not deploy anything and never downloads the model under evaluation.
 - Supported engines: **vLLM**, **Ollama**, and **`openai`** — a generic OpenAI-compatible adapter that covers local NVIDIA NIM, `llama-server`, TGI and LM Studio with no new code.
 - An NVIDIA GPU is not required, but without `nvidia-smi` there are no VRAM or power figures, and the report says so.
 
@@ -38,7 +99,7 @@ The meerkat is the group's sentinel: it stands on its hind legs and keeps watch 
 
 Not published on PyPI yet, so it installs from the repository.
 
-**With [uv](https://docs.astral.sh/uv/)** — leaves the `opaas-bench` command on your PATH, with no environment to activate:
+**With [uv](https://docs.astral.sh/uv/)** — leaves the `opaas` command on your PATH, with no environment to activate:
 
 ```bash
 uv tool install git+https://github.com/luxinopanyvino/opaas-bench.git
@@ -75,7 +136,7 @@ pip install .
 **Check that it worked.** With no arguments you get the cover page and a navigable menu, which reports what you have and what you are missing:
 
 ```bash
-opaas-bench
+opaas
 ```
 
 **Optional — block D classifiers** (faithfulness and toxicity). A separate extra because torch weighs more than everything else combined. Installing it is enough: the pinned weights download once on first use and those two dimensions start being measured. Without it the tool works the same and declares them unmeasured. Details in [Measure faithfulness and toxicity](#7-measure-faithfulness-and-toxicity).
@@ -90,10 +151,10 @@ Five minutes, against a model you already serve. This example uses Ollama; for v
 ollama run llama3.2:1b "hello"
 ```
 
-**2. Run the five blocks.** The first execution downloads the evaluation datasets into `~/.opaas-bench/cache` and reuses them from then on:
+**2. Run the five blocks.** The first execution downloads the evaluation datasets into `~/.opaas/cache` and reuses them from then on:
 
 ```bash
-opaas-bench run --model llama3.2:1b --backend ollama --suite all --output result.json
+opaas run --model llama3.2:1b --backend ollama --suite all --output result.json
 ```
 
 A full evaluation takes a while, so `run` prints the percentage and elapsed time as it goes, naming the block and what it is doing inside it (`[2/5] capability · reasoning · 34/60 items`). Redirected to a file or in CI there is no bar to redraw: the same information comes out as lines, every 15 seconds.
@@ -101,7 +162,7 @@ A full evaluation takes a while, so `run` prints the percentage and elapsed time
 **3. Read the result.**
 
 ```bash
-opaas-bench show result.json
+opaas show result.json
 ```
 
 You now have `result.json`: the full report, per category, with its confidence intervals, its findings about the deployment and its declared limitations. That file is the artifact everything else is built on — its SHA-256 is what a certificate certifies.
@@ -115,11 +176,11 @@ You now have `result.json`: the full report, per category, with its confidence i
 The common case: measure what you have and read the report.
 
 ```bash
-opaas-bench run --model my-model --backend vllm --base-url http://gpu-box.lan:8000/v1 --suite all --output result.json
+opaas run --model my-model --backend vllm --base-url http://gpu-box.lan:8000/v1 --suite all --output result.json
 ```
 
 ```bash
-opaas-bench show result.json
+opaas show result.json
 ```
 
 Without `--suite`, only block A (performance) runs. Without `--output`, the report goes to `runs/<run-id>/report.json`.
@@ -131,7 +192,7 @@ A full run is dominated by generation: blocks B and D score ~960 items, and on a
 **First, check the engine is actually serving in parallel.** Block A reports it: if throughput stays flat while TTFT grows, the engine is queueing, and no flag here will help — it is the deployment's own limit (vLLM `--max-num-seqs`, `OLLAMA_NUM_PARALLEL`). Declare what you configured and the report cross-checks it:
 
 ```bash
-opaas-bench run --model my-model --backend vllm --suite all --max-concurrency 8 --suite-concurrency 8
+opaas run --model my-model --backend vllm --suite all --max-concurrency 8 --suite-concurrency 8
 ```
 
 `--max-concurrency` is what you say the engine serves; `--suite-concurrency` is what the harness sends. Raising the second above what the engine honours only fills a queue.
@@ -139,7 +200,7 @@ opaas-bench run --model my-model --backend vllm --suite all --max-concurrency 8 
 **Lowering the generation caps is the other lever on the same 88%.** Blocks B and D stop at 400 and 320 tokens per item; most of the wall clock is spent producing them.
 
 ```bash
-opaas-bench run --model my-model --backend vllm --suite all --capability-max-tokens 256 --safety-max-tokens 256
+opaas run --model my-model --backend vllm --suite all --capability-max-tokens 256 --safety-max-tokens 256
 ```
 
 It is not free either, and the report will not let it pass quietly: a cut answer fails constraints it might have met, and a refusal cut mid-sentence can stop matching the detector and be scored as compliance — the model blamed for a setting of yours. Every response that hits the cap is counted per task and declared as a limitation, so if you cut too deep the report says so instead of returning a worse figure that looks real.
@@ -153,17 +214,17 @@ It is not free either, and the report will not let it pass quietly: a cut answer
 Turns a report into a signed credential. The key pair is generated **once** and is your root of trust — see [key custody](docs/key-custody.md).
 
 ```bash
-opaas-bench keygen --out keys
+opaas keygen --out keys
 ```
 
 It asks for a passphrase at the keyboard and writes `keys/opaas-root-ed25519.pem` (private), `keys/opaas-root-ed25519.pub.pem` and `keys/did.json`.
 
 ```bash
-opaas-bench sign --input result.json --key keys/opaas-root-ed25519.pem --out credential.json --log ledger.jsonl
+opaas sign --input result.json --key keys/opaas-root-ed25519.pem --out credential.json --log ledger.jsonl
 ```
 
 ```bash
-opaas-bench verify --credential credential.json --report result.json --log ledger.jsonl
+opaas verify --credential credential.json --report result.json --log ledger.jsonl
 ```
 
 `verify` is the step your customer or auditor runs when they receive the certificate, and it works **without a network**. `--log` records the issuance in a hash chain and checks, on verification, that the credential is logged and has not changed since.
@@ -175,7 +236,7 @@ A run that does not cover all five blocks is certified as `evaluated-partial`, a
 `publish` generates a **static site** — public registry, one page per certificate, embeddable badge. No server, no database, no backend that could lie.
 
 ```bash
-opaas-bench publish --report result.json --credential credential.json --did-document keys/did.json --out site
+opaas publish --report result.json --credential credential.json --did-document keys/did.json --out site
 ```
 
 To review it before deploying it anywhere:
@@ -193,7 +254,7 @@ Deploying is your own step — copy `site/` to any hosting. Details in [web/READ
 FP16 and Q4 of the same model do not fit on one GPU at the same time, so each configuration is evaluated separately and the reports are cross-referenced:
 
 ```bash
-opaas-bench compare --report fp16.json --report q8.json --report q4.json --out comparison.json
+opaas compare --report fp16.json --report q8.json --report q4.json --out comparison.json
 ```
 
 It warns when what you are comparing is not comparable (different hardware, another engine, another dataset, another answer style) and applies one rule above all: **a difference whose confidence intervals overlap is not a difference**.
@@ -203,13 +264,13 @@ It warns when what you are comparing is not comparable (different hardware, anot
 Datasets and classifier weights download on first use and are cached; `--offline` forbids both and fails saying what is missing, rather than breaking an evaluation halfway through. Populate the cache on a connected machine — this fetches the datasets, plus the pinned classifiers if that extra is installed:
 
 ```bash
-opaas-bench fetch
+opaas fetch
 ```
 
-Copy `~/.opaas-bench/cache` to the isolated machine and forbid the network explicitly:
+Copy `~/.opaas/cache` to the isolated machine and forbid the network explicitly:
 
 ```bash
-opaas-bench run --model my-model --backend vllm --suite all --offline
+opaas run --model my-model --backend vllm --suite all --offline
 ```
 
 ### 6. Cloud baseline
@@ -217,7 +278,7 @@ opaas-bench run --model my-model --backend vllm --suite all --offline
 A reference against a public endpoint measures the same model under optimal conditions, to know how much you lose by deploying locally:
 
 ```bash
-opaas-bench run --model meta/llama-3.3-70b-instruct --backend openai --base-url https://integrate.api.nvidia.com/v1 --api-key $NVIDIA_API_KEY --suite capability --reference-type cloud-baseline --output baseline.json
+opaas run --model meta/llama-3.3-70b-instruct --backend openai --base-url https://integrate.api.nvidia.com/v1 --api-key $NVIDIA_API_KEY --suite capability --reference-type cloud-baseline --output baseline.json
 ```
 
 A baseline **refuses** to run performance or compliance, **cannot be signed** as a certificate, and the comparator labels it and excludes it from the performance tables. Somebody else's shared endpoint describes no deployment of yours.
@@ -227,13 +288,13 @@ A baseline **refuses** to run performance or compliance, **cannot be signed** as
 Two dimensions of block D that need a classifier. **Install the extra and they measure themselves** — the weights download once into the cache, at a pinned revision, and are reused from then on. Roughly 2.5 GB with CUDA on Windows:
 
 ```bash
-pip install "opaas-bench[classifiers] @ git+https://github.com/luxinopanyvino/opaas-bench.git"
+pip install "opaas[classifiers] @ git+https://github.com/luxinopanyvino/opaas-bench.git"
 ```
 
 From there the ordinary command measures them, with no extra flags:
 
 ```bash
-opaas-bench run --model my-model --backend vllm --suite all
+opaas run --model my-model --backend vllm --suite all
 ```
 
 The pinned defaults, one per dimension:
@@ -243,12 +304,12 @@ The pinned defaults, one per dimension:
 | toxicity | `unitary/toxic-bert` | Apache-2.0 |
 | faithfulness | `MoritzLaurer/DeBERTa-v3-base-mnli-fever-anli` | MIT |
 
-**Pinned to a commit, not to a tag**, exactly like datasets carry a pinned SHA-256: two runs of the identical command on different days must not silently use different weights. `opaas-bench datasets` shows which are cached, and the report records the repo and revision that measured, so a reader never assumes weights you chose.
+**Pinned to a commit, not to a tag**, exactly like datasets carry a pinned SHA-256: two runs of the identical command on different days must not silently use different weights. `opaas datasets` shows which are cached, and the report records the repo and revision that measured, so a reader never assumes weights you chose.
 
 **Your own weights still win.** An explicit path is used as-is and downloads nothing:
 
 ```bash
-opaas-bench run --model my-model --backend vllm --suite all --toxicity-model /models/toxic-bert --faithfulness-model /models/nli
+opaas run --model my-model --backend vllm --suite all --toxicity-model /models/toxic-bert --faithfulness-model /models/nli
 ```
 
 Any model compatible with `AutoModelForSequenceClassification` works, as long as the directory has a `config.json`:
@@ -258,16 +319,16 @@ Any model compatible with `AutoModelForSequenceClassification` works, as long as
 | `nli` (default) | A DeBERTa-MNLI or similar. The passage is the premise, the response the hypothesis |
 | `hhem` | Vectara's HHEM-2.1-Open. Needs `--allow-remote-code`: third-party code, run to measure safety. No default is pinned for it |
 
-**Air-gapped still works.** `--offline` forbids the classifier download as firmly as the dataset one, and fails saying what to supply. Pre-populate on a connected machine and copy `~/.opaas-bench/cache`:
+**Air-gapped still works.** `--offline` forbids the classifier download as firmly as the dataset one, and fails saying what to supply. Pre-populate on a connected machine and copy `~/.opaas/cache`:
 
 ```bash
-opaas-bench fetch
+opaas fetch
 ```
 
 **Faithfulness also needs a passage to score against.** It only reaches items of type `grounded_qa`, and `ifeval,xstest` provides none — with the classifier ready and no such items, the report still says *"There are no items with a passage and a response to score"*. Compose in a dataset of your own documents, which is the on-prem case that matters:
 
 ```bash
-opaas-bench run --model my-model --backend vllm --suite all --dataset ifeval,xstest,/data/internal-documentation
+opaas run --model my-model --backend vllm --suite all --dataset ifeval,xstest,/data/internal-documentation
 ```
 
 Toxicity has no such requirement: it scores every response block D generates.
@@ -326,23 +387,23 @@ With the optional classifiers, faithfulness and toxicity are added — local pin
 Half audited checklist, half probes, under one rule: **what is declared and what is probed are never added together**.
 
 ```bash
-opaas-bench compliance --out declaration.json
+opaas compliance --out declaration.json
 ```
 
-You fill in the declaration — traceability, license, provenance, AI Act risk classification, logging, air-gapped — each requirement with its evidence and its regulatory reference. A requirement declared as met **without evidence** is reported as `unsupported`, not as met. OPAAS-Bench probes three things itself: whether the engine exposes logprobs, whether it can expose reasoning, and whether it opens external connections during inference. If air-gapped is declared and the probe sees external traffic, the report states the contradiction.
+You fill in the declaration — traceability, license, provenance, AI Act risk classification, logging, air-gapped — each requirement with its evidence and its regulatory reference. A requirement declared as met **without evidence** is reported as `unsupported`, not as met. OPAAS probes three things itself: whether the engine exposes logprobs, whether it can expose reasoning, and whether it opens external connections during inference. If air-gapped is declared and the probe sees external traffic, the report states the contradiction.
 
 ## Datasets
 
 **Real datasets are used by default** — `ifeval,xstest`, 960 items covering blocks B and D — downloaded on first use and reused from the cache. An unconfigured run measures something real.
 
 ```bash
-opaas-bench datasets
+opaas datasets
 ```
 
 Several sources compose into a **single dataset**, because a certificate is issued from one run, not one per block. Your own documents can be mixed in, which is what matters on-prem: whether the model makes things up about your internal documentation, not about Wikipedia.
 
 ```bash
-opaas-bench run --model my-model --backend vllm --suite all --dataset ifeval,xstest,/data/internal-documentation
+opaas run --model my-model --backend vllm --suite all --dataset ifeval,xstest,/data/internal-documentation
 ```
 
 What is downloaded is verified against a pinned hash: if the source file changes, the run stops instead of certifying against something else.
@@ -353,7 +414,7 @@ Format, sample size and how to install other subsets: [docs/datasets.md](docs/da
 
 ## `run` options
 
-The ones you will actually reach for. Full list with `opaas-bench run --help`.
+The ones you will actually reach for. Full list with `opaas run --help`.
 
 | Option | Default | Notes |
 |---|---|---|
@@ -382,22 +443,22 @@ The ones you will actually reach for. Full list with `opaas-bench run --help`.
 
 | Command | What it does |
 |---|---|
-| `opaas-bench` | Cover page and menu: what you have, what you are missing |
-| `opaas-bench run` | Runs the suites and writes the report |
-| `opaas-bench show <report>` | Summary of an existing report, with its hash |
-| `opaas-bench compare` | Cross-references several reports |
-| `opaas-bench keygen` | Generates the root Ed25519 pair (root of trust) |
-| `opaas-bench sign` | Issues the signed W3C credential from a report |
-| `opaas-bench verify` | Verifies a credential, offline |
-| `opaas-bench publish` | Generates the static certificate site |
-| `opaas-bench log-verify` | Checks the transparency log |
-| `opaas-bench compliance` | Generates the block E declaration template |
-| `opaas-bench datasets` | Available datasets and cache status |
-| `opaas-bench fetch` | Downloads datasets into the cache |
-| `opaas-bench import` | Converts a local IFEval or XSTest file |
-| `opaas-bench backends` | Registered adapters and their limitations |
-| `opaas-bench suites` | Evaluation blocks |
-| `opaas-bench version` | Tool and methodology version |
+| `opaas` | Cover page and menu: what you have, what you are missing |
+| `opaas run` | Runs the suites and writes the report |
+| `opaas show <report>` | Summary of an existing report, with its hash |
+| `opaas compare` | Cross-references several reports |
+| `opaas keygen` | Generates the root Ed25519 pair (root of trust) |
+| `opaas sign` | Issues the signed W3C credential from a report |
+| `opaas verify` | Verifies a credential, offline |
+| `opaas publish` | Generates the static certificate site |
+| `opaas log-verify` | Checks the transparency log |
+| `opaas compliance` | Generates the block E declaration template |
+| `opaas datasets` | Available datasets and cache status |
+| `opaas fetch` | Downloads datasets into the cache |
+| `opaas import` | Converts a local IFEval or XSTest file |
+| `opaas backends` | Registered adapters and their limitations |
+| `opaas suites` | Evaluation blocks |
+| `opaas version` | Tool and methodology version |
 
 ## How verification works
 
@@ -405,7 +466,7 @@ The credential is signed with Ed25519 over canonical RFC 8785 JSON, using `DataI
 
 The certified hash is the hash of **the report's bytes**, so checking that a report is the certified one is `sha256sum result.json`.
 
-`verify` needs the issuer's public key up front — never taking it from the credential itself — and looks for it in this order: `--key` or `--did-document`, then anchors in `~/.opaas-bench/anchors/` (or `$OPAAS_ANCHOR_DIR`), then the anchors bundled with the tool. If it finds none, it fails saying what is missing.
+`verify` needs the issuer's public key up front — never taking it from the credential itself — and looks for it in this order: `--key` or `--did-document`, then anchors in `~/.opaas/anchors/` (or `$OPAAS_ANCHOR_DIR`), then the anchors bundled with the tool. If it finds none, it fails saying what is missing.
 
 The transparency log is **not** Certificate Transparency: there are no Merkle trees and no independent monitors. It is published by the issuer, so the chain only proves that the published log is internally consistent. Publishing it in a repository with history puts date-stamped copies in third-party hands, which is what gives it value.
 
@@ -425,13 +486,13 @@ A run that skips blocks is certified as `evaluated-partial`. The report's `limit
 ## Architecture
 
 ```
-src/opaas_bench/
+src/opaas/
 ├── adapters/      InferenceBackend + adapters (vllm, ollama, openai)
 ├── suites/        Evaluation blocks A–E
 ├── datasets/      Loading of hashed local datasets + importers
 ├── classifiers/   Pinned block D classifiers (optional dependency)
 ├── credential/    Ed25519 root of trust, VC credential, trust anchors
-├── cli/           opaas-bench commands
+├── cli/           opaas commands
 ├── telemetry/     GPU sampling (VRAM, power)
 ├── runner.py      Orchestration of a run
 ├── report.py      Structured report + hash

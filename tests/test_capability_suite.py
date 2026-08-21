@@ -1,7 +1,7 @@
 import json
 
-from opaas_bench.datasets import load_dataset
-from opaas_bench.suites.capability import CapabilitySuite
+from opaas.datasets import load_dataset
+from opaas.suites.capability import CapabilitySuite
 
 from .conftest import ScriptedBackend
 

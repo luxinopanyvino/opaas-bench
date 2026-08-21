@@ -5,7 +5,7 @@ The mascot is drawn outside this repository. So that the terminal sprite is
 here programmatically. `tests/test_sprite_matches_png.py` repeats the read and
 fails if anyone touches up the generated module by hand.
 
-    python scripts/sprite_from_png.py docs/img/suricata.png
+    python scripts/sprite_from_png.py docs/img/mascot.png
 
 The PNG is not a clean pixel export: it comes rescaled, with smoothed edges and
 ±2 per-channel noise. So there are two steps to guess, and both are guessed by
@@ -142,7 +142,7 @@ def render_module(path: Path, palette: dict[str, str], rows: tuple[str, ...]) ->
         "#: Colors exactly as they come out of the PNG, from darkest to lightest.\n"
         f"PALETTE: dict[str, str] = {{\n{entries}\n}}\n\n"
         f"#: {len(rows[0])} columns × {len(rows)} rows.\n"
-        f"SURICATA: tuple[str, ...] = (\n{grid}\n)\n"
+        f"MASCOT: tuple[str, ...] = (\n{grid}\n)\n"
     )
 
 
@@ -154,7 +154,7 @@ def main() -> int:
     parser.add_argument(
         "--out",
         type=Path,
-        default=Path("src/opaas_bench/cli/_sprite_data.py"),
+        default=Path("src/opaas/cli/_sprite_data.py"),
         help="data module to write",
     )
     args = parser.parse_args()

@@ -3,10 +3,10 @@ import json
 import httpx
 import pytest
 
-from opaas_bench.adapters import available_backends, get_backend
-from opaas_bench.adapters.base import BackendError
-from opaas_bench.adapters.openai_compatible import OpenAICompatibleBackend
-from opaas_bench.adapters.vllm import VllmBackend
+from opaas.adapters import available_backends, get_backend
+from opaas.adapters.base import BackendError
+from opaas.adapters.openai_compatible import OpenAICompatibleBackend
+from opaas.adapters.vllm import VllmBackend
 
 MODEL = "fake/model-1b"
 

@@ -3,9 +3,9 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "opaas-bench"
+name = "opaas"
 version = "0.1.0"
-description = "OPAAS-Bench — On-Prem AI Audit Suite: evaluation and digital credential for on-prem LLM models"
+description = "OPAAS — On-Prem AI Audit Suite: evaluation and digital credential for on-prem LLM models"
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
@@ -35,7 +35,7 @@ dev = [
     "numpy>=1.24",
 ]
 # Pinned block D classifiers (faithfulness and toxicity). Optional on purpose:
-# torch weighs more than everything else combined, and without it OPAAS-Bench
+# torch weighs more than everything else combined, and without it OPAAS
 # works just the same, declaring that it did not measure those dimensions.
 classifiers = [
     "torch>=2.2",
@@ -48,16 +48,16 @@ classifiers = [
 ]
 
 [project.scripts]
-opaas-bench = "opaas_bench.cli.main:app"
+opaas = "opaas.cli.main:app"
 
 [project.urls]
 Homepage = "https://onpremialabs.com"
-# 'opaas-bench', two a's. The old 'opas-bench' name 404s: GitHub's rename
+# 'opaas', two a's. The old 'opas-bench' name 404s: GitHub's rename
 # redirect does not cover it, so every install command that used it failed.
 Repository = "https://github.com/luxinopanyvino/opaas-bench"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/opaas_bench"]
+packages = ["src/opaas"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

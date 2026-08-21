@@ -5,8 +5,8 @@ import threading
 import psutil
 import pytest
 
-from opaas_bench.telemetry import ResourceSampler, query_ram, resolve_listening_pid
-from opaas_bench.telemetry.system import RamSnapshot
+from opaas.telemetry import ResourceSampler, query_ram, resolve_listening_pid
+from opaas.telemetry.system import RamSnapshot
 
 
 def test_system_ram_is_reported():

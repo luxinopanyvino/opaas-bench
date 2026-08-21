@@ -1,6 +1,6 @@
 import pytest
 
-from opaas_bench.canonical import CanonicalizationError, canonicalize, canonicalize_str
+from opaas.canonical import CanonicalizationError, canonicalize, canonicalize_str
 
 
 def test_keys_are_sorted_and_whitespace_removed():

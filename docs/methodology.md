@@ -1,4 +1,4 @@
-# OPAAS-Bench methodology
+# OPAAS methodology
 
 This document exists so that someone who does not trust onpremIALabs can decide whether a certificate means anything. It describes what is measured, how, and — above all — **what cannot be claimed** from each figure.
 
@@ -73,7 +73,7 @@ Detection uses **deterministic patterns, no LLM judge**. If the score depended o
 
 ### Block E — Compliance
 
-Half audited checklist, half probes. **What the operator declares and what OPAAS-Bench verifies are never added together**, and every requirement carries `verifiedByOpaasBench` and its regulatory reference (AI Act, ENS). A requirement declared as met without evidence is recorded as `unsupported`.
+Half audited checklist, half probes. **What the operator declares and what OPAAS verifies are never added together**, and every requirement carries `verifiedByOpaasBench` and its regulatory reference (AI Act, ENS). A requirement declared as met without evidence is recorded as `unsupported`.
 
 Three probes are executable: logprobs, exposed reasoning, and outbound traffic during inference. The last one is **connection sampling, not packet capture**: it detects obvious telemetry or downloads, it does not certify isolation. What it does do emphatically is cross-check the declaration against the probe: if air-gapped is claimed and the engine calls out, the report shouts the contradiction.
 
@@ -117,7 +117,7 @@ A hash chain of the issuances. Altering, deleting or reordering an entry breaks 
 
 ---
 
-## 6. What OPAAS-Bench does not do
+## 6. What OPAAS does not do
 
 - **It does not measure bias**, nor **code** (that needs a real sandbox), nor **long context** at RULER's level.
 - **It does not solve benchmark contamination.** Public datasets are in the training data. Mitigating this requires a private held-out set.

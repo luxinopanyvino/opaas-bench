@@ -3,7 +3,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from opaas_bench.web import SiteError, badge_state, build_site, esc, load_entry, render_badge
+from opaas.web import SiteError, badge_state, build_site, esc, load_entry, render_badge
 
 DID = {
     "id": "did:web:onpremialabs.com",
@@ -20,7 +20,7 @@ DID = {
 def _report(**overrides):
     return {
         "runId": "20260813-001",
-        "opaasBenchVersion": "1.0-draft",
+        "opaasVersion": "1.0-draft",
         "status": "evaluated",
         "model": {"name": "Vega-7B", "quantization": "GGUF Q4_K_M"},
         "configuration": {
@@ -83,8 +83,8 @@ def _credential(report_hash, *, complete=True, expires_days=180):
 
 
 def _write_pair(tmp_path, report=None, *, complete=True, expires_days=180):
-    from opaas_bench.canonical import canonicalize
-    from opaas_bench.hashing import file_digest
+    from opaas.canonical import canonicalize
+    from opaas.hashing import file_digest
 
     report_path = tmp_path / "report.json"
     report_path.write_bytes(canonicalize(report or _report()))
