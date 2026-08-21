@@ -136,7 +136,15 @@ opaas-bench run --model my-model --backend vllm --suite all --max-concurrency 8 
 
 `--max-concurrency` is what you say the engine serves; `--suite-concurrency` is what the harness sends. Raising the second above what the engine honours only fills a queue.
 
-**Trimming the dataset is the other lever, and it is not free.** `--limit` cuts items per task, and the confidence interval pays for it — at 69% accuracy, n=510 gives a 8.0pp interval, n=100 gives 17.8pp, n=50 gives 24.7pp. Below a few hundred items you can no longer tell two configurations apart. The report declares the trim, so it stays honest; use it while iterating, not to certify.
+**Lowering the generation caps is the other lever on the same 88%.** Blocks B and D stop at 400 and 320 tokens per item; most of the wall clock is spent producing them.
+
+```bash
+opaas-bench run --model my-model --backend vllm --suite all --capability-max-tokens 256 --safety-max-tokens 256
+```
+
+It is not free either, and the report will not let it pass quietly: a cut answer fails constraints it might have met, and a refusal cut mid-sentence can stop matching the detector and be scored as compliance — the model blamed for a setting of yours. Every response that hits the cap is counted per task and declared as a limitation, so if you cut too deep the report says so instead of returning a worse figure that looks real.
+
+**Trimming the dataset is the third lever, and the most expensive.** `--limit` cuts items per task, and the confidence interval pays for it — at 69% accuracy, n=510 gives a 8.0pp interval, n=100 gives 17.8pp, n=50 gives 24.7pp. Below a few hundred items you can no longer tell two configurations apart. The report declares the trim, so it stays honest; use it while iterating, not to certify.
 
 **And run only what you need**: `--suite performance` while tuning the server, `--suite consistency` (seconds) while checking a context setting.
 
@@ -356,6 +364,8 @@ The ones you will actually reach for. Full list with `opaas-bench run --help`.
 | `--output` | `runs/<run-id>/report.json` | Report file |
 | `--num-ctx` | server's default | Context window the engine must serve (Ollama) |
 | `--max-concurrency` | — | What the engine is configured to serve at once. Declared by you, cross-checked by block A |
+| `--capability-max-tokens` | `400` | Token cap per block B instruction item. Cut answers are counted and declared |
+| `--safety-max-tokens` | `320` | Token cap per block D item. Cut answers are counted and declared |
 | `--suite-concurrency` | `4` | Parallel requests the harness sends while scoring blocks B and D |
 | `--dataset` | `ifeval,xstest` | Sources, local paths, or `opaas-smoke` |
 | `--concurrency` | `1,4,16` | Block A concurrency levels |

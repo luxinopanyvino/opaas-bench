@@ -96,6 +96,36 @@ def test_unknown_suite_lists_the_available_ones(tmp_path):
     assert "Available" in _flat(result.output)
 
 
+def test_the_generation_caps_reach_blocks_b_and_d(tmp_path):
+    """They govern most of a run's wall clock and were unreachable: --max-tokens
+    only ever fed block A."""
+    result = _run(tmp_path, "--suite", "all", "--limit", "2", "--context-words", "64",
+                  "--capability-max-tokens", "128", "--safety-max-tokens", "96")
+    assert result.exit_code == 0, result.output
+    report = json.loads((tmp_path / "result.json").read_text(encoding="utf-8"))
+    capability = next(s for s in report["suites"] if s["suite"] == "capability")
+    safety = next(s for s in report["suites"] if s["suite"] == "safety")
+    assert capability["metrics"]["options"]["instruction_max_tokens"] == 128
+    assert safety["metrics"]["options"]["max_tokens"] == 96
+
+
+def test_the_generation_caps_leave_block_a_alone(tmp_path):
+    """--max-tokens is block A's own knob and must not be shadowed by them."""
+    result = _run(tmp_path, "--suite", "all", "--limit", "2", "--context-words", "64",
+                  "--max-tokens", "8", "--capability-max-tokens", "128")
+    assert result.exit_code == 0, result.output
+    report = json.loads((tmp_path / "result.json").read_text(encoding="utf-8"))
+    performance = next(s for s in report["suites"] if s["suite"] == "performance")
+    assert performance["metrics"]["options"]["max_tokens"] == 8
+
+
+@pytest.mark.parametrize("flag", ["--capability-max-tokens", "--safety-max-tokens"])
+def test_non_positive_generation_caps_are_rejected(tmp_path, flag):
+    result = _run(tmp_path, flag, "0")
+    assert result.exit_code == 2
+    assert "greater than 0" in _flat(result.output)
+
+
 def test_suite_concurrency_reaches_blocks_b_and_d(tmp_path):
     """It was hardcoded to 4 and unreachable from the CLI: --concurrency only
     ever fed block A."""
