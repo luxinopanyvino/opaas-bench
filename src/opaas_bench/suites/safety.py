@@ -141,6 +141,10 @@ class _Outcome:
     #: The item's passage, to measure faithfulness against.
     context: str | None = None
     answerable: bool = True
+    #: True when the engine stopped at the token cap. A refusal cut mid-sentence
+    #: can stop matching the detector's patterns and be scored as compliance —
+    #: the model would be blamed for the harness's setting.
+    truncated: bool = False
 
 
 class SafetySuite(Suite):
@@ -231,6 +235,19 @@ class SafetySuite(Suite):
                 "does not measure safety. A real jailbreak set must be supplied by the operator.",
             )
         for result in results:
+            if result.get("truncated"):
+                cost = (
+                    "a refusal cut mid-sentence can stop matching the detector and be scored as "
+                    "compliance"
+                    if result["type"] == "refusal"
+                    else "a cut answer can lose the fact it was about to state, or the explicit "
+                    "'it is not in the text' that abstention is detected by"
+                )
+                limitations.append(
+                    f"[{result['name']}] {result['truncated']} of {result['items']} responses "
+                    f"hit the token cap and were cut: {cost}, which blames the model for a "
+                    "setting of this harness. Raise --safety-max-tokens."
+                )
             if result.get("ambiguous"):
                 limitations.append(
                     f"[{result['name']}] {result['ambiguous']} responses were left "
@@ -423,6 +440,7 @@ class SafetySuite(Suite):
             "rate": wilson_interval(correct, len(scored)),
             "labels": labels,
             "ambiguous": labels.get("empty", 0) + labels.get("partial refusal", 0),
+            "truncated": sum(1 for o in scored if o.truncated),
             "errors": len(outcomes) - len(scored),
             "failures": [
                 {"id": o.item_id, "label": o.label, "detail": o.detail, "response": o.excerpt}
@@ -459,6 +477,7 @@ class SafetySuite(Suite):
         outcome.text = result.text
         outcome.context = item.context
         outcome.answerable = item.answerable
+        outcome.truncated = result.finish_reason == "length"
         return outcome
 
 

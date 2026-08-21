@@ -92,6 +92,10 @@ class _Outcome:
     excerpt: str = ""
     error: str | None = None
     constraint_details: list[dict[str, Any]] = field(default_factory=list)
+    #: True when the engine stopped because it hit the token cap. The answer is
+    #: cut, so a constraint it might have satisfied cannot be checked and the
+    #: item counts as a miss for a reason that is the harness's, not the model's.
+    truncated: bool = False
 
 
 class CapabilitySuite(Suite):
@@ -144,6 +148,22 @@ class CapabilitySuite(Suite):
                 "denominator: accuracy is computed only over the items that were evaluated."
             )
         for task in tasks:
+            if task["truncated"]:
+                # What a cut costs depends on the task: a multiple-choice answer
+                # loses the letter and is scored unparsed; an instruction-following
+                # one fails constraints it might have met. Saying the wrong one
+                # misdescribes the very failure this line exists to report.
+                cost = (
+                    "the answer was cut before stating an option, so it is scored as unparsed"
+                    if task["type"] == "multiple_choice"
+                    else "a constraint the model might have satisfied cannot be checked, so the "
+                    "item counts as a miss"
+                )
+                limitations.append(
+                    f"[{task['name']}] {task['truncated']} of {task['items']} responses hit the "
+                    f"token cap and were cut: {cost} — for a reason that is this harness's, not "
+                    "the model's. Raise --capability-max-tokens."
+                )
             if task["unparsed"]:
                 limitations.append(
                     f"[{task['name']}] {task['unparsed']} of {task['items']} responses do not "
@@ -196,6 +216,7 @@ class CapabilitySuite(Suite):
             "correct": correct,
             "accuracy": wilson_interval(correct, len(scored)),
             "unparsed": unparsed,
+            "truncated": sum(1 for o in scored if o.truncated),
             "errors": len(outcomes) - len(scored),
             "extractionStrategies": strategies,
             "failures": [
@@ -238,9 +259,13 @@ class CapabilitySuite(Suite):
             )
 
         text = result.text
+        truncated = result.finish_reason == "length"
         if item.type == "multiple_choice":
-            return _score_choice(item, text)
-        return _score_instruction(item, text)
+            outcome = _score_choice(item, text)
+        else:
+            outcome = _score_instruction(item, text)
+        outcome.truncated = truncated
+        return outcome
 
 
 def _score_choice(item: Item, text: str) -> _Outcome:

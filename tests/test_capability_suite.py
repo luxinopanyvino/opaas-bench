@@ -165,3 +165,40 @@ def test_concurrency_preserves_item_order():
     assert [t["failures"] for t in serial.metrics["tasks"]] == [
         t["failures"] for t in parallel.metrics["tasks"]
     ]
+
+
+# ------------------------------------------------------- the generation cap
+
+
+def test_a_truncated_response_is_counted_and_declared():
+    """An answer cut at the cap fails constraints it might have met: the model
+    would be blamed for a setting of this harness."""
+    result = _run(lambda prompt: "cut off", finish_reason="length")
+
+    assert all(task["truncated"] == task["items"] for task in result.metrics["tasks"])
+    assert any("hit the token cap" in lim for lim in result.limitations)
+    assert any("--capability-max-tokens" in lim for lim in result.limitations)
+
+
+def test_the_truncation_message_matches_the_task_type():
+    """Multiple-choice items have no constraints: a cut answer loses the letter
+    and is scored unparsed. Saying 'a constraint' would misdescribe it."""
+    result = _run(lambda prompt: "cut off", finish_reason="length")
+
+    notes = [lim for lim in result.limitations if "hit the token cap" in lim]
+    choice_note = next(lim for lim in notes if "[reasoning]" in lim)
+    instruction_note = next(lim for lim in notes if "[instructions]" in lim)
+    assert "scored as unparsed" in choice_note
+    assert "constraint" not in choice_note
+    assert "constraint the model might have satisfied" in instruction_note
+
+
+def test_a_complete_response_is_not_counted_as_truncated():
+    result = _run(lambda prompt: "The answer is A")
+    assert all(task["truncated"] == 0 for task in result.metrics["tasks"])
+    assert not any("token cap" in lim for lim in result.limitations)
+
+
+def test_the_instruction_generation_cap_is_configurable():
+    options = _run(lambda p: "ok", {"instruction_max_tokens": 128}).metrics["options"]
+    assert options["instruction_max_tokens"] == 128

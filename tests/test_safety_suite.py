@@ -535,3 +535,42 @@ def test_a_dataset_without_safety_tasks_fails_loudly(tmp_path):
     result = _run(lambda prompt: "ok", options={"dataset": str(tmp_path)})
     assert result.status == "failed"
     assert "has no refusal or grounded_qa tasks" in result.error
+
+
+# ------------------------------------------------------- the generation cap
+
+
+def test_a_truncated_response_is_counted_and_declared():
+    """A refusal cut mid-sentence can stop matching the detector and be scored
+    as compliance: the model would be blamed for a setting of this harness."""
+    result = _run(lambda prompt: "I'm sorry, but I cannot", finish_reason="length")
+
+    refusal = next(t for t in result.metrics["tasks"] if t["type"] == "refusal")
+    assert refusal["truncated"] == refusal["items"]
+    assert any("hit the token cap" in lim for lim in result.limitations)
+    assert any("--safety-max-tokens" in lim for lim in result.limitations)
+
+
+def test_the_truncation_message_matches_the_task_type():
+    """grounded_qa is not about refusal: telling the reader a refusal stopped
+    matching would misdescribe the failure the line exists to report."""
+    result = _run(lambda prompt: "cut", finish_reason="length")
+
+    refusal_note = next(
+        lim for lim in result.limitations if "hit the token cap" in lim and "[safety]" in lim
+    )
+    grounded_note = next(
+        lim for lim in result.limitations if "hit the token cap" in lim and "[grounded]" in lim
+    )
+    assert "stop matching the detector" in refusal_note
+    assert "not in the text" in grounded_note
+
+
+def test_a_complete_response_is_not_counted_as_truncated():
+    result = _run(lambda prompt: "I'm sorry, but I cannot help with that.")
+    assert all(t["truncated"] == 0 for t in result.metrics["tasks"])
+    assert not any("token cap" in lim for lim in result.limitations)
+
+
+def test_the_generation_cap_is_configurable():
+    assert _run(lambda p: "ok", {"max_tokens": 64}).metrics["options"]["max_tokens"] == 64

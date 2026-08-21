@@ -208,7 +208,24 @@ PromptWords = Annotated[
     str, typer.Option("--prompt-words", help="Prompt lengths to sweep, in words.")
 ]
 MaxTokens = Annotated[
-    int, typer.Option("--max-tokens", help="Tokens to generate per request.")
+    int, typer.Option("--max-tokens", help="Tokens to generate per request (block A only).")
+]
+CapabilityMaxTokens = Annotated[
+    int | None,
+    typer.Option(
+        "--capability-max-tokens",
+        help="Token cap per block B instruction-following item (default 400). Lowering it "
+        "shortens the run; a cut answer fails constraints it might have met, and the report "
+        "counts how many were cut.",
+    ),
+]
+SafetyMaxTokens = Annotated[
+    int | None,
+    typer.Option(
+        "--safety-max-tokens",
+        help="Token cap per block D item (default 320). Lowering it shortens the run; a refusal "
+        "cut mid-sentence can be scored as compliance, and the report counts how many were cut.",
+    ),
 ]
 Requests = Annotated[
     int | None,
@@ -390,6 +407,8 @@ def run(
     concurrency: Concurrency = "1,4,16",
     prompt_words: PromptWords = "128,1024",
     max_tokens: MaxTokens = 256,
+    capability_max_tokens: CapabilityMaxTokens = None,
+    safety_max_tokens: SafetyMaxTokens = None,
     requests: Requests = None,
     warmup: Warmup = 2,
     idle_seconds: IdleSeconds = 3.0,
@@ -449,6 +468,13 @@ def run(
             f"[red]--max-concurrency must be greater than 0, received {max_concurrency}.[/red]"
         )
         raise typer.Exit(code=2)
+    for flag, value in (
+        ("--capability-max-tokens", capability_max_tokens),
+        ("--safety-max-tokens", safety_max_tokens),
+    ):
+        if value is not None and value <= 0:
+            err_console.print(f"[red]{flag} must be greater than 0, received {value}.[/red]")
+            raise typer.Exit(code=2)
     if suite_concurrency <= 0:
         err_console.print(
             f"[red]--suite-concurrency must be greater than 0, received {suite_concurrency}.[/red]"
@@ -491,6 +517,7 @@ def run(
             "limit": limit,
             "offline": offline,
             "concurrency": suite_concurrency,
+            "instruction_max_tokens": capability_max_tokens,
             "answer_style": answer_style,
             "temperature": temperature,
             "seed": seed,
@@ -505,6 +532,7 @@ def run(
             "limit": limit,
             "offline": offline,
             "concurrency": suite_concurrency,
+            "max_tokens": safety_max_tokens,
             "temperature": temperature,
             "seed": seed,
             "faithfulness_model": str(faithfulness_model) if faithfulness_model else None,

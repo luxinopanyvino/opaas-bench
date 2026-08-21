@@ -56,11 +56,19 @@ class ScriptedBackend(FakeBackend):
 
     name: ClassVar[str] = "fake-scripted"
 
-    def __init__(self, responder, prompt_token_cap: int | None = None, **kwargs: Any) -> None:
+    def __init__(
+        self,
+        responder,
+        prompt_token_cap: int | None = None,
+        finish_reason: str = "stop",
+        **kwargs: Any,
+    ) -> None:
         super().__init__(**kwargs)
         self.responder = responder
         #: Simulates an engine that trims the prompt: the count stops growing.
         self.prompt_token_cap = prompt_token_cap
+        #: "length" simulates an engine that stopped at the token cap.
+        self.finish_reason = finish_reason
         self.prompts: list[str] = []
 
     def generate(self, prompt: str, **params: Any) -> GenerationResult:
@@ -78,7 +86,7 @@ class ScriptedBackend(FakeBackend):
             completion_tokens=max(1, len(text.split())),
             total_s=0.002,
             ttft_s=0.001,
-            finish_reason="stop",
+            finish_reason=self.finish_reason,
         )
 
 
