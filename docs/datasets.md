@@ -104,6 +104,26 @@ A working example ships with the tool — the `grounded` task of `opaas-smoke`, 
 
 Composing such a dataset is also what unlocks **faithfulness**: with no passage to score a response against, that dimension stays declared unmeasured no matter which classifier is installed.
 
+### Item types beyond these four
+
+The four above are what the five blocks score today. A block that brings its own
+kind of data registers a type instead of editing the loader:
+
+```python
+from opaas.datasets import register_item_type
+
+def check_injection(item, where):
+    if not item.expected_facts:
+        raise DatasetError(f"{where}: prompt_injection needs 'expected_facts'")
+
+register_item_type("prompt_injection", check_injection)
+```
+
+The validator runs after the common fields are read and raises `DatasetError`
+naming the file and line. `available_item_types()` lists what is registered, and
+an unknown `type` in a manifest fails at load time with that list — a dataset
+error is caught before the model is loaded, never counted as a model failure.
+
 ---
 
 ## Using a real dataset

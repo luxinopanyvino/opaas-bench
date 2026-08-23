@@ -14,7 +14,7 @@ from __future__ import annotations
 import json
 import random
 from collections import defaultdict
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, TypeVar
@@ -22,15 +22,32 @@ from typing import Any, TypeVar
 from opaas.datasets.sources import available_sources, get_source
 from opaas.hashing import sha256_json, text_file_digest
 
+#: (item, where) -> None. Raises DatasetError when the item cannot be scored.
+ItemValidator = Callable[["Item", str], None]
+
 _Entry = TypeVar("_Entry")
 
 MANIFEST_FILENAME = "dataset.json"
 BUILTIN_DIR = Path(__file__).parent / "builtin"
 
 #: Item types the block B and D runners know how to score.
-SUPPORTED_ITEM_TYPES = frozenset(
-    {"multiple_choice", "instruction_following", "refusal", "grounded_qa"}
-)
+#: Item types, each with the check that decides whether one is usable. A block
+#: that brings its own kind of data — a security layer with injection attempts,
+#: say — registers it here instead of editing this module, the same way an
+#: engine registers an adapter and a block registers a suite.
+#:
+#: A validator raises `DatasetError` naming the file and line. It runs after the
+#: common fields are read, so it only has to check what its own type requires.
+_ITEM_TYPES: dict[str, ItemValidator] = {}
+
+
+def register_item_type(name: str, validator: ItemValidator) -> None:
+    """Registers an item type and the check that guards it."""
+    _ITEM_TYPES[name] = validator
+
+
+def available_item_types() -> list[str]:
+    return sorted(_ITEM_TYPES)
 
 #: Expected behavior on a `refusal` item.
 REFUSAL_EXPECTATIONS = frozenset({"refuse", "comply"})
@@ -303,10 +320,10 @@ def _load_task(root: Path, entry: dict[str, Any], *, limit: int | None) -> Task:
         raise DatasetError(f"The manifest references a file that does not exist: {path}")
 
     item_type = str(entry.get("type", "multiple_choice"))
-    if item_type not in SUPPORTED_ITEM_TYPES:
+    if item_type not in _ITEM_TYPES:
         raise DatasetError(
             f"Unsupported item type: {item_type!r}. "
-            f"Supported: {', '.join(sorted(SUPPORTED_ITEM_TYPES))}"
+            f"Supported: {', '.join(available_item_types())}"
         )
 
     category = str(entry.get("category", path.stem))
@@ -356,34 +373,50 @@ def _build_item(
         expected_facts=[str(fact) for fact in raw.get("expected_facts", [])],
     )
 
-    if item_type == "multiple_choice":
-        if len(item.choices) < 2:
-            raise DatasetError(f"{where}: multiple_choice needs at least 2 choices")
-        if not item.answer:
-            raise DatasetError(f"{where}: multiple_choice needs 'answer'")
-        letters = _letters(len(item.choices))
-        if item.answer.strip().upper() not in letters:
-            raise DatasetError(
-                f"{where}: 'answer' is {item.answer!r}, "
-                f"but with {len(item.choices)} choices it must be one of {''.join(letters)}"
-            )
-    elif item_type == "instruction_following" and not item.constraints:
+    _ITEM_TYPES[item_type](item, where)
+    return item
+
+
+def _check_multiple_choice(item: Item, where: str) -> None:
+    if len(item.choices) < 2:
+        raise DatasetError(f"{where}: multiple_choice needs at least 2 choices")
+    if not item.answer:
+        raise DatasetError(f"{where}: multiple_choice needs 'answer'")
+    letters = _letters(len(item.choices))
+    if item.answer.strip().upper() not in letters:
+        raise DatasetError(
+            f"{where}: 'answer' is {item.answer!r}, "
+            f"but with {len(item.choices)} choices it must be one of {''.join(letters)}"
+        )
+
+
+def _check_instruction_following(item: Item, where: str) -> None:
+    if not item.constraints:
         raise DatasetError(f"{where}: instruction_following needs at least one constraint")
-    elif item_type == "refusal" and item.expected not in REFUSAL_EXPECTATIONS:
+
+
+def _check_refusal(item: Item, where: str) -> None:
+    if item.expected not in REFUSAL_EXPECTATIONS:
         raise DatasetError(
             f"{where}: refusal needs 'expected' set to one of "
             f"{', '.join(sorted(REFUSAL_EXPECTATIONS))}, received {item.expected!r}"
         )
-    elif item_type == "grounded_qa":
-        if not item.context:
-            raise DatasetError(f"{where}: grounded_qa needs 'context'")
-        if item.answerable and not item.expected_facts:
-            raise DatasetError(
-                f"{where}: an answerable grounded_qa needs 'expected_facts' with what must "
-                "appear in the response"
-            )
 
-    return item
+
+def _check_grounded_qa(item: Item, where: str) -> None:
+    if not item.context:
+        raise DatasetError(f"{where}: grounded_qa needs 'context'")
+    if item.answerable and not item.expected_facts:
+        raise DatasetError(
+            f"{where}: an answerable grounded_qa needs 'expected_facts' with what must "
+            "appear in the response"
+        )
+
+
+register_item_type("multiple_choice", _check_multiple_choice)
+register_item_type("instruction_following", _check_instruction_following)
+register_item_type("refusal", _check_refusal)
+register_item_type("grounded_qa", _check_grounded_qa)
 
 
 def _letters(count: int) -> list[str]:

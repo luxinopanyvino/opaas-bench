@@ -57,10 +57,12 @@ The three seams that are open by design:
 | An inference engine | `adapters/<engine>.py` + registration. Nothing in `suites/` |
 | An evaluation block | Subclass `Suite`, register it. `--suite all` and `coverage()` pick it up |
 | A classifier | An entry in `DEFAULT_CLASSIFIERS` and a profile in `PROFILES` |
+| A dataset item type | `register_item_type(name, validator)` — the validator raises `DatasetError` naming file and line |
 
-New dataset *item types* are not yet extensible from outside: `SUPPORTED_ITEM_TYPES`
-in `datasets/loader.py` is a closed set. Adding one is fine, it just is not a
-plug-in point yet.
+A block that brings its own kind of data — a security layer with injection
+attempts, say — registers the item type rather than editing the loader. The
+validator runs after the common fields are read, so it only checks what its own
+type requires.
 
 ## Tests
 

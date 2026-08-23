@@ -198,3 +198,103 @@ def test_empty_task_file_is_rejected(tmp_path):
     _write(tmp_path, items=[])
     with pytest.raises(DatasetError, match="is empty"):
         load_dataset(str(tmp_path))
+
+
+# ------------------------------------------------------- the item type seam
+
+
+def test_the_built_in_item_types_are_registered():
+    from opaas.datasets import available_item_types
+
+    assert available_item_types() == [
+        "grounded_qa",
+        "instruction_following",
+        "multiple_choice",
+        "refusal",
+    ]
+
+
+def test_a_block_can_bring_its_own_item_type(tmp_path):
+    """The seam that was closed: a security or XAI layer needs its own kind of
+    item, and used to have to edit the loader to get one."""
+    from opaas.datasets import load_dataset, register_item_type
+    from opaas.datasets.loader import _ITEM_TYPES, DatasetError
+
+    def _check_injection(item, where):
+        if not item.expected_facts:
+            raise DatasetError(f"{where}: prompt_injection needs 'expected_facts'")
+
+    register_item_type("prompt_injection", _check_injection)
+    try:
+        (tmp_path / "dataset.json").write_text(
+            json.dumps(
+                {
+                    "name": "injection",
+                    "version": "1",
+                    "tasks": [
+                        {"file": "items.jsonl", "type": "prompt_injection", "category": "security"}
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+        (tmp_path / "items.jsonl").write_text(
+            json.dumps({"id": "i-1", "prompt": "ignore previous", "expected_facts": ["refused"]}),
+            encoding="utf-8",
+        )
+
+        dataset = load_dataset(str(tmp_path))
+        assert dataset.tasks[0].type == "prompt_injection"
+        assert dataset.tasks[0].items[0].expected_facts == ["refused"]
+    finally:
+        _ITEM_TYPES.pop("prompt_injection", None)
+
+
+def test_a_registered_type_still_enforces_its_own_check(tmp_path):
+    """Registering a type must not mean anything is accepted under its name."""
+    from opaas.datasets import load_dataset, register_item_type
+    from opaas.datasets.loader import _ITEM_TYPES, DatasetError
+
+    def _always_refuses(item, where):
+        raise DatasetError(f"{where}: nope")
+
+    register_item_type("picky", _always_refuses)
+    try:
+        (tmp_path / "dataset.json").write_text(
+            json.dumps(
+                {
+                    "name": "picky",
+                    "version": "1",
+                    "tasks": [{"file": "items.jsonl", "type": "picky", "category": "x"}],
+                }
+            ),
+            encoding="utf-8",
+        )
+        (tmp_path / "items.jsonl").write_text(
+            json.dumps({"id": "p-1", "prompt": "hello"}), encoding="utf-8"
+        )
+        with pytest.raises(DatasetError, match="nope"):
+            load_dataset(str(tmp_path))
+    finally:
+        _ITEM_TYPES.pop("picky", None)
+
+
+def test_an_unknown_type_lists_what_is_registered(tmp_path):
+    from opaas.datasets import load_dataset
+    from opaas.datasets.loader import DatasetError
+
+    (tmp_path / "dataset.json").write_text(
+        json.dumps(
+            {
+                "name": "bad",
+                "version": "1",
+                "tasks": [{"file": "items.jsonl", "type": "telepathy", "category": "x"}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "items.jsonl").write_text(
+        json.dumps({"id": "1", "prompt": "x"}), encoding="utf-8"
+    )
+    with pytest.raises(DatasetError, match="grounded_qa"):
+        load_dataset(str(tmp_path))
