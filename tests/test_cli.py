@@ -492,3 +492,77 @@ def test_datasets_says_how_to_install_the_extra_when_it_is_missing(monkeypatch):
 
     assert result.exit_code == 0, result.output
     assert "opaas[classifiers]" in _flat(result.output)
+
+
+# ------------------------------------------------------------------- trust
+
+
+def _anchor_dir(tmp_path, monkeypatch):
+    directory = tmp_path / "anchors"
+    monkeypatch.setenv("OPAAS_ANCHOR_DIR", str(directory))
+    return directory
+
+
+def test_trust_lists_nothing_and_says_how_to_pin(tmp_path, monkeypatch):
+    _anchor_dir(tmp_path, monkeypatch)
+    result = runner.invoke(app, ["trust"])
+    assert result.exit_code == 0, result.output
+    assert "No anchors pinned" in _flat(result.output)
+    assert "--add" in _flat(result.output)
+
+
+def test_trust_shows_the_fingerprint_before_pinning(tmp_path, monkeypatch):
+    """Pinning is the moment the whole chain rests on: the fingerprint has to be
+    checkable against a channel other than the file itself."""
+    directory = _anchor_dir(tmp_path, monkeypatch)
+    _keygen(tmp_path / "keys")
+
+    result = runner.invoke(app, ["trust", "--add", str(tmp_path / "keys" / "did.json"), "--yes"])
+    assert result.exit_code == 0, result.output
+    flat = _flat(result.output)
+    assert "fingerprint" in flat
+    assert "against a channel other than the one this file came through" in flat
+    assert list(directory.glob("*.json"))
+
+
+def test_pinning_needs_confirmation_when_not_forced(tmp_path, monkeypatch):
+    directory = _anchor_dir(tmp_path, monkeypatch)
+    _keygen(tmp_path / "keys")
+
+    result = runner.invoke(
+        app, ["trust", "--add", str(tmp_path / "keys" / "did.json")], input="n\n"
+    )
+    assert result.exit_code == 1
+    assert not directory.exists() or not list(directory.glob("*.json"))
+
+
+def test_a_pinned_anchor_makes_verify_work_with_no_flags(tmp_path, monkeypatch):
+    """The whole point of an anchor: the verifier stops having to be handed a key."""
+    _anchor_dir(tmp_path, monkeypatch)
+    report, credential, keys = _sign_flow(tmp_path)
+
+    refused = runner.invoke(app, ["verify", "--credential", str(credential)])
+    assert refused.exit_code == 2
+
+    runner.invoke(app, ["trust", "--add", str(keys / "did.json"), "--yes"])
+    accepted = runner.invoke(
+        app, ["verify", "--credential", str(credential), "--report", str(report)]
+    )
+    assert accepted.exit_code == 0, accepted.output
+    assert "local anchor" in _flat(accepted.output)
+
+
+def test_trust_rejects_a_document_that_is_not_one(tmp_path, monkeypatch):
+    _anchor_dir(tmp_path, monkeypatch)
+    broken = tmp_path / "not-a-did.json"
+    broken.write_text('{"id": "did:web:example.com"}', encoding="utf-8")
+
+    result = runner.invoke(app, ["trust", "--add", str(broken), "--yes"])
+    assert result.exit_code == 2
+
+
+def test_trust_rejects_a_missing_file(tmp_path, monkeypatch):
+    _anchor_dir(tmp_path, monkeypatch)
+    result = runner.invoke(app, ["trust", "--add", str(tmp_path / "nope.json"), "--yes"])
+    assert result.exit_code == 2
+    assert "Does not exist" in _flat(result.output)

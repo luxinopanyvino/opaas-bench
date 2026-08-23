@@ -31,10 +31,30 @@ It produces three files:
 For `opaas verify` to work without a network, the verifier needs the key beforehand. Three routes, from most to least convenient for them:
 
 1. **Bundled anchor**: the `did.json` is included in the OPAAS package (`credential/anchors/`). It works out of the box. Empty until the production key exists.
-2. **Installed anchor**: the verifier copies `did.json` into `~/.opaas/anchors/` once.
+2. **Installed anchor**: the verifier pins `did.json` once.
+
+   ```bash
+   opaas trust --add did.json
+   ```
+
+   It prints the fingerprint and waits before writing anything, because **pinning is the moment the whole chain rests on**: from then on, everything that issuer signs verifies without further questions. Compare that fingerprint against a channel other than the one the file arrived through — a document that vouches for itself vouches for nothing. `opaas trust` with no arguments lists what is already pinned, with fingerprints.
 3. **Explicit**: `--did-document did.json` or `--key opaas-root-ed25519.pub.pem` on every verification.
 
 The key is never distributed inside the credential: a credential that carries its own key verifies itself.
+
+## The ceremony, rehearsed
+
+The full chain — `keygen` → `sign` → `trust --add` → `verify` with no key flags — has been exercised end to end with a throwaway key, so the production ceremony is not the first time it runs. What it produced, in order:
+
+| step | result |
+|---|---|
+| `keygen` | three files, and a fingerprint to write down |
+| `sign` | credential plus an entry in the transparency log |
+| `verify` **without** an anchor | refuses, listing the three ways to supply the key |
+| `trust --add` | prints the fingerprint, then pins |
+| `verify` again | six checks pass: structure, cryptosuite, signature, validity, report hash, log inclusion |
+
+The throwaway key was discarded. Nothing about the rehearsal is committed: bundling a test anchor would make `verify` accept credentials signed with a key that is not the production one, which is worse than having no anchor at all.
 
 ## Rotation and revocation
 

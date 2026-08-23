@@ -455,6 +455,7 @@ The ones you will actually reach for. Full list with `opaas run --help`.
 | `opaas keygen` | Generates the root Ed25519 pair (root of trust) |
 | `opaas sign` | Issues the signed W3C credential from a report |
 | `opaas verify` | Verifies a credential, offline |
+| `opaas trust` | Lists pinned trust anchors, or pins one after showing its fingerprint |
 | `opaas publish` | Generates the static certificate site |
 | `opaas log-verify` | Checks the transparency log |
 | `opaas compliance` | Generates the block E declaration template |
@@ -472,6 +473,14 @@ The credential is signed with Ed25519 over canonical RFC 8785 JSON, using `DataI
 The certified hash is the hash of **the report's bytes**, so checking that a report is the certified one is `sha256sum result.json`.
 
 `verify` needs the issuer's public key up front — never taking it from the credential itself — and looks for it in this order: `--key` or `--did-document`, then anchors in `~/.opaas/anchors/` (or `$OPAAS_ANCHOR_DIR`), then the anchors bundled with the tool. If it finds none, it fails saying what is missing.
+
+Pinning an anchor once removes that step for good:
+
+```bash
+opaas trust --add did.json
+```
+
+It shows the fingerprint and waits, because pinning is the moment everything else rests on: afterwards, anything that issuer signs verifies without further questions. Check that fingerprint against a channel other than the one the file came through.
 
 The transparency log is **not** Certificate Transparency: there are no Merkle trees and no independent monitors. It is published by the issuer, so the chain only proves that the published log is internally consistent. Publishing it in a repository with history puts date-stamped copies in third-party hands, which is what gives it value.
 

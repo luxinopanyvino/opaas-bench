@@ -50,6 +50,8 @@ from opaas.credential import (
     sign_credential,
     verify_credential,
 )
+from opaas.credential.keys import public_key_from_did_document
+from opaas.credential.trust import user_anchor_dir
 from opaas.credential.vc import DEFAULT_VALIDITY_DAYS
 from opaas.datasets import (
     DEFAULT_DATASET,
@@ -66,7 +68,7 @@ from opaas.datasets import (
 )
 from opaas.datasets.importers import ImporterError, import_dataset
 from opaas.declaration import template as declaration_template
-from opaas.hashing import canonical_json, file_digest, short_hash
+from opaas.hashing import canonical_json, file_digest, short_hash, slugify
 from opaas.report import REPORT_FILENAME
 from opaas.runner import RunEvent, RunRequest, execute
 from opaas.scoring import ScoringError, prompt_template_hash
@@ -1199,6 +1201,18 @@ CredentialIn = Annotated[
 VerifyKey = Annotated[
     Path | None, typer.Option("--key", "-k", help="Issuer public key, if there is no anchor.")
 ]
+TrustAdd = Annotated[
+    Path | None,
+    typer.Option(
+        "--add",
+        help="DID document to pin as a trust anchor. Its fingerprint is shown before "
+        "installing: check it against a second channel, not against the file you were sent.",
+    ),
+]
+TrustYes = Annotated[
+    bool,
+    typer.Option("--yes", "-y", help="Install without asking. For provisioning scripts."),
+]
 DidDocument = Annotated[
     Path | None, typer.Option("--did-document", help="Issuer did.json document.")
 ]
@@ -1227,6 +1241,75 @@ def log_verify(log: Annotated[Path, typer.Argument(help="JSONL log to check.")])
         "rewrite requires comparing against an earlier copy — which is why it is worth "
         "publishing it in a repository with history.[/dim]"
     )
+
+
+@app.command("trust")
+def trust_command(add: TrustAdd = None, yes: TrustYes = False) -> None:
+    """Lists the pinned trust anchors, or pins a new one.
+
+    Pinning an anchor is the moment the whole chain rests on: from then on,
+    `verify` accepts anything that issuer signs. The fingerprint is printed
+    before anything is written so it can be compared against a channel other
+    than the one the file arrived through — a file that came with its own
+    assurance that it is genuine assures nothing.
+    """
+    directory = user_anchor_dir()
+
+    if add is not None:
+        try:
+            document = json.loads(add.read_text(encoding="utf-8-sig"))
+        except FileNotFoundError:
+            err_console.print(f"[red]Does not exist:[/red] {add}")
+            raise typer.Exit(code=2) from None
+        except json.JSONDecodeError as exc:
+            err_console.print(f"[red]{add} is not valid JSON:[/red] {exc}")
+            raise typer.Exit(code=2) from None
+
+        issuer = str(document.get("id") or "")
+        try:
+            key = public_key_from_did_document(document)
+        # keys.py raises bare ValueErrors and vc.py raises CredentialError, which
+        # subclasses it: one clause covers a malformed document either way.
+        except ValueError as exc:
+            err_console.print(f"[red]{_plain(exc)}[/red]")
+            raise typer.Exit(code=2) from None
+
+        console.print(f"  issuer      : {_plain(issuer)}")
+        console.print(f"  fingerprint : [bold]{fingerprint(key)}[/bold]")
+        console.print(
+            "\n[yellow]Check that fingerprint against a channel other than the one this "
+            "file came through.[/yellow] Once pinned, every credential this issuer signs "
+            "verifies without further questions."
+        )
+        if not yes and not typer.confirm("Pin this issuer?", default=False):
+            raise typer.Exit(code=1)
+
+        directory.mkdir(parents=True, exist_ok=True)
+        target = directory / f"{slugify(issuer) or 'anchor'}.json"
+        target.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
+        console.print(f"[green]Pinned:[/green] {target}")
+        return
+
+    if not directory.is_dir() or not (found := sorted(directory.glob("*.json"))):
+        console.print(f"No anchors pinned in {directory}.")
+        console.print(
+            "[dim]Pin one with: opaas trust --add did.json[/dim]"
+        )
+        return
+
+    table = Table(title=f"Trust anchors in {directory}")
+    table.add_column("issuer", style="bold")
+    table.add_column("fingerprint")
+    table.add_column("file")
+    for path in found:
+        try:
+            document = json.loads(path.read_text(encoding="utf-8-sig"))
+            mark = fingerprint(public_key_from_did_document(document))
+            issuer = str(document.get("id") or "—")
+        except (ValueError, OSError) as exc:
+            issuer, mark = "—", f"[red]unreadable: {type(exc).__name__}[/red]"
+        table.add_row(_plain(issuer), mark, _plain(path.name))
+    console.print(table)
 
 
 @app.command("verify")

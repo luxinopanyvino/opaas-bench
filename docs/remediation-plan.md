@@ -40,6 +40,13 @@ the seal that means something to a stranger is not operational.
 **Acceptance:** on a clean machine, `opaas verify --credential cert.json
 --report report.json` succeeds with no flags.
 
+**The chain is already proven.** The whole ceremony was rehearsed with a
+throwaway key — `keygen`, `sign`, `trust --add`, then `verify` with no key
+flags passing all six checks including log inclusion. See
+[key-custody.md](key-custody.md). What is missing is the real key, not the
+mechanism, and `opaas trust` now makes step 2.3 a command rather than a
+filesystem instruction.
+
 The private key never travels through a code change. See
 [key-custody.md](key-custody.md): it is the system's only secret, and if it
 leaks anyone can issue certificates that look legitimate.
