@@ -47,8 +47,10 @@ jobs:
         with:
           enable-cache: true
 
+      # `uv run ruff` without the extra creates a bare environment and then
+      # fails to spawn a tool it never installed.
       - name: Ruff
-        run: uv run ruff check src tests
+        run: uv run --extra dev ruff check src tests
 
       # Dependencies are pinned on purpose: a lockfile that drifts from
       # pyproject.toml means two installs of the same commit can differ, which
