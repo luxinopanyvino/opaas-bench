@@ -14,7 +14,7 @@ by construction, and a test pins that down.
 from __future__ import annotations
 
 import platform
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -102,7 +102,7 @@ class RunReport(_Base):
 
 
 def utcnow_iso() -> str:
-    return datetime.now(UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
+    return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
 
 
 def describe_environment() -> dict[str, Any]:

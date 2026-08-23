@@ -86,7 +86,7 @@ def test_runs_without_a_declaration_and_says_what_is_missing():
 def test_the_suggested_command_is_one_that_exists():
     """The limitation told the reader to run 'compliance --template', a flag that
     was never implemented: following the report's own advice failed."""
-    from typer.testing import CliRunner
+    from typer.main import get_command
 
     from opaas.cli.main import app
 
@@ -96,14 +96,17 @@ def test_the_suggested_command_is_one_that_exists():
     flags = [word.strip("'\",.") for word in advice.split() if word.startswith("--")]
     assert flags, "the advice names no flag to run"
 
-    runner = CliRunner()
-    # The advice spans two commands: generate the template, then feed it to a run.
-    known = " ".join(
-        " ".join(runner.invoke(app, [command, "--help"]).output.split())
-        for command in ("compliance", "run")
-    )
+    # Asked of the command tree, not of rendered `--help` text: help output is
+    # wrapped by Rich to the terminal width and differs between a developer's
+    # machine and CI, which is how this test first failed on a flag that exists.
+    accepted = {
+        option
+        for command in get_command(app).commands.values()
+        for parameter in command.params
+        for option in (*parameter.opts, *parameter.secondary_opts)
+    }
     for flag in flags:
-        assert flag in known, f"the advice names {flag}, which no command accepts"
+        assert flag in accepted, f"the advice names {flag}, which no command accepts"
 
 
 def test_declared_and_probed_are_never_summed():

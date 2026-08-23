@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import re
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -132,7 +132,7 @@ def slugify(value: str) -> str:
 
 def allocate_run_id(runs_dir: Path, now: datetime | None = None) -> str:
     """Generates `YYYYMMDD-NNN`, with NNN running sequentially within the day."""
-    stamp = (now or datetime.now(UTC)).strftime("%Y%m%d")
+    stamp = (now or datetime.now(timezone.utc)).strftime("%Y%m%d")
     existing = {p.name for p in runs_dir.glob(f"{stamp}-*")} if runs_dir.exists() else set()
     for index in range(1, 1000):
         candidate = f"{stamp}-{index:03d}"

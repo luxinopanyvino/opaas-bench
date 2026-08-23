@@ -9,7 +9,7 @@ is partial or the credential has expired.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from typing import Any
 from xml.sax.saxutils import escape
 
@@ -40,12 +40,13 @@ def _expired(expiration: Any, now: datetime | None) -> bool:
     if not isinstance(expiration, str):
         return False
     try:
-        parsed = datetime.fromisoformat(expiration)
+        # See credential/vc.py::_parse: the "Z" suffix needs 3.11 without this.
+        parsed = datetime.fromisoformat(expiration.replace("Z", "+00:00"))
     except ValueError:
         return False
     if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=UTC)
-    return (now or datetime.now(UTC)) >= parsed
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return (now or datetime.now(timezone.utc)) >= parsed
 
 
 def render_badge(credential: dict[str, Any], now: datetime | None = None) -> str:

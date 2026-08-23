@@ -2,6 +2,11 @@
 
 # OPAAS
 
+[![CI](https://github.com/luxinopanyvino/opaas-bench/actions/workflows/ci.yml/badge.svg)](https://github.com/luxinopanyvino/opaas-bench/actions/workflows/ci.yml)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)](pyproject.toml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Methodology 1.0-draft](https://img.shields.io/badge/methodology-1.0--draft-8fae6a)](docs/methodology.md)
+
 **LLM & SLM deployment audit** · quantization · inference engines · on-prem & edge
 · reproducible evidence · no aggregate score · AI Act / ENS
 
@@ -90,7 +95,7 @@ the others eat. That is what this tool does with a deployment.
 
 ## Requirements
 
-- **Python 3.11 or later**
+- **Python 3.10 or later** — the floor is 3.10 so it installs on edge devices; JetPack 6 ships 3.10
 - **An inference server already running** with the model loaded. OPAAS evaluates a deployment; it does not deploy anything and never downloads the model under evaluation.
 - Supported engines: **vLLM**, **Ollama**, and **`openai`** — a generic OpenAI-compatible adapter that covers local NVIDIA NIM, `llama-server`, TGI and LM Studio with no new code.
 - An NVIDIA GPU is not required, but without `nvidia-smi` there are no VRAM or power figures, and the report says so.
@@ -511,6 +516,7 @@ The suites never talk to a specific engine, only to `InferenceBackend`. Supporti
 - **[Certifying yourself without sending us your model](docs/self-evaluation.md)** — self-evaluation and what the signature guarantees
 - [Block B datasets](docs/datasets.md) — format, how to install real subsets, sample size
 - [Root key custody](docs/key-custody.md)
+- [Remediation plan](docs/remediation-plan.md) — what is left, and what each item unblocks
 - [System design](docs/design.md) — credential, A–E parameters, backend architecture, end-to-end flow
 - [Design decisions](docs/decisions.md) — where and why the implementation departs from the design
 
@@ -529,6 +535,8 @@ pytest
 ```bash
 ruff check src tests
 ```
+
+CI runs both on Python 3.10 through 3.13, plus `uv lock --check` and a package build. Contributions: [CONTRIBUTING.md](CONTRIBUTING.md).
 
 **The dependencies are locked.** `pyproject.toml` declares what is needed (`>=`); `uv.lock` pins the exact resolved version of all 72 packages, extras included. A tool whose whole claim is that a certificate is reproducible should not be built on a stack that resolves differently depending on the day it was installed.
 

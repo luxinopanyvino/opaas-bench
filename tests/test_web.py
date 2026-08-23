@@ -1,5 +1,5 @@
 import json
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -53,7 +53,7 @@ def _report(**overrides):
 
 
 def _credential(report_hash, *, complete=True, expires_days=180):
-    now = datetime.now(UTC)
+    now = datetime.now(timezone.utc)
     return {
         "@context": ["https://www.w3.org/ns/credentials/v2"],
         "id": "urn:opaas:cert:vega-7b:1a3c5e7f:20260813-001",
