@@ -110,13 +110,27 @@ signatures: admission is about comparability, authenticity is `opaas verify`.
 
 ## Phase 5 — Edge and modularity
 
-| # | Task | Note |
+| # | Task | Status |
 |---|---|---|
-| 5.1 | Jetson telemetry backend (`tegrastats`/sysfs) | Additive: the ABC already answers *unavailable, with a reason* |
-| 5.2 | ONNX Runtime GenAI adapter | Fits the current ABC. Detection models do not — different modality, not a different engine |
-| 5.3 | Open `SUPPORTED_ITEM_TYPES` | A closed `frozenset` today. Needed before a security or XAI layer can bring its own data |
+| 5.1 | Jetson telemetry backend (`tegrastats`/sysfs) | open — **needs the hardware** |
+| 5.2 | ONNX Runtime GenAI adapter | open — **needs the runtime** |
+| 5.3 | Open the item type seam | ✅ done |
 
-Depends on 1.1: without a 3.10 floor there is no Jetson.
+**5.3** is `register_item_type(name, validator)`, following the same convention
+as adapters, suites, sources and importers. A security or XAI layer now brings
+its own kind of item without editing `datasets/loader.py`. The four built-in
+types were extracted from an `if/elif` chain into registered validators, and
+the whole suite passed unchanged: the refactor moved code, it changed no
+behaviour.
+
+**5.1 and 5.2 are deliberately not written blind.** Telemetry that claims to
+read VRAM and power, and an adapter that claims to drive a runtime, are exactly
+the code that must not ship unverified: if either is wrong it produces plausible
+numbers rather than an error, which is the failure mode this project exists to
+catch. Both need a machine to run on — a Jetson for one, an ONNX Runtime GenAI
+install for the other. What is already in place for whoever has that machine:
+the telemetry ABC answers *unavailable, with a reason* rather than zero, and
+`InferenceBackend` takes a new engine without any change under `suites/`.
 
 ---
 
