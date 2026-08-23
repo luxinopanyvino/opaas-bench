@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 
 from opaas.hashing import (
     allocate_run_id,
@@ -83,7 +83,7 @@ def test_text_file_digest_still_detects_content_changes(tmp_path):
 
 
 def test_allocate_run_id_increments(tmp_path):
-    now = datetime(2026, 8, 6, tzinfo=UTC)
+    now = datetime(2026, 8, 6, tzinfo=timezone.utc)
     first = allocate_run_id(tmp_path, now)
     assert first == "20260806-001"
     (tmp_path / first).mkdir()

@@ -1,0 +1,70 @@
+name: CI
+
+on:
+  push:
+    branches: [develop, main]
+  pull_request:
+
+# A second push to the same branch supersedes the first: no point burning
+# minutes on a commit nobody will look at again.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 3.10 is the floor: JetPack 6 ships it, and edge devices are a
+        # supported target. It broke twice while being lowered — once on
+        # `datetime.UTC`, once on `fromisoformat` refusing the "Z" suffix —
+        # so it is tested, not assumed.
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install the project
+        run: uv sync --extra dev --python ${{ matrix.python-version }}
+
+      # The classifiers extra is deliberately absent: an autouse fixture forces
+      # it off so no test loads real weights, and installing torch here would
+      # add gigabytes to every run to exercise code the tests already stub.
+      - name: Tests
+        run: uv run --python ${{ matrix.python-version }} pytest -q
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Ruff
+        run: uv run ruff check src tests
+
+      # Dependencies are pinned on purpose: a lockfile that drifts from
+      # pyproject.toml means two installs of the same commit can differ, which
+      # is the one thing a tool about reproducibility cannot allow.
+      - name: Lockfile is current
+        run: uv lock --check
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+
+      # Catches a broken package before PyPI does, not after.
+      - name: Build sdist and wheel
+        run: uv build
+
+      - name: Check metadata
+        run: uvx twine check dist/*

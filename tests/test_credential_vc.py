@@ -1,5 +1,5 @@
 import json
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -72,8 +72,9 @@ def test_credential_follows_the_designed_shape(keypair):
 
 def test_default_validity_is_about_six_months(keypair):
     credential = _signed(keypair)
-    issued = datetime.fromisoformat(credential["issuanceDate"])
-    expires = datetime.fromisoformat(credential["expirationDate"])
+    # The dates end in "Z", which fromisoformat only reads from 3.11 on.
+    issued = datetime.fromisoformat(credential["issuanceDate"].replace("Z", "+00:00"))
+    expires = datetime.fromisoformat(credential["expirationDate"].replace("Z", "+00:00"))
     assert 180 <= (expires - issued).days <= 185
 
 
@@ -116,7 +117,9 @@ def test_another_key_does_not_verify(keypair, tmp_path):
 def test_expired_credential_is_invalid(keypair):
     _, public_key, _ = keypair
     credential = _signed(keypair, validity_days=1)
-    result = verify_credential(credential, public_key, now=datetime.now(UTC) + timedelta(days=2))
+    result = verify_credential(
+        credential, public_key, now=datetime.now(timezone.utc) + timedelta(days=2)
+    )
     assert not result.valid
     assert any("EXPIRED" in check.detail for check in result.checks)
 

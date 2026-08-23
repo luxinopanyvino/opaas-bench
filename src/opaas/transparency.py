@@ -27,7 +27,7 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import asdict, dataclass
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -103,8 +103,8 @@ def append_entry(
 
     payload = {
         "index": len(entries),
-        "issuedAt": (issued_at or datetime.now(UTC))
-        .astimezone(UTC)
+        "issuedAt": (issued_at or datetime.now(timezone.utc))
+        .astimezone(timezone.utc)
         .isoformat(timespec="seconds")
         .replace("+00:00", "Z"),
         "credentialId": credential_id,

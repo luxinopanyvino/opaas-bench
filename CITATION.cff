@@ -1,0 +1,30 @@
+cff-version: 1.2.0
+title: "OPAAS — On-Prem AI Audit Suite"
+message: "If you use OPAAS in your research, please cite it as below."
+type: software
+authors:
+  - name: "onpremIALabs"
+    website: "https://onpremialabs.com"
+repository-code: "https://github.com/luxinopanyvino/opaas-bench"
+url: "https://onpremialabs.com"
+abstract: >-
+  OPAAS audits an LLM or SLM deployment rather than a model: the composite of
+  model, quantization, inference engine, hardware and configuration. It reports
+  per category with confidence intervals, never as an aggregate score, declares
+  what it could not measure instead of reporting a zero, and uses no LLM judge
+  anywhere in scoring, so a third party can recompute a figure rather than trust
+  it. Reports are canonical JCS bytes whose SHA-256 is the certified hash, and
+  can be signed as W3C Verifiable Credentials and verified offline.
+keywords:
+  - llm
+  - slm
+  - evaluation
+  - audit
+  - quantization
+  - inference
+  - on-premise
+  - edge-ai
+  - reproducibility
+  - verifiable-credentials
+license: MIT
+version: 0.1.0

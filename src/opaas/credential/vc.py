@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass, field
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -74,7 +74,7 @@ def build_credential(
             "alongside the local run to see how much quality your deployment loses."
         )
 
-    issued = issued_at or datetime.now(UTC)
+    issued = issued_at or datetime.now(timezone.utc)
     model = report["model"]
     configuration = report["configuration"]
     coverage = report.get("coverage", {})
@@ -146,7 +146,7 @@ def sign_credential(
     proof_config = {
         "type": PROOF_TYPE,
         "cryptosuite": CRYPTOSUITE,
-        "created": _iso(created or datetime.now(UTC)),
+        "created": _iso(created or datetime.now(timezone.utc)),
         "verificationMethod": key_id,
         "proofPurpose": "assertionMethod",
         "@context": credential.get("@context", CREDENTIAL_CONTEXT),
@@ -201,7 +201,7 @@ def verify_credential(
     report is supplied, it also checks that it is exactly the certified report.
     """
     result = VerificationResult()
-    moment = now or datetime.now(UTC)
+    moment = now or datetime.now(timezone.utc)
 
     types = credential.get("type") or []
     result.add(
@@ -292,11 +292,14 @@ def _check_report(credential: dict[str, Any], report_path: Path) -> tuple[bool, 
 
 
 def _iso(moment: datetime) -> str:
-    return moment.astimezone(UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
+    return moment.astimezone(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
 
 
 def _parse(value: Any) -> datetime:
     if not isinstance(value, str):
         raise TypeError(f"Date missing or not a string: {value!r}")
-    parsed = datetime.fromisoformat(value)
-    return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
+    # `fromisoformat` only learned to read the 'Z' suffix in 3.11, and every
+    # date we emit ends in one (`_iso`). Normalising it here keeps a credential
+    # verifiable on 3.10 — refusing to parse our own output would be absurd.
+    parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)

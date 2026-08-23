@@ -20,7 +20,7 @@ verify → offline signature + log inclusion check
 publish → static site (browser-side verification, no backend)
 ```
 
-Python 3.11+, CLI built on Typer + Rich, reports modelled with Pydantic v2, signatures with
+Python 3.10+, CLI built on Typer + Rich, reports modelled with Pydantic v2, signatures with
 `cryptography`. Runtime deps are deliberately few (`httpx`, `typer`, `pydantic`, `rich`,
 `cryptography`, `psutil`); torch/transformers live behind the optional `classifiers` extra.
 
@@ -137,8 +137,10 @@ pins the exact resolution of all 72 packages including extras. Run `uv lock` aft
 a dependency. Plain `pip install .` ignores the lockfile — fine for trying the tool, not for
 reproducing a run.
 
-There is **no CI configuration in this repository** (no `.github/`): run `pytest` and `ruff`
-yourself before committing.
+**CI runs on every push and pull request** (`.github/workflows/ci.yml`): the suite on
+Python 3.10 through 3.13, `ruff check`, `uv lock --check`, and a package build checked
+with `twine`. Run them yourself before committing anyway — the feedback is faster than
+a round trip.
 
 ### Known test state
 
