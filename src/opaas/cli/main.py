@@ -69,6 +69,7 @@ from opaas.datasets import (
 from opaas.datasets.importers import ImporterError, import_dataset
 from opaas.declaration import template as declaration_template
 from opaas.hashing import canonical_json, file_digest, short_hash, slugify
+from opaas.registry import REJECTED, admit
 from opaas.report import REPORT_FILENAME
 from opaas.runner import RunEvent, RunRequest, execute
 from opaas.scoring import ScoringError, prompt_template_hash
@@ -693,6 +694,57 @@ ReportInputs = Annotated[
 ComparisonOut = Annotated[
     Path | None, typer.Option("--out", "-o", help="Comparison JSON file to write.")
 ]
+
+
+AdmitReport = Annotated[
+    Path, typer.Argument(help="Report to check against the registry's admission rules.")
+]
+AdmitJson = Annotated[
+    bool, typer.Option("--json", help="Machine-readable verdict, for a submission pipeline.")
+]
+
+
+@app.command("admit")
+def admit_command(report: AdmitReport, as_json: AdmitJson = False) -> None:
+    """Checks whether a report can join a public comparison, and says why not.
+
+    The criteria are not a secret: run this on your own report before
+    submitting it anywhere. A rejection is not a verdict on the deployment —
+    a smoke dataset or a cloud baseline are valid runs that simply cannot be
+    ranked against somebody else's.
+    """
+    try:
+        payload = json.loads(report.read_text(encoding="utf-8-sig"))
+    except FileNotFoundError:
+        err_console.print(f"[red]The report does not exist:[/red] {report}")
+        raise typer.Exit(code=2) from None
+    except json.JSONDecodeError as exc:
+        err_console.print(f"[red]The report is not valid JSON:[/red] {exc}")
+        raise typer.Exit(code=2) from None
+
+    result = admit(payload)
+
+    if as_json:
+        # Deliberately not the Rich console: it wraps to the terminal width, and
+        # a hard break inside a long `detail` string produces output that is no
+        # longer JSON. `print_json` is no better — it imports `rich.json`, which
+        # the Rich resolved for 3.10 does not ship. Machine output leaves the
+        # renderer alone.
+        print(json.dumps(result.as_dict(), indent=2))
+    else:
+        colour = {"rejected": "red", "flagged": "yellow", "accepted": "green"}[result.verdict]
+        console.print(f"\n[{colour} bold]{result.verdict.upper()}[/{colour} bold]")
+        for finding in result.findings:
+            mark = "[red]reject[/red]" if finding.verdict == "reject" else "[yellow]flag[/yellow]"
+            console.print(f"  {mark}  [bold]{_plain(finding.rule)}[/bold]")
+            console.print(f"          {_plain(finding.detail)}")
+        if not result.findings:
+            console.print(
+                "  [dim]Nothing found. This says the row is comparable, not that the "
+                "figures are good.[/dim]"
+            )
+
+    raise typer.Exit(code=1 if result.verdict == REJECTED else 0)
 
 
 @app.command("compare")

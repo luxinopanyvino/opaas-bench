@@ -456,6 +456,7 @@ The ones you will actually reach for. Full list with `opaas run --help`.
 | `opaas sign` | Issues the signed W3C credential from a report |
 | `opaas verify` | Verifies a credential, offline |
 | `opaas trust` | Lists pinned trust anchors, or pins one after showing its fingerprint |
+| `opaas admit` | Checks a report against the public registry's admission rules |
 | `opaas publish` | Generates the static certificate site |
 | `opaas log-verify` | Checks the transparency log |
 | `opaas compliance` | Generates the block E declaration template |
@@ -524,6 +525,7 @@ The suites never talk to a specific engine, only to `InferenceBackend`. Supporti
 - **[Methodology](docs/methodology.md)** — what is measured, how, and what cannot be claimed from each figure
 - **[Certifying yourself without sending us your model](docs/self-evaluation.md)** — self-evaluation and what the signature guarantees
 - [Block B datasets](docs/datasets.md) — format, how to install real subsets, sample size
+- [Admission policy](docs/admission-policy.md) — what a public comparison accepts, flags and refuses
 - [Root key custody](docs/key-custody.md)
 - [Remediation plan](docs/remediation-plan.md) — what is left, and what each item unblocks
 - [System design](docs/design.md) — credential, A–E parameters, backend architecture, end-to-end flow
