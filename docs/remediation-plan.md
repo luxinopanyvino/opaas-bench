@@ -63,11 +63,22 @@ their claims.
 | 3.1 | Fill the block E declaration | Declared requirements 0/7 → 7/7 |
 | 3.2 | A `grounded_qa` dataset of your own documents | Unlocks hallucination **and** faithfulness |
 | 3.3 | The definitive run, with both | Unmeasured dimensions 3 → 1 (bias only) |
-| 3.4 | Verify live that 3.2 unlocks what it should | Never yet executed |
+| 3.4 | Verify that 3.2 unlocks what it should | ✅ done |
 
-3.4 is open: the composition has been validated statically — it loads, composes
-to 970 items and carries `grounded_qa` items — but no run has confirmed it,
-because the engine was down on both attempts.
+**3.4 is settled.** Block D was run against `ifeval,xstest,<your documents>` and
+both dimensions came back measured:
+
+| dimension | with `ifeval,xstest` | with documents composed in |
+|---|---|---|
+| hallucination with a passage | not measured — no `grounded_qa` items | **measured** |
+| faithfulness | not measured — nothing with a passage to score | **measured** |
+| unmeasured, total | bias, hallucination, faithfulness | **bias alone** |
+
+It needs no inference server: the backend only has to produce text, and what
+was in question was whether the composition reaches the two dimensions. It
+does, with the pinned DeBERTa classifier loading and scoring for real. What
+3.3 still needs is a served model and your own passages in place of the
+example ones.
 
 ---
 

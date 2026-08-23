@@ -98,7 +98,11 @@ Adding a new constraint means adding a pure function to `src/opaas/constraints.p
 {"id": "g-2", "context": "The server has 48 GB.", "prompt": "How much did it cost?", "answerable": false, "expected_facts": []}
 ```
 
-Items with `answerable: false` are the heart of the hallucination measurement: the correct answer is to acknowledge that the fact is not in the passage. Answering anyway is hallucinating, and it is detected without a judge.
+Items with `answerable: false` are the heart of the hallucination measurement: the correct answer is to acknowledge that the fact is not in the passage. Answering anyway is hallucinating, and it is detected without a judge. **Roughly half the items should be unanswerable**: a set where everything can be answered measures reading comprehension, not invention.
+
+A working example ships with the tool — the `grounded` task of `opaas-smoke`, in `datasets/builtin/opaas-smoke/`. Copy its shape and put your passages in it.
+
+Composing such a dataset is also what unlocks **faithfulness**: with no passage to score a response against, that dimension stays declared unmeasured no matter which classifier is installed.
 
 ---
 
