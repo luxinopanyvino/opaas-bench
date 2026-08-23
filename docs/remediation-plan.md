@@ -87,16 +87,24 @@ example ones.
 The public side aggregates what the tool emits. That only produces trustworthy
 rankings if the admission rules are written down.
 
-| # | Task | Note |
+| # | Task | Status |
 |---|---|---|
-| 4.1 | An admission policy, published like the methodology | What the site accepts, flags, rejects. **This is the product**: the registry is worth exactly what its criteria are worth |
-| 4.2 | Document the output contract | Group by `environment.gpus[]`, **not** `configuration.hardware` — the latter is a free string that will not group |
-| 4.3 | A submission flow for hardware vendors | Signed credential plus transparency log, so submissions are attributable |
+| 4.1 | An admission policy, published like the methodology | ✅ done |
+| 4.2 | Document the output contract | ✅ done |
+| 4.3 | A submission flow for hardware vendors | open — needs the site |
 
-Every signal 4.1 needs is already in the report: `syntheticSmoke`, `promptMode`,
-`datasetHash`, the interval width behind `n`, `evaluated-partial`,
-`cloud-baseline`, and a non-empty `limitations`. What is missing is the rule,
-not the data.
+**4.1 is code, not prose.** [`registry.py`](../src/opaas/registry.py) decides
+accepted / flagged / rejected from the report alone, and `opaas admit` exposes
+it so a submitter can check their own report before sending it. Published as
+[admission-policy.md](admission-policy.md), for the same reason the methodology
+is: someone who does not trust the registry can read what it enforces.
+
+**4.2** is the *Grouping rows* section of that document: group by
+`environment.gpus[]`, never by the free-text `configuration.hardware`.
+
+**4.3** still needs the site — signed credential plus transparency log, so a
+vendor's submission is attributable. The policy deliberately does **not** check
+signatures: admission is about comparability, authenticity is `opaas verify`.
 
 ---
 

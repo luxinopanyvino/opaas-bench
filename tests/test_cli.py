@@ -566,3 +566,36 @@ def test_trust_rejects_a_missing_file(tmp_path, monkeypatch):
     result = runner.invoke(app, ["trust", "--add", str(tmp_path / "nope.json"), "--yes"])
     assert result.exit_code == 2
     assert "Does not exist" in _flat(result.output)
+
+
+# ------------------------------------------------------------------ admit
+
+
+def test_admit_flags_a_partial_run_without_rejecting_it(tmp_path):
+    assert _run(tmp_path).exit_code == 0
+    result = runner.invoke(app, ["admit", str(tmp_path / "result.json")])
+    assert result.exit_code == 0
+    flat = _flat(result.output)
+    assert "FLAGGED" in flat
+    assert "partial-coverage" in flat
+
+
+def test_admit_rejects_a_smoke_run_and_exits_nonzero(tmp_path):
+    """A submission pipeline needs the exit code, not the prose."""
+    assert _run(tmp_path, "--suite", "all", "--limit", "2", "--context-words", "64").exit_code == 0
+    result = runner.invoke(app, ["admit", str(tmp_path / "result.json")])
+    assert result.exit_code == 1
+    assert "smoke-dataset" in _flat(result.output)
+
+
+def test_admit_speaks_json_for_a_pipeline(tmp_path):
+    assert _run(tmp_path).exit_code == 0
+    result = runner.invoke(app, ["admit", str(tmp_path / "result.json"), "--json"])
+    payload = json.loads(result.output)
+    assert payload["verdict"] == "flagged"
+    assert all({"rule", "verdict", "detail"} == set(f) for f in payload["findings"])
+
+
+def test_admit_on_a_missing_report_exits_two(tmp_path):
+    result = runner.invoke(app, ["admit", str(tmp_path / "nope.json")])
+    assert result.exit_code == 2
