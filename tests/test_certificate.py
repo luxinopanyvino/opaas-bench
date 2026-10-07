@@ -153,3 +153,28 @@ def test_the_command_refuses_without_a_trust_anchor(tmp_path, monkeypatch):
     )
     assert result.exit_code == 2
     assert not out.exists()
+
+
+# ------------------------------------------------------------ operator notes
+
+
+def test_operator_notes_are_printed_as_unverified_and_apart_from_limitations(tmp_path):
+    report = _report(operatorNotes=["Shared workstation; background load not controlled."])
+    page = _render(tmp_path, report)
+    notes_at = page.index("Declared by the operator")
+    assert page.index("What this certificate does not claim") < notes_at
+    assert "OPAAS did not verify it" in page
+    assert "Shared workstation; background load not controlled." in page[notes_at:]
+    assert "The operator added 1 note(s)" in page
+
+
+def test_a_certificate_without_notes_has_no_notes_section(tmp_path):
+    page = _render(tmp_path)
+    assert "Declared by the operator" not in page
+    assert "The operator added" not in page
+
+
+def test_an_operator_note_cannot_inject_html(tmp_path):
+    page = _render(tmp_path, _report(operatorNotes=["<script>alert(1)</script>"]))
+    assert "<script>alert(1)" not in page
+    assert "&lt;script&gt;alert(1)" in page

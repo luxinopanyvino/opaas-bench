@@ -80,6 +80,14 @@ def test_run_writes_report_to_the_given_file(tmp_path):
     assert report["coverage"]["blocksEvaluated"] == ["A"]
 
 
+def test_run_publishes_repeated_notes_and_labels_them_unverified(tmp_path):
+    result = _run(tmp_path, "--note", "Shared workstation.", "--note", "Engine restarted.")
+    assert result.exit_code == 0, result.output
+    report = json.loads((tmp_path / "result.json").read_text(encoding="utf-8"))
+    assert report["operatorNotes"] == ["Shared workstation.", "Engine restarted."]
+    assert "Declared by the operator (not verified by OPAAS)" in _flat(result.output)
+
+
 def test_suite_all_now_gives_complete_coverage(tmp_path):
     """With all five blocks implemented, --suite all really is a complete evaluation."""
     result = _run(tmp_path, "--suite", "all", "--limit", "2", "--context-words", "64")

@@ -50,6 +50,20 @@ Signing non-reproducible bytes produces a credential nobody can verify and that 
 
 ---
 
+## D31 — The operator can add context, and it is printed as unverified
+
+**Status:** applied · **Affects:** [`report.py`](../src/opaas/report.py), [`runner.py`](../src/opaas/runner.py), [`web/`](../src/opaas/web)
+
+`limitations` is what the tool knows it could not measure. Some context only the operator knows: the machine was shared and background load was not controlled, the engine was restarted before block A, the GPU was power-capped. There was no place to say it, so it either went unsaid or invited editing the report, which breaks the signature.
+
+`opaas run --note "..."` (repeatable) records it in a new report field, `operatorNotes`. It is signed with the rest of the report, and the CLI summary, the certificate page and the printable certificate show it under **Declared by the operator**, with the words "not verified by OPAAS".
+
+It is **never added to `limitations`**. That is D14's rule applied to the whole report: a claim nobody checked is not mixed with a finding. A note saying "the network was isolated" next to the probe's own limitation would read as if OPAAS had confirmed it.
+
+Notes are capped at 500 characters each, because each one is printed on the certificate, and an empty note is refused. Both checks run before the backend loads.
+
+**What it costs:** a free-text field in a public, signed document. OPAAS cannot tell whether a note is true, or whether it leaks something it should not; the help text warns against secrets, and `_publishable_config` does not apply because the note is the operator's own words. A false note stays what it was labelled: the operator's claim, which the issuer's signature proves unaltered, not true.
+
 ## D30 — Block E's regulatory references are cited to the clause and checked
 
 **Status:** applied · **Revises:** the framework references of the first block E catalogue · **Affects:** [`declaration.py`](../src/opaas/declaration.py), [`standards-mapping.md`](standards-mapping.md)

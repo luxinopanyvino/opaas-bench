@@ -122,4 +122,5 @@ A hash chain of the issuances. Altering, deleting or reordering an entry breaks 
 - **It does not measure bias**, nor **code** (that needs a real sandbox), nor **long context** at RULER's level.
 - **It does not solve benchmark contamination.** Public datasets are in the training data. Mitigating this requires a private held-out set.
 - **It does not certify network isolation**, it only detects obvious traffic.
+- **It does not check operator notes.** What `--note` records is printed as declared by the operator; the signature proves it was not altered after the run, not that it is true.
 - **It does not replace an audit.** It certifies that specific measurements were taken in a specific way on a specific artifact.

@@ -279,6 +279,8 @@ def _render_certificate(
 <p class="subtitle">What this run can <em>not</em> claim, according to its own report.</p>
 {limitations_html}
 
+{_render_operator_notes(report)}
+
 <h2>Traceability</h2>
 <table>
   <tbody>
@@ -308,6 +310,18 @@ def _render_certificate(
 <script src="../../assets/verify.js"></script>""",
         depth=2,
     )
+
+
+def _render_operator_notes(report: dict[str, Any]) -> str:
+    """Operator context, headed so it cannot be read as something OPAAS measured (D31)."""
+    notes = report.get("operatorNotes") or []
+    if not notes:
+        return ""
+    items = "".join(f"<li>{esc(note)}</li>" for note in notes)
+    return f"""<h2>Declared by the operator</h2>
+<p class="subtitle">Context the operator stated about this run. Signed with the report,
+so unaltered since, but <strong>not verified by OPAAS</strong>.</p>
+<ul>{items}</ul>"""
 
 
 def _render_blocks(report: dict[str, Any]) -> str:

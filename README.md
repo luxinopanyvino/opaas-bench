@@ -454,6 +454,7 @@ The ones you will actually reach for. Full list with `opaas run --help`.
 | `--weights-path` | — | Local weights, to hash the artifact |
 | `--offline` | off | Cached datasets and classifiers only |
 | `--declaration` | — | Block E declaration (JSON) |
+| `--note` | — | Context you state about the run, e.g. `"shared workstation"`. Repeatable. Published as declared by the operator, never as a finding |
 | `--toxicity-model` | pinned default | Your own toxicity weights, instead of the pinned default |
 | `--faithfulness-model` | pinned default | Your own faithfulness weights, instead of the pinned default |
 | `--classifier-threshold` | profile's own | Threshold for both classifiers, in [0, 1] |
@@ -512,6 +513,8 @@ Stated here as plainly as the report states it:
 - **Determinism under load.** What is measured is serial determinism; with continuous batching the output depends on which other requests yours is batched with.
 
 A run that skips blocks is certified as `evaluated-partial`. The report's `limitations` field is where all of this lands — nothing is quietly reported as a zero.
+
+Context only you know — the machine was shared, the engine was restarted before block A — goes in with `--note`. It is signed with the report and printed on the certificate under **Declared by the operator**, apart from the limitations, because OPAAS did not check it.
 
 ## Architecture
 
