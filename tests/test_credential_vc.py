@@ -45,7 +45,8 @@ REPORT = {
 
 @pytest.fixture()
 def keypair(tmp_path):
-    paths = generate_root_keypair(tmp_path / "keys")
+    # The production key is named explicitly; nothing defaults to it (D39).
+    paths = generate_root_keypair(tmp_path / "keys", did=ISSUER)
     return load_private_key(paths.private_key), load_public_key(paths.public_key), paths
 
 

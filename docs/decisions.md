@@ -50,6 +50,28 @@ Signing non-reproducible bytes produces a credential nobody can verify and that 
 
 ---
 
+## D39 — A key signs under its own name unless told otherwise
+
+**Status:** applied · **Fixes:** a default found in the first signed run · **Affects:** [`credential/keys.py`](../src/opaas/credential/keys.py), `cli/main.py` (`keygen`, `sign`), [`key-custody.md`](key-custody.md)
+
+The first full run on a real deployment produced a certificate signed with a throwaway test key that read, on paper, *Issuer key did:web:onpremialabs.com#key-1*. Two defaults were behind it. `keygen` wrote a DID document named `did:web:onpremialabs.com` for every key it generated, and `sign` used the same name as the issuer whenever `--issuer` was left out. Anyone who ran the tool got certificates that *said* onpremIALabs issued them.
+
+The cryptography never believed it: `verify` takes the key from a trust anchor, never from the credential (D4), so such a credential fails against the real onpremIALabs anchor. But the printed certificate and the site page show the issuer name, and a name that looks right is exactly what a reader checks.
+
+**Now:**
+
+- **`keygen` names a key by itself.** The DID is `did:key:z6Mk…`, derived from the public key, with the verification method `did:key:…#z6Mk…` as that method specifies. It claims no domain. `--did did:web:<domain>` is for whoever controls the domain and will publish the document there. onpremIALabs' production key is generated with `--did did:web:onpremialabs.com`, spelled out in key custody, and nothing defaults to it.
+- **`sign` takes the issuer from the key's own `did.json`**, the one `keygen` wrote beside it, along with the verification method whose public key matches the private key.
+  - An explicit `--issuer` that differs from that document is refused, because the credential could not be verified against the issuer's document.
+  - A `did.json` listing a different key is refused too.
+  - With no `did.json` at all, `--issuer` is required.
+
+A `did:key` name is not a trusted name. The public key is visible in the identifier, but `verify` still will not take it from there (D4). A credential issued under `did:key` verifies only against a key or anchor obtained some other way, which is the point.
+
+**Found on the way:** Rich renders `:key:` as an emoji, so the first real `keygen` printed `did🔑z6Mk…`. The files were right and the screen was not. The CLI's consoles now run with `emoji=False`, so identifiers print verbatim.
+
+**What it costs:** `DEFAULT_DID` and `DEFAULT_KEY_ID` are gone from the public API, replaced by `ONPREMIALABS_DID` and `did_key()`. Scripts that relied on the old default now get a `did:key` issuer, or a refusal if they passed `--issuer did:web:onpremialabs.com` with a key that is not onpremIALabs'. That refusal is the point of the change.
+
 ## D38 — Block E's probes no longer report what they did not observe
 
 **Status:** applied · **Fixes:** two errors found running against a real Ollama 0.40 · **Affects:** [`suites/compliance.py`](../src/opaas/suites/compliance.py), [`adapters/ollama.py`](../src/opaas/adapters/ollama.py)

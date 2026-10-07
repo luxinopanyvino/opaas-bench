@@ -13,7 +13,7 @@ from opaas.credential import (
 
 
 def test_generate_creates_keypair_and_did_document(tmp_path):
-    paths = generate_root_keypair(tmp_path)
+    paths = generate_root_keypair(tmp_path, did="did:web:onpremialabs.com")
     assert paths.private_key.exists()
     assert paths.public_key.exists()
 
@@ -23,6 +23,16 @@ def test_generate_creates_keypair_and_did_document(tmp_path):
     assert method["id"] == "did:web:onpremialabs.com#key-1"
     assert method["type"] == "Ed25519VerificationKey2020"
     assert method["publicKeyMultibase"].startswith("z")
+
+
+def test_a_new_key_is_named_by_itself_not_by_onpremialabs(tmp_path):
+    """Before D39 every generated key claimed to be did:web:onpremialabs.com."""
+    paths = generate_root_keypair(tmp_path)
+    document = json.loads(paths.did_document.read_text(encoding="utf-8"))
+    multibase = public_key_multibase(load_public_key(paths.public_key))
+    assert document["id"] == f"did:key:{multibase}"
+    assert document["verificationMethod"][0]["id"] == f"did:key:{multibase}#{multibase}"
+    assert "onpremialabs" not in json.dumps(document)
 
 
 def test_private_key_signs_what_public_key_verifies(tmp_path):

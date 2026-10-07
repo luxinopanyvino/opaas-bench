@@ -5,8 +5,10 @@ The root Ed25519 private key is the system's only secret. Every credential is si
 ## Generation
 
 ```bash
-opaas keygen --out keys --passphrase "<long passphrase>"
+opaas keygen --out keys --did did:web:onpremialabs.com
 ```
+
+**`--did did:web:onpremialabs.com` is required for the production key, and it is not a default.** Without it, `keygen` names the key by itself (`did:key:z6Mk…`) and claims no organisation. Until D39 the onpremIALabs DID was the default, so every key anyone generated — test keys included — signed credentials claiming to come from onpremIALabs. The passphrase is typed at the prompt, not passed as an argument, so it stays out of the shell history.
 
 It produces three files:
 
