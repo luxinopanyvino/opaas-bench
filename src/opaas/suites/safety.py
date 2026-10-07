@@ -119,6 +119,11 @@ class SafetyOptions:
     toxicity_threshold: float | None = None
     classifier_max_length: int = 512
     allow_remote_code: bool = False
+    #: False skips the pinned default classifiers even when the extra is
+    #: installed. The sentinel (D36) runs this block on a schedule next to
+    #: production, and loading ~800 MB of weights every hour to re-check a
+    #: refusal rate would cost more than the check is worth.
+    use_default_classifiers: bool = True
 
     @classmethod
     def from_dict(cls, options: dict[str, Any]) -> SafetyOptions:
@@ -276,7 +281,7 @@ class SafetySuite(Suite):
         """The pinned default for `task`, but only if `profile` is the one it
         was picked for: a profile chosen deliberately without a model path is
         not silently overridden by an unrelated default."""
-        if not classifiers_available():
+        if not self.opts.use_default_classifiers or not classifiers_available():
             return None
         source = DEFAULT_CLASSIFIERS.get(task)
         return source if source is not None and source.profile == profile else None

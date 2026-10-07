@@ -79,6 +79,7 @@ src/opaas/
 ├── canonical.py        RFC 8785 JCS serialization — everything signed passes through here
 ├── hashing.py          config/weights/file hashes, run ids (YYYYMMDD-NNN), slugify
 ├── fingerprint.py      Deployment fingerprint: what was serving, not how OPAAS ran (D34)
+├── sentinel.py         `opaas watch`: canary baseline, drift checks, hash-chained watch log (D36)
 ├── report.py           Pydantic report models, canonical write, content_hash
 ├── runner.py           RunRequest → execute() → RunOutcome; progress events
 ├── scoring.py          Block B prompt templates (direct/cot) + answer extraction
@@ -103,7 +104,7 @@ src/opaas/
 
 docs/     design.md, methodology.md, decisions.md, datasets.md, key-custody.md,
           self-evaluation.md, implementation-plan.md, mitigation-plan.md
-tests/    659 tests, one file per module, plus conftest.py with the fake backends
+tests/    681 tests, one file per module, plus conftest.py with the fake backends
 scripts/  sprite_from_png.py — regenerates cli/_sprite_data.py from docs/img/mascot.png
 web/      README describing the published site layout (the generator lives in src/)
 ```
@@ -146,7 +147,7 @@ a round trip.
 
 ### Known test state
 
-`uv run pytest` reports **659 passed** in ~4s. The suite is green: treat any failure as
+`uv run pytest` reports **681 passed** in ~4s. The suite is green: treat any failure as
 yours.
 
 ### Test conventions
@@ -187,7 +188,9 @@ yours.
 - CLI options are declared as module-level `Annotated[...]` type aliases in
   `cli/main.py`, grouped just before the command that uses them and reused across
   commands; each command validates its inputs itself and exits with
-  `typer.Exit(code=2)` for user error, `1` for a failed run or backend error.
+  `typer.Exit(code=2)` for user error, `1` for a failed run or backend error. The one
+  exception is `watch`, which uses `3` for inconclusive so a scheduler can tell "the
+  deployment changed" from "the check could not run" (D36).
 
 ## Extension recipes
 

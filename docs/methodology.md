@@ -118,7 +118,17 @@ A hash chain of the issuances. Altering, deleting or reordering an entry breaks 
 
 ---
 
-## 6. What OPAAS does not do
+## 6. Between certifications: the sentinel
+
+`opaas watch` says whether a signed certificate still describes the deployment: `current`, `drifted`, `inconclusive` or `expired`. It compares against a baseline signed with the report: twenty canary output hashes and a serial latency interval.
+
+**What it does not claim.**
+- A `current` is **not a new measurement** and not a renewed certificate. It says the checks that ran found no change; the result lists which checks carried it.
+- A `current` carried by the statistical checks alone is coarse: at 40 items an interval spans about ±15 points, and a subtle change passes unnoticed.
+- A `drifted` says the deployment differs from what was certified. It does not say the new deployment is worse.
+- A canary check is only as strong as the deployment's determinism when certified. If the canaries disagreed with themselves then, the check is disabled and says so.
+
+## 7. What OPAAS does not do
 
 - **It does not measure bias**, nor **code** (that needs a real sandbox), nor **long context** at RULER's level.
 - **It does not solve benchmark contamination.** Public datasets are in the training data. Mitigating this requires a private held-out set.
