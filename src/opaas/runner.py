@@ -154,6 +154,25 @@ def _publishable_config(config: dict[str, Any]) -> dict[str, Any]:
     return clean
 
 
+def _quantization_contradiction(declared: str | None, reported: str | None) -> str | None:
+    """A declared quantization the engine contradicts, said out loud (D37).
+
+    'GGUF Q4_K_M' declared and 'Q4_K_M' reported agree: the operator often adds
+    the format. Neither containing the other is a contradiction, and the
+    certificate would otherwise show the operator's word over the engine's.
+    """
+    if not declared or not reported:
+        return None
+    a, b = declared.strip().upper(), reported.strip().upper()
+    if a in b or b in a:
+        return None
+    return (
+        f"The declared quantization ({declared}) contradicts what the engine reports "
+        f"({reported}). The certificate shows the declaration, labelled as such; check "
+        "which model is really being served."
+    )
+
+
 def _sentinel_baseline(
     request: RunRequest, backend: Any, emit: Callable[..., None]
 ) -> dict[str, Any]:
@@ -230,13 +249,18 @@ def execute(
         backend_metadata = backend.get_backend_metadata()
         weights = weights_hash(request.weights_path)
         tokenizer_files = tokenizer_files_hash(request.weights_path)
+        reported_quantization = backend.reported_quantization()
         report = RunReport(
             run_id=run_id,
             started_at=started_at,
             model=ModelInfo(
                 name=request.model,
                 source=request.model_source,
-                quantization=request.quantization or backend_metadata.get("quantization"),
+                quantization=request.quantization or reported_quantization,
+                quantization_source="declared"
+                if request.quantization
+                else ("engine" if reported_quantization else None),
+                quantization_reported=reported_quantization,
                 weights_hash=weights,
                 tokenizer_files_hash=tokenizer_files,
             ),
@@ -320,6 +344,10 @@ def execute(
             "someone else's optimal conditions. It tells you how much quality your local "
             "deployment loses, not how to certify it. It is not comparable with block A metrics.",
         )
+    if contradiction := _quantization_contradiction(
+        request.quantization, report.model.quantization_reported
+    ):
+        report.limitations.insert(0, contradiction)
     if any(result.status == "failed" for result in report.suites):
         report.status = "partial"
     elif not report.coverage["complete"]:

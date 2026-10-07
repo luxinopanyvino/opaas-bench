@@ -31,7 +31,8 @@ from urllib.parse import urlparse
 import segno
 
 from opaas.credential.vc import public_identifier
-from opaas.web.site import Entry, SiteError, esc
+from opaas.hashing import short_hash
+from opaas.web.site import Entry, SiteError, esc, quantization_html
 
 #: The design blocks, in the order a reader expects them. Duplicated from
 #: `suites.BLOCKS` on purpose: importing `suites` would drag the evaluation
@@ -114,7 +115,7 @@ def render_printable(
   <section class="subject">
     <h2>{esc(entry.model)}</h2>
     <p class="facts">
-      <span>Quantization <b>{esc(entry.quantization or "not declared")}</b></span>
+      <span>Quantization {quantization_html(report)}</span>
       <span>Backend <b>{esc(configuration.get("backend") or "unknown")}</b></span>
       <span>Hardware <b>{esc(configuration.get("hardware") or "unknown")}</b></span>
       <span>Run <b>{esc(entry.eval_run.get("runId") or "unknown")}</b></span>
@@ -144,8 +145,8 @@ def render_printable(
       <p class="mono command">opaas verify --credential credential.json --report report.json</p>
       <dl>
         <dt>Report SHA-256</dt><dd class="mono">{esc(entry.eval_run.get("reportHash"))}</dd>
-        <dt>Deployment</dt><dd class="mono">{esc(configuration.get("deploymentHash")
-          or "not recorded")}</dd>
+        <dt>Deployment</dt><dd><span class="mono">{esc(configuration.get("deploymentHash")
+          or "not recorded")}</span>{_fingerprint_html(report)}</dd>
         <dt>Credential</dt><dd class="mono">{esc(credential.get("id"))}</dd>
         <dt>Issuer key</dt><dd class="mono">{esc(proof.get("verificationMethod"))}</dd>
       </dl>
@@ -158,6 +159,56 @@ def render_printable(
 </body>
 </html>
 """
+
+
+#: Short names for the fingerprint fields, for a line that has to fit.
+_FINGERPRINT_LABELS = {
+    "engine": "engine",
+    "engineVersion": "engine version",
+    "modelDigest": "model digest",
+    "chatTemplateHash": "chat template",
+    "weightsHash": "weights",
+    "tokenizerFilesHash": "tokenizer files",
+    "gpus": "GPU",
+    "gpuDrivers": "GPU driver",
+}
+
+
+def _fingerprint_html(report: dict[str, Any]) -> str:
+    """What the deployment hash stands for, and what it does not cover.
+
+    A bare hash tells a reader nothing. The fields that went into it are named,
+    digests shortened, and the fields the deployment did not expose are listed,
+    because a matching hash proves nothing about them (D34).
+    """
+    fingerprint = report.get("deploymentFingerprint") or {}
+    fields = fingerprint.get("fields") or {}
+    if not fields:
+        return ""
+    parts = []
+    if fields.get("engine"):
+        parts.append(" ".join(str(v) for v in (fields["engine"], fields.get("engineVersion")) if v))
+    for name in ("modelDigest", "chatTemplateHash", "weightsHash", "tokenizerFilesHash"):
+        if fields.get(name):
+            label = _FINGERPRINT_LABELS[name]
+            if name == "weightsHash":
+                label += " (seen loaded)"
+            parts.append(f"{label} {short_hash(str(fields[name]), 12)}")
+    if fields.get("gpus"):
+        gpu = ", ".join(sorted(set(fields["gpus"])))
+        drivers = ", ".join(fields.get("gpuDrivers") or [])
+        parts.append(f"{gpu}" + (f", driver {drivers}" if drivers else ""))
+    # Plain text throughout, escaped once here: every part can carry report data.
+    line = f"<span class='fp'>{esc(' · '.join(parts))}</span>"
+    unknown = sorted(
+        {_FINGERPRINT_LABELS.get(name, name) for name in fingerprint.get("unknown") or {}}
+    )
+    if unknown:
+        line += (
+            f"<span class='fp missing'>Not exposed by the deployment, so not covered: "
+            f"{esc(', '.join(unknown))}.</span>"
+        )
+    return line
 
 
 def _render_block_rows(report: dict[str, Any], eval_run: dict[str, Any]) -> str:
@@ -393,6 +444,10 @@ footer { display: flex; gap: 6mm; align-items: flex-start; margin-top: 4mm; }
 .trace dt { color: #5c5a53; }
 .command { background: #f4f2ec; padding: 1mm 2mm; display: inline-block; }
 .note { color: #5c5a53; font-size: 8.5pt; }
+.src { color: #5c5a53; font-size: 8.5pt; }
+.conflict { color: #a3471b; }
+.fp { display: block; font-size: 8.5pt; }
+.fp.missing { color: #5c5a53; }
 .limitations h2 { margin-top: 0; font-size: 14pt; font-weight: normal; }
 .limitations li { margin-bottom: 1.5mm; }
 .limitations h2.declared { margin-top: 8mm; border-top: 1px solid #c9c4b6; padding-top: 4mm; }

@@ -348,3 +348,44 @@ def test_the_runner_hashes_the_weights_once_and_records_the_check(tmp_path, monk
     assert report["model"]["weightsHash"]["available"] is True
     assert report["model"]["tokenizerFilesHash"]["available"] is True
     assert report["deploymentFingerprint"]["weightsCheck"]["status"] == "unverifiable"
+
+
+# ---------------------------------------------- quantization provenance (D37)
+
+
+class QuantizedBackend(DigestBackend):
+    name: ClassVar[str] = "fake-quantized"
+
+    def reported_quantization(self) -> str | None:
+        return "Q4_K_M"
+
+
+def _quantized_run(tmp_path, quantization=None):
+    register_backend(QuantizedBackend)
+    request = RunRequest(
+        model="fake/model-1b", backend="fake-quantized", suites=["performance"],
+        suite_options=OPTIONS, output=tmp_path / "q" / "report.json", quantization=quantization,
+    )
+    return json.loads(execute(request).report_path.read_text(encoding="utf-8"))
+
+
+def test_the_engine_reported_quantization_is_labelled_as_the_engines(tmp_path):
+    model = _quantized_run(tmp_path)["model"]
+    assert (model["quantization"], model["quantizationSource"]) == ("Q4_K_M", "engine")
+
+
+def test_a_consistent_declaration_keeps_both_values(tmp_path):
+    report = _quantized_run(tmp_path, "GGUF Q4_K_M")
+    model = report["model"]
+    assert model["quantizationSource"] == "declared"
+    assert model["quantizationReported"] == "Q4_K_M"
+    assert not any("contradicts" in item for item in report["limitations"])
+
+
+def test_a_declaration_the_engine_contradicts_becomes_a_limitation(tmp_path):
+    report = _quantized_run(tmp_path, "Q8_0")
+    assert "contradicts what the engine reports (Q4_K_M)" in report["limitations"][0]
+
+
+def test_ollama_reports_the_quantization_of_the_model_it_loaded():
+    assert _load(_handler()).reported_quantization() == "Q4_K_M"

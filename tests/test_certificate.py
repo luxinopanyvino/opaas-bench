@@ -178,3 +178,60 @@ def test_an_operator_note_cannot_inject_html(tmp_path):
     page = _render(tmp_path, _report(operatorNotes=["<script>alert(1)</script>"]))
     assert "<script>alert(1)" not in page
     assert "&lt;script&gt;alert(1)" in page
+
+
+# ----------------------------------------------- provenance on the certificate (D37)
+
+
+def _quantized(**model):
+    return _report(model={"name": "Vega-7B", **model})
+
+
+@pytest.mark.parametrize(
+    ("model", "expected"),
+    [
+        ({"quantization": "Q4_K_M", "quantizationSource": "engine"}, "(reported by the engine)"),
+        (
+            {"quantization": "AWQ 4-bit", "quantizationSource": "declared"},
+            "(declared by the operator, not reported by the engine)",
+        ),
+        (
+            {"quantization": "GGUF Q4_K_M", "quantizationSource": "declared",
+             "quantizationReported": "Q4_K_M"},
+            "(declared; the engine reports Q4_K_M)",
+        ),
+        ({"quantization": "Q4_K_M"}, "(source not recorded)"),
+    ],
+)
+def test_the_quantization_says_whose_word_it_is(tmp_path, model, expected):
+    assert expected in _render(tmp_path, _quantized(**model))
+
+
+def test_a_declared_quantization_the_engine_contradicts_is_shown_as_such(tmp_path):
+    page = _render(tmp_path, _quantized(quantization="Q8_0", quantizationSource="declared",
+                                        quantizationReported="Q4_K_M"))
+    assert "<span class='conflict'>the engine reports <b>Q4_K_M</b></span>" in page
+
+
+def test_the_deployment_hash_is_explained_and_its_gaps_named(tmp_path):
+    fingerprint = {
+        "hash": "sha256:feed",
+        "fields": {
+            "engine": "Ollama", "engineVersion": "0.12.3", "model": "m",
+            "modelDigest": "sha256:845dbda0ea48ed749caafd9e", "chatTemplateHash": None,
+            "gpus": ["NVIDIA RTX 4090"], "gpuDrivers": ["560.94"],
+            "weightsHash": None, "tokenizerFilesHash": None,
+        },
+        "unknown": {"chatTemplateHash": "x", "weightsHash": "y", "tokenizerFilesHash": "z"},
+    }
+    page = _render(tmp_path, _report(deploymentFingerprint=fingerprint))
+    assert "Ollama 0.12.3 · model digest 845dbda0ea48 · NVIDIA RTX 4090, driver 560.94" in page
+    assert "not covered: chat template, tokenizer files, weights." in page
+
+
+def test_fingerprint_fields_cannot_inject_html(tmp_path):
+    fingerprint = {"hash": "sha256:x", "unknown": {},
+                   "fields": {"engine": "<script>x</script>", "gpus": [], "gpuDrivers": []}}
+    page = _render(tmp_path, _report(deploymentFingerprint=fingerprint))
+    assert "<script>x" not in page
+    assert "&lt;script&gt;x" in page

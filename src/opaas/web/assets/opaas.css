@@ -122,3 +122,7 @@ footer {
 }
 
 code { font-family: ui-monospace, Consolas, monospace; font-size: .85em; }
+
+/* Whose word a value is: the engine's or the operator's (D37). */
+.src { color: var(--muted); font-size: .82rem; }
+.conflict { color: var(--fail); }

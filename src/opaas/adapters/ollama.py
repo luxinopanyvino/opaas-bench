@@ -262,6 +262,11 @@ class OllamaBackend(InferenceBackend):
                 return _positive_int(value, str(key))
         return None
 
+    def reported_quantization(self) -> str | None:
+        details = self._details.get("details", {}) if isinstance(self._details, dict) else {}
+        level = details.get("quantization_level") if isinstance(details, dict) else None
+        return str(level) if level else None
+
     def model_digest(self) -> str | None:
         return self._digest
 

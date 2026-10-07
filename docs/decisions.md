@@ -50,6 +50,25 @@ Signing non-reproducible bytes produces a credential nobody can verify and that 
 
 ---
 
+## D37 — The certificate says whose word each value is, and what its deployment hash covers
+
+**Status:** applied · **Affects:** [`web/certificate.py`](../src/opaas/web/certificate.py), [`web/site.py`](../src/opaas/web/site.py), [`runner.py`](../src/opaas/runner.py), [`adapters/`](../src/opaas/adapters)
+
+Two things on the printed certificate were true but unreadable.
+
+**The deployment hash was a bare digest.** `sha256:ac38…` tells a reader nothing, and it hid how much it covers. On vLLM, with no model digest and no confirmed weights, it covers little more than the engine version and the GPU. The certificate now spells out the fields behind it, with digests shortened to 12 characters: "Ollama 0.12.3 · model digest 845dbda0ea48 · NVIDIA RTX 4090, driver 560.94". It also names what the deployment did not expose: "not covered: chat template, tokenizer files, weights". A matching hash proves nothing about those (D34).
+
+**The quantization did not say where it came from.** It could be what the engine reports or the operator's `--quantization`, and the runner preferred the declaration whenever there was one. That is D14's problem on the front of the certificate. Now:
+
+- `InferenceBackend.reported_quantization()` returns what the engine itself reports. Ollama answers it from `/api/show`; the others return None.
+- The report keeps `quantizationSource` (`engine` or `declared`) and `quantizationReported`, even when a declaration is also present. The credential carries the source.
+- The certificate labels the value: *reported by the engine*, *declared by the operator, not reported by the engine*, or *declared; the engine reports Q4_K_M*.
+- **A declaration the engine contradicts is said out loud.** It is shown as a conflict on the certificate, and it becomes the first limitation of the report. "GGUF Q4_K_M" declared and "Q4_K_M" reported are taken to agree, because operators add the format.
+
+The site's certificate page shows the same quantization label as the paper.
+
+**What it costs:** the first sheet carries two more lines of small print. Older reports show "source not recorded" rather than guessing. And the agreement rule (either value contained in the other) is a heuristic: `Q4_K_M` and `Q4_K_S` are correctly told apart, but a declaration written in different words than the engine's ("4-bit") reads as a contradiction and has to be fixed by the operator.
+
 ## D36 — The sentinel is implemented, with its own canaries, and stays local
 
 **Status:** applied · **Revises:** [D33](#d33--between-certifications-a-sentinel-checks-the-certificate-still-holds) · **Affects:** [`sentinel.py`](../src/opaas/sentinel.py), [`runner.py`](../src/opaas/runner.py), [`stats.py`](../src/opaas/stats.py), `cli/main.py`
