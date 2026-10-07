@@ -543,6 +543,7 @@ The suites never talk to a specific engine, only to `InferenceBackend`. Supporti
 - **[Methodology](docs/methodology.md)** — what is measured, how, and what cannot be claimed from each figure
 - **[Certifying yourself without sending us your model](docs/self-evaluation.md)** — self-evaluation and what the signature guarantees
 - [Block B datasets](docs/datasets.md) — format, how to install real subsets, sample size
+- [Proposal: the sentinel](docs/proposals/sentinel.md) — under review; checking between certifications that a certificate still describes the deployment
 - [Proposal: measuring bias](docs/proposals/bias.md) — under review; how block D would measure bias without a judge
 - [Standards mapping](docs/standards-mapping.md) — what a certificate is evidence for under ISO/IEC 42001, the AI Act, the ENS and the NIST AI RMF, and what it is not
 - [Admission policy](docs/admission-policy.md) — what a public comparison accepts, flags and refuses
