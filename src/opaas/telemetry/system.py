@@ -15,6 +15,7 @@ Two different measurements, and they should not be confused:
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 
 import psutil
@@ -97,3 +98,43 @@ def resolve_listening_pid(port: int) -> tuple[int | None, str | None]:
         ):
             return connection.pid, None
     return None, f"No local process listens on port {port}: remote server?"
+
+
+def files_held_by(pid: int) -> tuple[set[str] | None, str | None]:
+    """Files a process and its children have mapped or open. Returns (paths, reason).
+
+    The children matter: Ollama serves from a runner process spawned by
+    `ollama serve`, and vLLM runs its engine core in a separate process, so the
+    process listening on the port is rarely the one holding the weights.
+
+    Paths are normalised (`realpath`, `normcase`) so that the same file reached
+    through a symlink, or spelled with different case on Windows, compares
+    equal. Best effort, like the rest of this module: without permission, or on
+    a platform without `memory_maps` (macOS), it returns None and says why.
+    """
+    try:
+        root = psutil.Process(pid)
+        processes = [root, *root.children(recursive=True)]
+    except psutil.NoSuchProcess:
+        return None, f"The server process {pid} no longer exists"
+    except psutil.AccessDenied:
+        return None, f"No permission to inspect the server process {pid}"
+
+    held: set[str] = set()
+    denied = 0
+    for process in processes:
+        try:
+            if hasattr(process, "memory_maps"):
+                held.update(m.path for m in process.memory_maps(grouped=True) if m.path)
+            held.update(f.path for f in process.open_files())
+        except (psutil.AccessDenied, psutil.ZombieProcess):
+            denied += 1
+        except psutil.NoSuchProcess:
+            continue
+    if denied == len(processes):
+        return None, f"No permission to inspect the files of server process {pid}"
+    return {normalise_path(path) for path in held}, None
+
+
+def normalise_path(path: str) -> str:
+    return os.path.normcase(os.path.realpath(path))

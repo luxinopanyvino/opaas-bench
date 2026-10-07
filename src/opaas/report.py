@@ -42,6 +42,8 @@ class ModelInfo(_Base):
     source: str | None = None
     quantization: str | None = None
     weights_hash: dict[str, Any] = Field(default_factory=dict)
+    #: Chat template, tokenizer and generation defaults beside the weights (D35).
+    tokenizer_files_hash: dict[str, Any] = Field(default_factory=dict)
 
 
 class ConfigurationInfo(_Base):

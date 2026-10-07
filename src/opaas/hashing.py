@@ -119,6 +119,39 @@ def weights_hash(path: Path | None) -> dict[str, Any]:
     }
 
 
+#: Files next to the weights that change what the model is asked, not what it
+#: knows: the chat template, the tokenizer, and the generation defaults vLLM
+#: reads from `generation_config.json`. A new template changes block B and D as
+#: much as new weights do (D25), so they are hashed alongside them (D35).
+TOKENIZER_FILES = (
+    "chat_template.jinja",
+    "chat_template.json",
+    "generation_config.json",
+    "special_tokens_map.json",
+    "tokenizer.json",
+    "tokenizer_config.json",
+)
+
+
+def tokenizer_files_hash(path: Path | None) -> dict[str, Any]:
+    """Hash of the template, tokenizer and generation files beside the weights.
+
+    Only for a model directory. A single GGUF file carries its chat template in
+    its own metadata, so `weights_hash` already covers it.
+    """
+    if path is None or not path.is_dir():
+        return {
+            "available": False,
+            "note": "Not a model directory: a GGUF file embeds its template, and without "
+            "--weights-path there are no files to read.",
+        }
+    files = [path / name for name in TOKENIZER_FILES if (path / name).is_file()]
+    if not files:
+        return {"available": False, "note": f"No tokenizer or template files in {path}"}
+    per_file = [{"path": f.name, "sha256": sha256_file(f)} for f in files]
+    return {"available": True, "hash": sha256_json(per_file), "files": per_file}
+
+
 def short_hash(full_hash: str, length: int = 8) -> str:
     """Short form used in the certificate's public identifier."""
     return full_hash.split(":", 1)[-1][:length]

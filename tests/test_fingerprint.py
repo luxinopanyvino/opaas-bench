@@ -65,6 +65,8 @@ def test_the_fingerprint_records_what_is_serving():
         "chatTemplateHash": "sha256:template",
         "gpus": ["NVIDIA RTX 4090"],
         "gpuDrivers": ["560.35"],
+        "weightsHash": None,
+        "tokenizerFilesHash": None,
     }
 
 
@@ -209,3 +211,140 @@ def test_the_site_lists_what_the_fingerprint_could_not_see(tmp_path):
 def test_the_site_says_when_a_report_predates_the_fingerprint(tmp_path):
     page = _site_page(tmp_path, _report())
     assert "predates the fingerprint" in page
+
+
+# ------------------------------------------------- weights the server holds (D35)
+
+
+class LocalServerBackend(DigestBackend):
+    """A deployment whose serving process is on this host."""
+
+    name: ClassVar[str] = "fake-local"
+
+    def server_pid(self) -> int | None:
+        return 4242
+
+
+def _model_dir(tmp_path):
+    model = tmp_path / "model"
+    model.mkdir()
+    for name in ("model-00001.safetensors", "model-00002.safetensors"):
+        (model / name).write_bytes(name.encode())
+    (model / "tokenizer_config.json").write_text('{"chat_template": "{{ m }}"}')
+    return model
+
+
+def _weights_fingerprint(model, held, backend_cls=LocalServerBackend, monkeypatch=None):
+    from opaas import fingerprint as module
+    from opaas.hashing import tokenizer_files_hash, weights_hash
+    from opaas.telemetry.system import normalise_path
+
+    monkeypatch.setattr(
+        module, "files_held_by", lambda pid: ({normalise_path(str(p)) for p in held}, None)
+    )
+    backend = backend_cls()
+    backend.load("fake/model-1b", {})
+    weights, tokenizer = weights_hash(model), tokenizer_files_hash(model)
+    return deployment_fingerprint(
+        backend, backend.get_backend_metadata(), GPUS,
+        weights_path=model, weights=weights, tokenizer_files=tokenizer,
+    ), weights, tokenizer
+
+
+def test_weights_the_server_holds_enter_the_fingerprint(tmp_path, monkeypatch):
+    model = _model_dir(tmp_path)
+    fingerprint, weights, tokenizer = _weights_fingerprint(
+        model, model.glob("*.safetensors"), monkeypatch=monkeypatch
+    )
+    assert fingerprint["weightsCheck"]["status"] == "confirmed"
+    assert fingerprint["fields"]["weightsHash"] == weights["hash"]
+    assert fingerprint["fields"]["tokenizerFilesHash"] == tokenizer["hash"]
+    assert "weightsHash" not in fingerprint["unknown"]
+
+
+def test_declared_weights_the_server_is_not_seen_holding_stay_out(tmp_path, monkeypatch):
+    """Hashing files proves what is in them, not that the engine loaded them (D14)."""
+    model = _model_dir(tmp_path)
+    fingerprint, _, _ = _weights_fingerprint(model, [], monkeypatch=monkeypatch)
+    assert fingerprint["weightsCheck"]["status"] == "not-observed"
+    assert fingerprint["fields"]["weightsHash"] is None
+    assert fingerprint["fields"]["tokenizerFilesHash"] is None
+    assert "vLLM" in fingerprint["unknown"]["weightsHash"]
+
+
+def test_a_server_holding_only_some_of_the_files_is_partial(tmp_path, monkeypatch):
+    model = _model_dir(tmp_path)
+    fingerprint, _, _ = _weights_fingerprint(
+        model, [model / "model-00001.safetensors"], monkeypatch=monkeypatch
+    )
+    assert fingerprint["weightsCheck"]["status"] == "partial"
+    assert fingerprint["fields"]["weightsHash"] is None
+
+
+def test_a_server_that_cannot_be_located_cannot_confirm_anything(tmp_path, monkeypatch):
+    model = _model_dir(tmp_path)
+    fingerprint, _, _ = _weights_fingerprint(
+        model, model.glob("*.safetensors"), backend_cls=DigestBackend, monkeypatch=monkeypatch
+    )
+    assert fingerprint["weightsCheck"]["status"] == "unverifiable"
+    assert fingerprint["fields"]["weightsHash"] is None
+
+
+def test_without_weights_path_there_is_nothing_to_confirm():
+    fingerprint = _fingerprint()
+    assert fingerprint["weightsCheck"]["status"] == "not-declared"
+    assert fingerprint["fields"]["weightsHash"] is None
+
+
+def test_tokenizer_files_are_hashed_beside_a_model_directory(tmp_path):
+    from opaas.hashing import tokenizer_files_hash
+
+    model = _model_dir(tmp_path)
+    (model / "chat_template.jinja").write_text("{{ messages }}")
+    result = tokenizer_files_hash(model)
+    assert [f["path"] for f in result["files"]] == ["chat_template.jinja", "tokenizer_config.json"]
+
+    (model / "chat_template.jinja").write_text("{{ messages | reverse }}")
+    assert tokenizer_files_hash(model)["hash"] != result["hash"]
+
+
+def test_a_gguf_file_carries_its_own_template(tmp_path):
+    from opaas.hashing import tokenizer_files_hash
+
+    gguf = tmp_path / "model.gguf"
+    gguf.write_bytes(b"GGUF")
+    result = tokenizer_files_hash(gguf)
+    assert result["available"] is False
+    assert "embeds its template" in result["note"]
+
+
+def test_files_held_by_sees_a_file_this_process_has_open(tmp_path):
+    """Real psutil against our own process: no network, no other process."""
+    import os
+
+    from opaas.telemetry.system import files_held_by, normalise_path
+
+    target = tmp_path / "held.safetensors"
+    target.write_bytes(b"x")
+    with target.open("rb"):
+        held, reason = files_held_by(os.getpid())
+    assert reason is None
+    assert normalise_path(str(target)) in held
+
+
+def test_the_runner_hashes_the_weights_once_and_records_the_check(tmp_path, monkeypatch):
+    from opaas import hashing, runner
+
+    model = _model_dir(tmp_path)
+    calls = []
+    original = hashing.weights_hash
+    monkeypatch.setattr(runner, "weights_hash", lambda p: calls.append(p) or original(p))
+    request = RunRequest(
+        model="fake/model-1b", backend="fake-digest", suites=["performance"],
+        suite_options=OPTIONS, output=tmp_path / "r" / "report.json", weights_path=model,
+    )
+    report = json.loads(execute(request).report_path.read_text(encoding="utf-8"))
+    assert calls == [model]
+    assert report["model"]["weightsHash"]["available"] is True
+    assert report["model"]["tokenizerFilesHash"]["available"] is True
+    assert report["deploymentFingerprint"]["weightsCheck"]["status"] == "unverifiable"
