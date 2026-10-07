@@ -4,6 +4,7 @@ import pytest
 
 from opaas.declaration import (
     DECLARED_REQUIREMENTS,
+    REQUIREMENTS,
     DeclarationError,
     load_declaration,
     template,
@@ -139,6 +140,33 @@ def test_every_requirement_maps_to_a_framework():
     for item in _run().metrics["items"]:
         assert item["frameworks"]
         assert item["why"]
+
+
+#: ENS measures the catalogue cites, with their official titles in annex II of
+#: Real Decreto 311/2022. Citing a new one means checking it there first (D30):
+#: two references in the first catalogue named measures about authentication
+#: and personal data for requirements that had nothing to do with either.
+CHECKED_ENS_MEASURES = {
+    "mp.com.1": "Perímetro seguro",
+    "op.exp.1": "Inventario de activos",
+    "op.exp.8": "Registro de la actividad",
+}
+
+
+def test_ens_references_are_measures_checked_against_the_official_text():
+    cited = {
+        reference.removeprefix("ENS ")
+        for requirement in REQUIREMENTS
+        for reference in requirement.frameworks
+        if reference.startswith("ENS ")
+    }
+    assert cited <= CHECKED_ENS_MEASURES.keys()
+
+
+def test_ai_act_article_53_is_cited_to_the_paragraph():
+    """Art. 53 lists several provider obligations; a bare 'art. 53' points at none."""
+    for requirement in REQUIREMENTS:
+        assert "AI Act art. 53" not in requirement.frameworks
 
 
 def test_logprobs_probe_reports_absence_when_the_engine_returns_none():
