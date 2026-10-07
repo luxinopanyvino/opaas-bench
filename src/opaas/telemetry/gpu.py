@@ -21,6 +21,7 @@ _QUERY_FIELDS = (
     "memory.total",
     "utilization.gpu",
     "power.draw",
+    "driver_version",
 )
 
 _NOT_AVAILABLE = "nvidia-smi not found: GPU telemetry unavailable on this host"
@@ -105,6 +106,7 @@ def query_gpus(timeout_s: float = 5.0) -> GpuSnapshot:
                 "memory_total_mb": _to_float(parts[3]),
                 "utilization_pct": _to_float(parts[4]),
                 "power_w": _to_float(parts[5]),
+                "driver_version": parts[6] or None,
             }
         )
 

@@ -9,6 +9,7 @@ measurement with tokens you did not ask for.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import time
 from typing import Any, ClassVar
@@ -64,6 +65,7 @@ class OllamaBackend(InferenceBackend):
         self._pid: int | None = _UNRESOLVED
         self._pid_note: str | None = None
         self._num_ctx: int | None = None
+        self._digest: str | None = None
 
     # ---------------------------------------------------------------- lifecycle
 
@@ -112,13 +114,14 @@ class OllamaBackend(InferenceBackend):
         except json.JSONDecodeError as exc:
             raise BackendError(f"Non-JSON response from {self._base_url}/api/tags: {exc}") from exc
 
-        available = [m.get("name") for m in payload.get("models", []) if isinstance(m, dict)]
-        if self._model_id in available:
-            return
+        models = [m for m in payload.get("models", []) if isinstance(m, dict)]
+        available = [m.get("name") for m in models]
         # Ollama implicitly tags with ':latest'.
-        if f"{self._model_id}:latest" in available:
-            self._model_id = f"{self._model_id}:latest"
-            return
+        for name in (self._model_id, f"{self._model_id}:latest"):
+            if name in available:
+                self._model_id = name
+                self._digest = _prefixed_digest(models[available.index(name)].get("digest"))
+                return
         raise BackendError(
             f"Model {self._model_id!r} is not downloaded in Ollama. "
             f"Available models: {', '.join(str(m) for m in available) or 'none'}. "
@@ -259,6 +262,15 @@ class OllamaBackend(InferenceBackend):
                 return _positive_int(value, str(key))
         return None
 
+    def model_digest(self) -> str | None:
+        return self._digest
+
+    def chat_template_hash(self) -> str | None:
+        template = self._details.get("template") if isinstance(self._details, dict) else None
+        if not isinstance(template, str) or not template:
+            return None
+        return "sha256:" + hashlib.sha256(template.encode("utf-8")).hexdigest()
+
     def server_pid(self) -> int | None:
         if not _is_local(self._base_url):
             return None
@@ -320,6 +332,13 @@ class OllamaBackend(InferenceBackend):
             "serverPid": self.server_pid(),
             "serverPidNote": self._pid_note,
         }
+
+
+def _prefixed_digest(value: Any) -> str | None:
+    """Ollama lists the digest as bare hex; the report spells every hash `sha256:…`."""
+    if not isinstance(value, str) or not value:
+        return None
+    return value if value.startswith("sha256:") else f"sha256:{value}"
 
 
 def _positive_int(value: Any, field: str) -> int | None:

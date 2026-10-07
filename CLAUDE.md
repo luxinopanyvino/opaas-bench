@@ -78,6 +78,7 @@ src/opaas/
 ├── __init__.py         __version__ + OPAAS_SPEC_VERSION (methodology version)
 ├── canonical.py        RFC 8785 JCS serialization — everything signed passes through here
 ├── hashing.py          config/weights/file hashes, run ids (YYYYMMDD-NNN), slugify
+├── fingerprint.py      Deployment fingerprint: what was serving, not how OPAAS ran (D34)
 ├── report.py           Pydantic report models, canonical write, content_hash
 ├── runner.py           RunRequest → execute() → RunOutcome; progress events
 ├── scoring.py          Block B prompt templates (direct/cot) + answer extraction
@@ -102,7 +103,7 @@ src/opaas/
 
 docs/     design.md, methodology.md, decisions.md, datasets.md, key-custody.md,
           self-evaluation.md, implementation-plan.md, mitigation-plan.md
-tests/    637 tests, one file per module, plus conftest.py with the fake backends
+tests/    650 tests, one file per module, plus conftest.py with the fake backends
 scripts/  sprite_from_png.py — regenerates cli/_sprite_data.py from docs/img/mascot.png
 web/      README describing the published site layout (the generator lives in src/)
 ```
@@ -145,7 +146,7 @@ a round trip.
 
 ### Known test state
 
-`uv run pytest` reports **637 passed** in ~4s. The suite is green: treat any failure as
+`uv run pytest` reports **650 passed** in ~4s. The suite is green: treat any failure as
 yours.
 
 ### Test conventions
@@ -193,7 +194,8 @@ yours.
 **A new inference engine** — add `adapters/<engine>.py` with a subclass of
 `InferenceBackend` (set the `name`, `supports_concurrency`, `supports_streaming` ClassVars;
 implement `load`, `generate`, `get_resource_usage`, `get_backend_metadata`; override
-`context_window()` and `server_pid()` when the engine can answer them). Register it in
+`context_window()`, `server_pid()`, `model_digest()` and `chat_template_hash()` when the
+engine can answer them). Register it in
 `adapters/__init__.py`. Touch nothing in `suites/`. `context_window()` returning `None` means
 *unknown*, never *unlimited*.
 

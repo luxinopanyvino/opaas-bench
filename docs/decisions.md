@@ -50,6 +50,29 @@ Signing non-reproducible bytes produces a credential nobody can verify and that 
 
 ---
 
+## D34 — The report records what was serving, not only how OPAAS ran
+
+**Status:** applied · **Revises:** the fingerprint fields proposed in [D33](#d33--between-certifications-a-sentinel-checks-the-certificate-still-holds) · **Affects:** [`fingerprint.py`](../src/opaas/fingerprint.py), [`adapters/`](../src/opaas/adapters), [`telemetry/gpu.py`](../src/opaas/telemetry/gpu.py), [`credential/vc.py`](../src/opaas/credential/vc.py)
+
+`configHash` is the hash of the run's effective configuration: suites, options, prompt mode, model id. It is the right identity for *how OPAAS ran*, and it says nothing about the deployment underneath. Re-pull `llama3:8b` onto different weights, upgrade the engine or the GPU driver, and the configuration hash stays the same while the certificate quietly stops describing what is serving. A test now shows exactly that: same run, new model digest, identical `configHash`.
+
+The report gains a signed `deploymentFingerprint` with the deployment's identity, as the deployment reports it:
+
+| Field | Source |
+|---|---|
+| Engine and version | Adapter metadata |
+| Model id and **model digest** | `InferenceBackend.model_digest()`; Ollama publishes one per model in `/api/tags` |
+| **Chat template hash** | `InferenceBackend.chat_template_hash()`; Ollama returns the template in `/api/show` |
+| GPUs and **driver version** | `nvidia-smi`, now also queried for `driver_version` |
+
+The credential carries its hash as `configuration.deploymentHash`. The certificate page lists every field the deployment did not expose, and the printable certificate shows the hash.
+
+**Only what the deployment reports about itself.** D33 proposed quantization, the served window and the prompt mode too. They are left out: quantization is often the operator's `--quantization`, and the window and prompt mode are what OPAAS chose (`--num-ctx`, `--prompt-mode`). A declaration in a fingerprint would pass for an observation (D14), and those values are already in the configuration.
+
+**Unknown is listed, never guessed.** vLLM and generic OpenAI-compatible servers publish no model digest and no template, so on them the fingerprint rests on the engine version and the GPU. The `unknown` map says so with the reason, and two fingerprints with the same hash prove nothing about a field unknown on both sides.
+
+**What it costs:** one more section in every report, and one more field in the credential, which changes the signed bytes of every new credential. Reports and credentials issued before this have no fingerprint; the site says the report predates it rather than showing nothing. And a change on the server side of vLLM, such as a new `max_model_len`, is not in the fingerprint; it stays visible in `backendMetadata`.
+
 ## D33 — Between certifications, a sentinel checks the certificate still holds
 
 **Status:** proposed, not implemented · **Affects:** [`proposals/sentinel.md`](proposals/sentinel.md)

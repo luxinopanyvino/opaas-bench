@@ -80,6 +80,10 @@ class RunReport(_Base):
     reference_type: str = "on-prem"
     model: ModelInfo
     configuration: ConfigurationInfo
+    #: What was serving: engine version, model digest, chat template, GPUs and
+    #: driver, as the deployment reported them. `configHash` identifies how
+    #: OPAAS ran; this identifies what it ran against (D34).
+    deployment_fingerprint: dict[str, Any] = Field(default_factory=dict)
     environment: dict[str, Any] = Field(default_factory=dict)
     coverage: dict[str, Any] = Field(default_factory=dict)
     suites: list[SuiteResult] = Field(default_factory=list)
@@ -120,7 +124,11 @@ def describe_environment() -> dict[str, Any]:
         "machine": platform.machine(),
         "processor": platform.processor() or None,
         "gpus": [
-            {"name": gpu.get("name"), "vramTotalMb": gpu.get("memory_total_mb")}
+            {
+                "name": gpu.get("name"),
+                "vramTotalMb": gpu.get("memory_total_mb"),
+                "driverVersion": gpu.get("driver_version"),
+            }
             for gpu in snapshot.gpus
         ],
         "gpuTelemetryNote": snapshot.note,

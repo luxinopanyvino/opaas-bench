@@ -92,6 +92,7 @@ A run is reproducible by a third party because everything that influences the re
 | Block D detector | `detectorHash` of the patterns |
 | Classifiers | Weights hash, threshold and resolved activation |
 | Model weights | Hashed if `--weights-path` is supplied; if the model is remote, it is declared that they are not reachable |
+| Deployment | `deploymentFingerprint`: engine and version, model digest, chat template hash, GPUs and driver, as the deployment reports them. Fields it does not expose are listed as unknown, and a match proves nothing about them |
 
 Canonicalization is **RFC 8785 (JCS)**, not a home-grown serialization: a verifier in Go, Rust or JavaScript can reconstruct the same bytes without replicating our decisions.
 
