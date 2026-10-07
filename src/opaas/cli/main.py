@@ -81,7 +81,7 @@ from opaas.transparency import (
     load_log,
     verify_log,
 )
-from opaas.web import SiteError, build_site, load_entry
+from opaas.web import SiteError, build_site, check_verify_url, load_entry, render_printable
 
 app = typer.Typer(
     name="opaas",
@@ -113,6 +113,12 @@ def _menu_items() -> list[MenuItem]:
             "Publish certificates",
             command="opaas publish --report <report> --credential <cert> "
             "--did-document did.json",
+        ),
+        MenuItem(
+            "▣",
+            "Print a certificate",
+            command="opaas certificate --report <report> --credential <cert> "
+            "--url <published page>",
         ),
         MenuItem(
             "✓",
@@ -1424,6 +1430,91 @@ def verify(
     else:
         err_console.print("\n[red bold]Credential NOT valid.[/red bold]")
         raise typer.Exit(code=1)
+
+
+CertificateReport = Annotated[
+    Path, typer.Option("--report", "-r", help="Report the credential certifies.")
+]
+CertificateOut = Annotated[
+    Path, typer.Option("--out", "-o", help="HTML file to write, ready to print to PDF.")
+]
+CertificateUrl = Annotated[
+    str | None,
+    typer.Option(
+        "--url",
+        help="Public URL of the certificate page made by 'opaas publish'. Becomes the QR "
+        "code that leads from the paper to the signature.",
+    ),
+]
+
+
+@app.command("certificate")
+def certificate_command(
+    report: CertificateReport,
+    credential: CredentialIn,
+    out: CertificateOut = Path("certificate.html"),
+    url: CertificateUrl = None,
+    key: VerifyKey = None,
+    did_document: DidDocument = None,
+) -> None:
+    """Renders a printable certificate (A4, to PDF) from a credential that verifies.
+
+    The signature is checked first, with the same key resolution as `verify`:
+    a printed certificate for a credential that would fail verification is a
+    forgery with good typography.
+    """
+    try:
+        entry = load_entry(report, credential)
+        if url is not None:
+            check_verify_url(url)
+    except SiteError as exc:
+        err_console.print(f"[red]{_plain(exc)}[/red]")
+        raise typer.Exit(code=2) from None
+
+    document = entry.credential
+    proof = document.get("proof") or {}
+    try:
+        public_key, origin = resolve_public_key(
+            str(document.get("issuer", "")),
+            proof.get("verificationMethod"),
+            key_path=key,
+            did_document_path=did_document,
+        )
+    except (TrustAnchorError, ValueError) as exc:
+        err_console.print(f"[red]Cannot verify, so it will not be printed:[/red] {exc}")
+        raise typer.Exit(code=2) from None
+
+    result = verify_credential(document, public_key, report_path=report)
+    if not result.valid:
+        err_console.print(
+            "[red bold]The credential does NOT verify; nothing was written.[/red bold]"
+        )
+        for check in result.checks:
+            if not check.ok:
+                err_console.print(f"  [red]FAIL[/red] {check.name}: {_plain(check.detail)}")
+        raise typer.Exit(code=1)
+
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(render_printable(entry, verify_url=url), encoding="utf-8")
+
+    console.print(f"[green]Certificate written:[/green] {out}")
+    console.print(f"  credential : {document.get('id')}")
+    console.print(f"  key        : {origin}")
+    console.print(f"  valid until: {document.get('expirationDate')}")
+    if not entry.complete:
+        console.print(
+            "\n[yellow]Attention:[/yellow] PARTIAL evaluation. The certificate lists the "
+            "blocks that were not evaluated."
+        )
+    if url is None:
+        console.print(
+            "\n[yellow]No --url:[/yellow] the certificate has no QR code, so a reader can "
+            "only check it with 'opaas verify'. Publish the site and pass the page URL."
+        )
+    console.print(
+        "\n[dim]Open it in a browser and print to PDF (A4, landscape). The PDF is a "
+        "rendering: what is verified is the signed credential.[/dim]"
+    )
 
 
 @app.command("version")

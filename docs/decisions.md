@@ -50,6 +50,32 @@ Signing non-reproducible bytes produces a credential nobody can verify and that 
 
 ---
 
+## D29 — The printable certificate is a rendering, and only of a credential that verifies
+
+**Status:** applied · **Affects:** [`web/certificate.py`](../src/opaas/web/certificate.py), [`cli/main.py`](../src/opaas/cli/main.py)
+
+The signed credential is JSON and the certificate page lives on a site. Neither is what an operator hands to an auditor or attaches to a tender, and people asked for a certificate "like the one you get for finishing a course". `opaas certificate` renders one self-contained HTML page laid out for A4 landscape, which the browser prints to PDF.
+
+Three things keep it honest:
+
+1. **It is only rendered for a credential that verifies**, with the same key resolution as `verify` (D4) and the report checked against the certified hash. A printed certificate for a failing signature would be a forgery with good typography.
+2. **It points back to the signature.** Paper and PDFs are trivially edited, so the page carries a QR code to the published certificate page (D19), where the signature is checked in the browser, plus the report hash and credential id that `opaas verify` checks offline. It says in so many words that the credential, not the page, is the certificate.
+3. **It reads like a diploma without grading like one.** One line per block, a block that was not evaluated says so just as visibly, and there is no final mark, because there is no aggregate score. Every limitation the run declared is printed, even when that takes a second sheet.
+
+**HTML, not PDF.** Generating the PDF directly would need a rendering engine (WeasyPrint and its native libraries, or a headless browser), much heavier than everything else OPAAS depends on. Every browser prints HTML to PDF already.
+
+**What it costs:** one more runtime dependency, `segno`, to draw the QR code. It is pure Python with no dependencies of its own. Writing a QR encoder in-house was the alternative, and a QR code that scans wrong on a certificate is worse than having none. A one-line summary per block also leaves out the confidence intervals and the detail; the page says where the full report is, and the QR leads to it.
+
+## D28 — Credentials are valid for 90 days, not 6 months
+
+**Status:** applied · **Settles:** the re-certification frequency the design left open · **Affects:** [`credential/vc.py`](../src/opaas/credential/vc.py)
+
+The design suggested 6 months and left it open; it was implemented as 182 days. It is now **90 days** by default. On-prem LLM stacks change faster than that: engine releases (vLLM, Ollama) come out every few weeks, and a driver update, a new engine version or a different quantization changes block A's results, and sometimes block B's, even with the same weights. A certificate describing a stack that was replaced three months ago is describing a different deployment.
+
+`--validity-days` still sets any other period for a given credential. `verify`, the badge and the site page already treated expiry as invalid, so nothing else changes.
+
+**What it costs:** re-certifying twice as often, with a full run each time. A key compromise is also contained sooner (see [key custody](key-custody.md)).
+
 ## D25 — Without the chat template you are not measuring instruction following
 
 **Status:** applied · **Fixes:** a mistake of our own in both adapters · **Affects:** [`adapters/`](../src/opaas/adapters)
@@ -364,6 +390,5 @@ The meerkat is drawn outside the repository. The terminal grid is generated from
 ## Design items still undecided
 
 - **Scoring/tier system.** Still does not exist, and there is a test (`test_report_has_no_aggregate_score`) that prevents one from slipping in by accident.
-- **Re-certification frequency.** Implemented as 6 months (`--validity-days`, 182 by default), open to revision.
 - **Anchoring in a public log** Certificate Transparency style (Phase 6).
 - **Revocation policy** for when an evaluated model changes version.

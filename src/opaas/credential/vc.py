@@ -39,9 +39,10 @@ CREDENTIAL_TYPE = ["VerifiableCredential", "OpaasModelCertificate"]
 PROOF_TYPE = "DataIntegrityProof"
 CRYPTOSUITE = "eddsa-jcs-2022"
 
-#: The design suggests re-certifying every 6 months: a new driver or backend
-#: changes the result even when the model is the same.
-DEFAULT_VALIDITY_DAYS = 182
+#: 90 days (D28). A new driver, engine release or quantization changes the
+#: result even when the model is the same, and on-prem stacks update faster
+#: than the 6 months the design suggested.
+DEFAULT_VALIDITY_DAYS = 90
 
 
 class CredentialError(ValueError):

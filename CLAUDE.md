@@ -22,7 +22,7 @@ publish → static site (browser-side verification, no backend)
 
 Python 3.10+, CLI built on Typer + Rich, reports modelled with Pydantic v2, signatures with
 `cryptography`. Runtime deps are deliberately few (`httpx`, `typer`, `pydantic`, `rich`,
-`cryptography`, `psutil`); torch/transformers live behind the optional `classifiers` extra.
+`cryptography`, `psutil`, `segno` for the certificate's QR code); torch/transformers live behind the optional `classifiers` extra.
 
 ## Non-negotiable invariants
 
@@ -96,12 +96,13 @@ src/opaas/
 ├── credential/         keys (Ed25519 + DID), vc (build/sign/verify), trust (anchors),
 │                       anchors/ (deliberately empty until the production key exists)
 ├── telemetry/          gpu (nvidia-smi), system (psutil), network, sampler
-├── web/                Static site + badge generation, assets/verify.js (browser verify)
+├── web/                Static site + badge generation, printable certificate (certificate.py),
+│                       assets/verify.js (browser verify)
 └── cli/                main.py (all commands), menu.py, banner.py, sprite.py, pixelfont.py
 
 docs/     design.md, methodology.md, decisions.md, datasets.md, key-custody.md,
           self-evaluation.md, implementation-plan.md, mitigation-plan.md
-tests/    556 tests, one file per module, plus conftest.py with the fake backends
+tests/    626 tests, one file per module, plus conftest.py with the fake backends
 scripts/  sprite_from_png.py — regenerates cli/_sprite_data.py from docs/img/mascot.png
 web/      README describing the published site layout (the generator lives in src/)
 ```
@@ -144,7 +145,7 @@ a round trip.
 
 ### Known test state
 
-`uv run pytest` reports **556 passed** in ~4s. The suite is green: treat any failure as
+`uv run pytest` reports **626 passed** in ~4s. The suite is green: treat any failure as
 yours.
 
 ### Test conventions

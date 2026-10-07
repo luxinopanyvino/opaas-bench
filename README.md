@@ -83,7 +83,7 @@ the others eat. That is what this tool does with a deployment.
 - [Requirements](#requirements)
 - [Installation](#installation)
 - [Your first run](#your-first-run)
-- [Execution flows](#execution-flows) — evaluate, certify, publish, compare, air-gapped, cloud baseline, classifiers
+- [Execution flows](#execution-flows) — evaluate, certify, publish, print, compare, air-gapped, cloud baseline, classifiers
 - [What is measured](#what-is-measured) — the five blocks
 - [Datasets](#datasets)
 - [`run` options](#run-options)
@@ -236,6 +236,8 @@ opaas verify --credential credential.json --report result.json --log ledger.json
 
 A run that does not cover all five blocks is certified as `evaluated-partial`, and `verify` warns about it even when the signature is valid.
 
+A credential is valid for **90 days** by default (`--validity-days` changes it). After that the deployment needs re-certifying: a new driver, engine release or quantization changes the results even for the same model.
+
 ### 3. Publish the certificate
 
 `publish` generates a **static site** — public registry, one page per certificate, embeddable badge. No server, no database, no backend that could lie.
@@ -253,6 +255,18 @@ cd site && python -m http.server 8000
 The certificate page verifies the signature **in the browser**, with the credential and the DID document embedded in the HTML: it does not ask onpremIALabs whether the certificate is good, because then verifying would mean trusting the issuer. It needs a secure context, which `localhost` and HTTPS both provide.
 
 Deploying is your own step — copy `site/` to any hosting. Details in [web/README.md](web/README.md).
+
+### 3b. Print the certificate
+
+For the document you hand to an auditor or attach to a tender, `certificate` renders one self-contained HTML page laid out for A4 landscape. Open it in a browser and print to PDF.
+
+```bash
+opaas certificate --report result.json --credential credential.json --key keys/opaas-root-ed25519.pub.pem --url https://example.com/cert/<id>/index.html --out certificate.html
+```
+
+It shows the deployment, one line per block (a block that was not evaluated says so), the validity dates, every limitation the run declared, and the identifiers `verify` checks. `--url` is the published certificate page and becomes a **QR code**: paper is easy to edit, so the QR is how a reader gets from the sheet to the signature. There is no overall score or grade on it, because OPAAS has none.
+
+It checks the signature first, with the same key resolution as `verify`, and writes nothing if the credential does not verify.
 
 ### 4. Compare configurations
 
@@ -458,6 +472,7 @@ The ones you will actually reach for. Full list with `opaas run --help`.
 | `opaas trust` | Lists pinned trust anchors, or pins one after showing its fingerprint |
 | `opaas admit` | Checks a report against the public registry's admission rules |
 | `opaas publish` | Generates the static certificate site |
+| `opaas certificate` | Renders a printable certificate (A4, to PDF) with a QR code to the published page |
 | `opaas log-verify` | Checks the transparency log |
 | `opaas compliance` | Generates the block E declaration template |
 | `opaas datasets` | Available datasets and cache status |
