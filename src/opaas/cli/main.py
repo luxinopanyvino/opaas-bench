@@ -68,11 +68,26 @@ from opaas.datasets import (
 )
 from opaas.datasets.importers import ImporterError, import_dataset
 from opaas.declaration import template as declaration_template
-from opaas.hashing import canonical_json, file_digest, short_hash, slugify
+from opaas.fingerprint import deployment_fingerprint
+from opaas.hashing import (
+    canonical_json,
+    file_digest,
+    short_hash,
+    slugify,
+    tokenizer_files_hash,
+    weights_hash,
+)
 from opaas.registry import REJECTED, admit
-from opaas.report import REPORT_FILENAME
+from opaas.report import REPORT_FILENAME, describe_environment
 from opaas.runner import RunEvent, RunRequest, execute
 from opaas.scoring import ScoringError, prompt_template_hash
+from opaas.sentinel import (
+    EXIT_CODES,
+    SentinelError,
+    append_watch_log,
+    result_envelope,
+)
+from opaas.sentinel import watch as run_watch
 from opaas.suites import PLANNED_SUITES, available_suites, get_suite, planned_suite_hint
 from opaas.transparency import (
     TransparencyError,
@@ -1526,6 +1541,163 @@ def certificate_command(
         "\n[dim]Open it in a browser and print to PDF (A4, landscape). The PDF is a "
         "rendering: what is verified is the signed credential.[/dim]"
     )
+
+
+WatchFull = Annotated[
+    bool,
+    typer.Option(
+        "--full",
+        help="Also run the statistical checks (latency, egress, a small block B/D sample) "
+        "even when the fingerprint or the canaries already decided.",
+    ),
+]
+WatchOut = Annotated[
+    Path, typer.Option("--out", "-o", help="Where to write the result (JSON).")
+]
+WatchLog = Annotated[
+    Path | None,
+    typer.Option("--log", help="Hash-chained JSONL history of results to append to."),
+]
+
+
+@app.command("watch")
+def watch_command(
+    report: CertificateReport,
+    credential: CredentialIn,
+    key: VerifyKey = None,
+    did_document: DidDocument = None,
+    base_url: BaseUrl = None,
+    api_key: ApiKey = None,
+    weights_path: WeightsPath = None,
+    full: WatchFull = False,
+    out: WatchOut = Path("watch.json"),
+    log: WatchLog = None,
+) -> None:
+    """Checks that a certificate still describes the deployment (exit 0/1/3, 2 on error).
+
+    One-shot, for cron or a systemd timer. Exit codes: 0 current, 1 drifted or
+    expired, 3 inconclusive, 2 when the inputs are wrong. It signs nothing and
+    never reads user traffic.
+    """
+    try:
+        entry = load_entry(report, credential)
+    except SiteError as exc:
+        err_console.print(f"[red]{_plain(exc)}[/red]")
+        raise typer.Exit(code=2) from None
+
+    document = entry.credential
+    proof = document.get("proof") or {}
+    try:
+        public_key, _ = resolve_public_key(
+            str(document.get("issuer", "")),
+            proof.get("verificationMethod"),
+            key_path=key,
+            did_document_path=did_document,
+        )
+    except (TrustAnchorError, ValueError) as exc:
+        err_console.print(f"[red]Cannot verify the certificate to watch:[/red] {exc}")
+        raise typer.Exit(code=2) from None
+
+    verification = verify_credential(document, public_key, report_path=report)
+    failed = {check.name: check.detail for check in verification.checks if not check.ok}
+    report_hash = str(entry.eval_run.get("reportHash"))
+
+    def finish(state: str, body: dict[str, Any] | None = None, detail: str | None = None):
+        result = result_envelope(
+            state, credential=document, report_hash=report_hash, body=body, detail=detail
+        )
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(json.dumps(result, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        if log is not None:
+            try:
+                append_watch_log(log, result)
+            except SentinelError as exc:
+                err_console.print(f"[red]{_plain(exc)}[/red]")
+                raise typer.Exit(code=2) from None
+        _print_watch(result, out)
+        raise typer.Exit(code=EXIT_CODES[state])
+
+    if set(failed) - {"validity"}:
+        for name, detail in failed.items():
+            err_console.print(f"  [red]FAIL[/red] {name}: {_plain(detail)}")
+        err_console.print(
+            "[red]This certificate does not verify, so there is nothing to watch against.[/red]"
+        )
+        raise typer.Exit(code=2)
+    if "validity" in failed:
+        finish("expired", detail=failed["validity"])
+
+    effective = entry.report.get("configuration", {}).get("effectiveConfig", {})
+    backend_name, model = effective.get("backend"), effective.get("model")
+    if not backend_name or not model:
+        err_console.print(
+            "[red]The report does not record which backend and model it ran against.[/red]"
+        )
+        raise typer.Exit(code=2)
+    try:
+        backend = get_backend(str(backend_name))
+    except BackendError as exc:
+        err_console.print(f"[red]{_plain(exc)}[/red]")
+        raise typer.Exit(code=2) from None
+
+    # The canaries must go through the prompt mode and window that were certified.
+    config = {
+        name: effective.get(name)
+        for name in ("prompt_mode", "num_ctx", "max_concurrency", "quantization", "timeout_s")
+        if effective.get(name) is not None
+    }
+    config["base_url"] = base_url or effective.get("base_url")
+    config["api_key"] = api_key
+    try:
+        backend.load(str(model), config)
+    except BackendError as exc:
+        finish("inconclusive", detail=f"The endpoint could not be reached: {exc}")
+
+    try:
+        weights = weights_hash(weights_path) if weights_path else None
+        current = deployment_fingerprint(
+            backend,
+            backend.get_backend_metadata(),
+            describe_environment(),
+            weights_path=weights_path,
+            weights=weights,
+            tokenizer_files=tokenizer_files_hash(weights_path) if weights_path else None,
+        )
+        body = run_watch(entry.report, backend, current, full=full)
+    finally:
+        backend.close()
+    finish(body["state"], body)
+
+
+_STATE_STYLE = {
+    "current": "green",
+    "drifted": "red",
+    "expired": "red",
+    "inconclusive": "yellow",
+    "disabled": "dim",
+}
+
+
+def _print_watch(result: dict[str, Any], out: Path) -> None:
+    state = result["state"]
+    console.print(
+        f"[bold {_STATE_STYLE[state]}]{state.upper()}[/bold {_STATE_STYLE[state]}]"
+        f"  ·  {_plain(result.get('credentialId'))}"
+    )
+    if result.get("detail"):
+        console.print(f"  {_plain(result['detail'])}")
+    for name, check in result.get("checks", {}).items():
+        style = _STATE_STYLE.get(check["status"], "white")
+        console.print(
+            f"  [{style}]{check['status']:<12}[/{style}] {name}: {_plain(check['detail'])}"
+        )
+    carried = result.get("carriedBy") or []
+    if state == "current" and set(carried) <= {"latency", "egress", "behaviour"}:
+        console.print(
+            "\n[yellow]Carried by coarse statistics only:[/yellow] nothing identified the model "
+            "build and the canaries could not run. A subtle change would pass unnoticed."
+        )
+    console.print(f"\n[dim]Result: {out}. Not a certificate: the sentinel signs nothing.[/dim]")
 
 
 @app.command("version")

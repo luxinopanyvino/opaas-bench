@@ -86,6 +86,9 @@ class RunReport(_Base):
     #: driver, as the deployment reported them. `configHash` identifies how
     #: OPAAS ran; this identifies what it ran against (D34).
     deployment_fingerprint: dict[str, Any] = Field(default_factory=dict)
+    #: What `opaas watch` compares against between certifications: canary
+    #: output hashes and a latency interval, signed with the rest (D36).
+    sentinel_baseline: dict[str, Any] = Field(default_factory=dict)
     environment: dict[str, Any] = Field(default_factory=dict)
     coverage: dict[str, Any] = Field(default_factory=dict)
     suites: list[SuiteResult] = Field(default_factory=list)

@@ -50,6 +50,26 @@ Signing non-reproducible bytes produces a credential nobody can verify and that 
 
 ---
 
+## D36 — The sentinel is implemented, with its own canaries, and stays local
+
+**Status:** applied · **Revises:** [D33](#d33--between-certifications-a-sentinel-checks-the-certificate-still-holds) · **Affects:** [`sentinel.py`](../src/opaas/sentinel.py), [`runner.py`](../src/opaas/runner.py), [`stats.py`](../src/opaas/stats.py), `cli/main.py`
+
+`opaas watch` is implemented as D33 proposed: the fingerprint first, the canaries next, coarse statistics last, and the first `drifted` ends the run. The open questions are settled: the proposed sample sizes (20 canaries, 20 latency requests, 40 items per task), **results stay local**, and **exit code 3** for `inconclusive`.
+
+Three points differ from the proposal:
+
+- **The canary prompts are fixed and ship with OPAAS.** They are not drawn from the evaluation dataset. Drawing them from the dataset would make the sentinel depend on that dataset being cached on the production host, and an operator's own items, which never leave their network, would be needed again outside the run that used them. Twenty short prompts with obvious answers, versioned (`CANARY_SET_VERSION`) and hashed, do the same job anywhere.
+- **Determinism is checked by the canaries themselves.** The proposal relied on block C's 100% determinism. Instead, `run` sends each canary twice. If any disagrees with itself, the baseline records the canary check as unusable, so it no longer depends on block C having run.
+- **Weights are re-hashed only on request.** `--weights-path` re-hashes them, which is slow for large models. Without it, a certified `weightsHash` is reported as not comparable rather than silently assumed.
+
+**What `run` now signs.** A `sentinelBaseline` section: the canary set's hash, the 20 output hashes, whether they were stable, and a serial latency measurement. Time to first token or total latency is recorded with a **distribution-free 95% interval for the median**: order statistics, ranks 6 and 15 at n=20. It costs about 60 serial requests per run. A failure here never fails the evaluation; the baseline says it is unavailable. A cloud baseline gets none (D22).
+
+**Only the model build lets the fingerprint carry `current`.** A matching engine version and GPU say the stack is the same, not that the weights are. So the fingerprint decides on its own only when the model digest or the confirmed weights match (D35). Otherwise the canaries have to carry it, or the statistics, which the result flags as coarse.
+
+**Next to production.** The behaviour check runs blocks B and D at concurrency 1, offline, and without the default classifiers. `SafetyOptions.use_default_classifiers` exists for this: loading ~800 MB every hour to re-check a refusal rate would cost more than the check. The egress check calls the same `probe_egress` that block E certified, now a module-level function rather than a lookalike.
+
+**What it costs:** about 60 more requests in every `run`. A canary set that cannot change without invalidating every baseline signed against the previous version: the sentinel then says the sets differ, and asks for re-certification. And `current` is only as strong as whatever carried it; the result says which check that was, and the CLI warns when only the statistics did.
+
 ## D35 — Weights on disk enter the fingerprint only when the server is seen holding them
 
 **Status:** applied · **Affects:** [`fingerprint.py`](../src/opaas/fingerprint.py), [`telemetry/system.py`](../src/opaas/telemetry/system.py), [`hashing.py`](../src/opaas/hashing.py)
@@ -99,7 +119,7 @@ The credential carries its hash as `configuration.deploymentHash`. The certifica
 
 ## D33 — Between certifications, a sentinel checks the certificate still holds
 
-**Status:** proposed, not implemented · **Affects:** [`proposals/sentinel.md`](proposals/sentinel.md)
+**Status:** implemented, as revised by [D36](#d36--the-sentinel-is-implemented-with-its-own-canaries-and-stays-local) · **Affects:** [`proposals/sentinel.md`](proposals/sentinel.md)
 
 A certificate is valid for 90 days and can become false the day after it is issued, when the engine, the model build, the quantization or the driver changes. Monitoring production in real time is not the answer: that traffic is not reproducible, has no ground truth to score against without a judge (D11), and carries users' personal data.
 

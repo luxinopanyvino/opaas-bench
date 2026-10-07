@@ -1,6 +1,6 @@
 # Proposal: the sentinel, `opaas watch`
 
-**Status:** proposed, not implemented (D33). This document is for review before any code is written.
+**Status:** implemented (D36), with the revisions recorded there: fixed canary prompts instead of items drawn from the dataset, determinism checked by the canaries themselves, and the open questions settled (proposed sample sizes, results stay local, exit code 3).
 
 ## The problem
 

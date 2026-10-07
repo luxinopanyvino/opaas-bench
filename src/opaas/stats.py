@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Iterable
+from typing import Any
 
 
 def percentile(values: Iterable[float], p: float) -> float | None:
@@ -79,3 +80,49 @@ def wilson_interval(successes: int, total: int, z: float = _Z95) -> dict[str, fl
         "high": round(min(1.0, center + margin), 4),
         "n": total,
     }
+
+
+def median_interval(
+    values: Iterable[float], confidence: float = 0.95
+) -> dict[str, float | int | None]:
+    """Distribution-free confidence interval for the median, from order statistics.
+
+    Latencies are skewed and have long tails, so an interval that assumes a
+    normal distribution would be wrong exactly where it matters. The number of
+    samples below the true median is Binomial(n, 1/2) whatever the
+    distribution, which gives the ranks of the bounds directly. At n=20 the
+    interval runs from the 6th to the 15th sorted value, covering 95.9%.
+
+    Below six samples no pair of ranks reaches 95%: the bounds are None and the
+    caller has to treat the median as unqualified.
+    """
+    data = sorted(v for v in values if v is not None)
+    n = len(data)
+    if n == 0:
+        return {"point": None, "low": None, "high": None, "n": 0}
+    point = _round(percentile(data, 50), 4)
+    # Widen symmetrically from the middle until the coverage is reached.
+    for j in range(n // 2, 0, -1):
+        k = n - j + 1  # 1-based ranks j and k, symmetric around the median
+        coverage = sum(math.comb(n, i) for i in range(j, k)) / 2**n
+        if coverage >= confidence:
+            return {
+                "point": point,
+                "low": _round(data[j - 1], 4),
+                "high": _round(data[k - 1], 4),
+                "n": n,
+            }
+    return {"point": point, "low": None, "high": None, "n": n}
+
+
+def intervals_separate(a: dict[str, Any], b: dict[str, Any]) -> bool | None:
+    """True when two intervals do not overlap; None when either is unqualified.
+
+    The project's single rule for calling something a difference (invariant
+    11): two measurements whose intervals overlap are not different, however
+    far apart their points look.
+    """
+    bounds = (a.get("low"), a.get("high"), b.get("low"), b.get("high"))
+    if any(bound is None for bound in bounds):
+        return None
+    return a["low"] > b["high"] or b["low"] > a["high"]

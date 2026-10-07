@@ -361,6 +361,29 @@ wrong: it fails 1 of 8 cases in en. Try --classifier-threshold 0.9429.
 
 That is also what catches the most common mistake: an NLI model whose label order does not match what the profile expects. It is the mapping that is wrong, not the model.
 
+### 8. Watch a certified deployment between certifications
+
+A certificate can stop describing the deployment the day after it is issued: an engine update, a re-pulled model, a new driver. `watch` checks, on a schedule, whether the signed certificate still holds:
+
+```bash
+opaas watch --report result.json --credential credential.json --key keys/opaas-root-ed25519.pub.pem --log watch.jsonl
+```
+
+It is a one-shot command for cron, a systemd timer or Windows Task Scheduler. It never reads user traffic and signs nothing. It runs the cheapest check first and stops at the first change:
+
+1. **Deployment fingerprint**, with no inference: engine version, model digest, confirmed weights, chat template, GPU driver.
+2. **Twenty canary prompts** at temperature 0, compared by hash with the outputs signed at certification. Used only if the deployment was deterministic when certified.
+3. **Coarse statistics** (serial latency, egress, a 40-item sample of blocks B and D), under the confidence-interval overlap rule. They run when the first two could not decide, or always with `--full`.
+
+| Exit code | State | Meaning |
+|---|---|---|
+| `0` | `current` | The checks that could run match the certificate |
+| `1` | `drifted` / `expired` | Something changed, or the certificate is past its date |
+| `3` | `inconclusive` | It could not tell: endpoint down, nothing identifying exposed |
+| `2` | — | The inputs are wrong, or the certificate does not verify |
+
+The result goes to `watch.json`; `--log` appends it to a hash-chained history, the monitoring record a deployer keeps. It stays local: nothing is published. Pass `--weights-path` to re-hash weights on disk (slow for large models). Every `run` signs the baseline the sentinel needs (`sentinelBaseline`), at the cost of about 60 extra serial requests.
+
 ## What is measured
 
 | Block | `--suite` | What it answers |
@@ -473,6 +496,7 @@ The ones you will actually reach for. Full list with `opaas run --help`.
 | `opaas trust` | Lists pinned trust anchors, or pins one after showing its fingerprint |
 | `opaas admit` | Checks a report against the public registry's admission rules |
 | `opaas publish` | Generates the static certificate site |
+| `opaas watch` | Checks between certifications that a certificate still describes the deployment (exit 0/1/3) |
 | `opaas certificate` | Renders a printable certificate (A4, to PDF) with a QR code to the published page |
 | `opaas log-verify` | Checks the transparency log |
 | `opaas compliance` | Generates the block E declaration template |
@@ -543,7 +567,7 @@ The suites never talk to a specific engine, only to `InferenceBackend`. Supporti
 - **[Methodology](docs/methodology.md)** — what is measured, how, and what cannot be claimed from each figure
 - **[Certifying yourself without sending us your model](docs/self-evaluation.md)** — self-evaluation and what the signature guarantees
 - [Block B datasets](docs/datasets.md) — format, how to install real subsets, sample size
-- [Proposal: the sentinel](docs/proposals/sentinel.md) — under review; checking between certifications that a certificate still describes the deployment
+- [The sentinel](docs/proposals/sentinel.md) — design of `opaas watch`, now implemented (D36)
 - [Proposal: measuring bias](docs/proposals/bias.md) — under review; how block D would measure bias without a judge
 - [Standards mapping](docs/standards-mapping.md) — what a certificate is evidence for under ISO/IEC 42001, the AI Act, the ENS and the NIST AI RMF, and what it is not
 - [Admission policy](docs/admission-policy.md) — what a public comparison accepts, flags and refuses

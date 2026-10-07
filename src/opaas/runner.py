@@ -26,6 +26,7 @@ from opaas.report import (
     describe_hardware,
     utcnow_iso,
 )
+from opaas.sentinel import capture_baseline
 from opaas.suites import coverage, get_suite
 
 #: Where runs are stored when `--output` is not given.
@@ -151,6 +152,24 @@ def _publishable_config(config: dict[str, Any]) -> dict[str, Any]:
             continue
         clean[key] = "***" if key in _SECRET_KEYS and value else value
     return clean
+
+
+def _sentinel_baseline(
+    request: RunRequest, backend: Any, emit: Callable[..., None]
+) -> dict[str, Any]:
+    """The signed baseline `opaas watch` compares against later (D36).
+
+    Not for a cloud baseline, which can never become a certificate (D22). A
+    failure here never fails the run: the sentinel then says the report has no
+    usable baseline, rather than the evaluation being lost over it.
+    """
+    if request.reference_type == "cloud-baseline":
+        return {"available": False, "reason": "A cloud baseline cannot be certified (D22)."}
+    emit("Sentinel baseline: canaries and serial latency…")
+    try:
+        return capture_baseline(backend)
+    except Exception as exc:  # noqa: BLE001 - the evaluation outlives its baseline
+        return {"available": False, "reason": f"{type(exc).__name__}: {exc}"}
 
 
 def execute(
@@ -279,6 +298,8 @@ def execute(
                     suite=suite_name,
                     index=position,
                 )
+
+        report.sentinel_baseline = _sentinel_baseline(request, backend, emit)
     finally:
         backend.close()
 

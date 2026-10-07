@@ -113,34 +113,11 @@ class ComplianceSuite(Suite):
         )
 
     def _probe_egress(self, backend: InferenceBackend) -> dict[str, Any]:
-        """Generates a little load and watches whether the engine talks to the outside."""
-        watcher = EgressWatcher(backend.server_pid(), self.opts.egress_interval_s).start()
-        try:
-            for _ in range(max(1, self.opts.egress_probe_requests)):
-                try:
-                    backend.generate(_PROBE_PROMPT, max_tokens=16, temperature=0.0)
-                except Exception:  # noqa: BLE001 - the network probe does not depend on success
-                    continue
-        finally:
-            report = watcher.stop()
-
-        payload = report.as_dict()
-        if not report.available:
-            payload["status"] = "unknown"
-            payload["detail"] = report.note or "the server process could not be observed"
-        elif report.external:
-            destinations = ", ".join(f"{e.address}:{e.port}" for e in report.external)
-            payload["status"] = "fail"
-            payload["detail"] = (
-                f"The engine opened external connections during inference: {destinations}"
-            )
-        else:
-            payload["status"] = "pass"
-            payload["detail"] = (
-                f"No external connections across {report.samples} samples during "
-                f"{report.duration_s:.1f}s of inference"
-            )
-        return payload
+        return probe_egress(
+            backend,
+            requests=self.opts.egress_probe_requests,
+            interval_s=self.opts.egress_interval_s,
+        )
 
 
 def _probe_logprobs(backend: InferenceBackend) -> dict[str, Any]:
@@ -252,4 +229,41 @@ def _summarize(items: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-__all__ = ["ComplianceSuite", "ComplianceOptions", "REQUIREMENTS"]
+def probe_egress(
+    backend: InferenceBackend, *, requests: int, interval_s: float
+) -> dict[str, Any]:
+    """Generates a little load and watches whether the engine talks to the outside.
+
+    Module-level so the sentinel (D36) repeats exactly the probe that was
+    certified, rather than a lookalike.
+    """
+    watcher = EgressWatcher(backend.server_pid(), interval_s).start()
+    try:
+        for _ in range(max(1, requests)):
+            try:
+                backend.generate(_PROBE_PROMPT, max_tokens=16, temperature=0.0)
+            except Exception:  # noqa: BLE001 - the network probe does not depend on success
+                continue
+    finally:
+        report = watcher.stop()
+
+    payload = report.as_dict()
+    if not report.available:
+        payload["status"] = "unknown"
+        payload["detail"] = report.note or "the server process could not be observed"
+    elif report.external:
+        destinations = ", ".join(f"{e.address}:{e.port}" for e in report.external)
+        payload["status"] = "fail"
+        payload["detail"] = (
+            f"The engine opened external connections during inference: {destinations}"
+        )
+    else:
+        payload["status"] = "pass"
+        payload["detail"] = (
+            f"No external connections across {report.samples} samples during "
+            f"{report.duration_s:.1f}s of inference"
+        )
+    return payload
+
+
+__all__ = ["REQUIREMENTS", "ComplianceOptions", "ComplianceSuite", "probe_egress"]
