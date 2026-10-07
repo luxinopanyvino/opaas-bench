@@ -157,13 +157,21 @@ class OllamaBackend(InferenceBackend):
             options["num_ctx"] = self._num_ctx
         options.update(params.pop("options", {}))
 
-        body = {
+        body: dict[str, Any] = {
             "model": self.model_id,
             "prompt": prompt,
             "stream": bool(params.pop("stream", True)),
             "raw": self._raw,
             "options": options,
         }
+        # Forwarded, not dropped: block E's explainability probe asks for them,
+        # and silently discarding the parameter made the report say the
+        # *engine* returned none (D38). `logprobs=N` follows the OpenAI
+        # convention of N alternatives per token.
+        if logprobs := params.pop("logprobs", None):
+            body["logprobs"] = True
+            if isinstance(logprobs, int) and not isinstance(logprobs, bool):
+                body["top_logprobs"] = logprobs
         return self._stream(body) if body["stream"] else self._single(body)
 
     def _single(self, body: dict[str, Any]) -> GenerationResult:
@@ -179,10 +187,12 @@ class OllamaBackend(InferenceBackend):
             final=payload,
             ttft_s=None,
             elapsed=time.perf_counter() - started,
+            logprobs=payload.get("logprobs") or None,
         )
 
     def _stream(self, body: dict[str, Any]) -> GenerationResult:
         chunks: list[str] = []
+        logprobs: list[Any] = []
         final: dict[str, Any] = {}
         ttft_s: float | None = None
 
@@ -203,6 +213,8 @@ class OllamaBackend(InferenceBackend):
                         if ttft_s is None:
                             ttft_s = time.perf_counter() - started
                         chunks.append(piece)
+                    if isinstance(event.get("logprobs"), list):
+                        logprobs.extend(event["logprobs"])
                     if event.get("done"):
                         final = event
         except httpx.HTTPError as exc:
@@ -213,10 +225,17 @@ class OllamaBackend(InferenceBackend):
             final=final,
             ttft_s=ttft_s,
             elapsed=time.perf_counter() - started,
+            logprobs=logprobs or None,
         )
 
     def _build(
-        self, *, text: str, final: dict[str, Any], ttft_s: float | None, elapsed: float
+        self,
+        *,
+        text: str,
+        final: dict[str, Any],
+        ttft_s: float | None,
+        elapsed: float,
+        logprobs: list[Any] | None = None,
     ) -> GenerationResult:
         return GenerationResult(
             text=text,
@@ -232,6 +251,7 @@ class OllamaBackend(InferenceBackend):
                 "enginePromptEvalS": _ns_to_s(final.get("prompt_eval_duration")),
                 "engineLoadS": _ns_to_s(final.get("load_duration")),
                 "engineTotalS": _ns_to_s(final.get("total_duration")),
+                "logprobs": logprobs,
             },
         )
 
