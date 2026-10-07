@@ -50,6 +50,22 @@ Signing non-reproducible bytes produces a credential nobody can verify and that 
 
 ---
 
+## D33 — Between certifications, a sentinel checks the certificate still holds
+
+**Status:** proposed, not implemented · **Affects:** [`proposals/sentinel.md`](proposals/sentinel.md)
+
+A certificate is valid for 90 days and can become false the day after it is issued, when the engine, the model build, the quantization or the driver changes. Monitoring production in real time is not the answer: that traffic is not reproducible, has no ground truth to score against without a judge (D11), and carries users' personal data.
+
+The proposal is `opaas watch`, a one-shot command for a scheduler. It answers one question, whether the signed certificate still describes this deployment, with `current`, `drifted`, `inconclusive` or `expired`. It runs three checks, cheapest first:
+
+1. **The deployment fingerprint:** engine version, model digest, quantization, served window, GPU driver. No inference is needed.
+2. **Exact-output canaries** at temperature 0. Applied only if block C certified 100% serial determinism.
+3. **Coarse statistical drift**, under the same overlap rule as `compare`.
+
+It never signs, never holds the key, never reads user traffic and never revokes. It supplies the trigger for the revocation policy that is still undecided, not the mechanism.
+
+**What it would cost:** `run` has to record a signed `deploymentFingerprint` and `sentinelBaseline`, because today's `configHash` identifies OPAAS's run configuration, not the deployment. Reports certified before that can only be checked loosely. It adds a little load on production per check, and it carries a risk of false reassurance, which the result has to counter by saying which checks actually carried a `current`.
+
 ## D32 — Bias is measured with stereotype questions and counterfactual pairs
 
 **Status:** proposed, not implemented · **Settles (once applied):** the bias methodology left open in block D · **Affects:** [`proposals/bias.md`](proposals/bias.md)
@@ -437,4 +453,4 @@ The meerkat is drawn outside the repository. The terminal grid is generated from
 
 - **Scoring/tier system.** Still does not exist, and there is a test (`test_report_has_no_aggregate_score`) that prevents one from slipping in by accident.
 - **Anchoring in a public log** Certificate Transparency style (Phase 6).
-- **Revocation policy** for when an evaluated model changes version.
+- **Revocation policy** for when an evaluated model changes version. The proposed sentinel (D33) would detect the change; how a certificate is then revoked is still open.
