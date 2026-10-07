@@ -255,7 +255,7 @@ def _render_certificate(
         f"OPAAS certificate — {entry.model}",
         f"""<h1>{esc(entry.model)}</h1>
 <p class="subtitle">
-  {esc(entry.quantization or "quantization not declared")} ·
+  quantization {quantization_html(report)} ·
   {esc(configuration.get("backend", "unknown backend"))} ·
   {esc(configuration.get("hardware", "unknown hardware"))}
 </p>
@@ -312,6 +312,35 @@ def _render_certificate(
 <script src="../../assets/verify.js"></script>""",
         depth=2,
     )
+
+
+def quantization_html(report: dict[str, Any]) -> str:
+    """The value, and whose word it is: the engine's or the operator's (D37)."""
+    model = report.get("model", {})
+    shown, source = model.get("quantization"), model.get("quantizationSource")
+    reported = model.get("quantizationReported")
+    if not shown:
+        return "<b>not declared</b>"
+    value = f"<b>{esc(shown)}</b>"
+    if source == "engine":
+        return f"{value} <span class='src'>(reported by the engine)</span>"
+    if source == "declared" and reported:
+        a, b = str(shown).upper(), str(reported).upper()
+        if a in b or b in a:
+            return (
+                f"{value} <span class='src'>(declared; the engine reports "
+                f"{esc(reported)})</span>"
+            )
+        return (
+            f"{value} <span class='src'>(declared)</span> · "
+            f"<span class='conflict'>the engine reports <b>{esc(reported)}</b></span>"
+        )
+    if source == "declared":
+        return (
+            f"{value} <span class='src'>(declared by the operator, not reported by "
+            "the engine)</span>"
+        )
+    return f"{value} <span class='src'>(source not recorded)</span>"
 
 
 def _render_fingerprint(report: dict[str, Any], configuration: dict[str, Any]) -> str:

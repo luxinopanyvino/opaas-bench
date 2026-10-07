@@ -169,6 +169,15 @@ class InferenceBackend(ABC):
             return None
         return value if value > 0 else None
 
+    def reported_quantization(self) -> str | None:
+        """The quantization the engine itself reports for the loaded model, if any.
+
+        Kept apart from `--quantization`, which is the operator's word for it:
+        the certificate says which of the two it shows, and a disagreement
+        between them is reported rather than resolved silently (D37).
+        """
+        return None
+
     def model_digest(self) -> str | None:
         """Content digest of the model build being served, if the engine publishes one.
 

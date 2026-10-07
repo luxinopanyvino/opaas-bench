@@ -93,6 +93,7 @@ def build_credential(
                 "weightsHash": (model.get("weightsHash") or {}).get("hash"),
                 "source": model.get("source"),
                 "quantization": model.get("quantization"),
+                "quantizationSource": model.get("quantizationSource"),
             },
             "configuration": {
                 "backend": configuration.get("backend"),

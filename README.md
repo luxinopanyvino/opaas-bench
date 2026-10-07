@@ -264,7 +264,7 @@ For the document you hand to an auditor or attach to a tender, `certificate` ren
 opaas certificate --report result.json --credential credential.json --key keys/opaas-root-ed25519.pub.pem --url https://example.com/cert/<id>/index.html --out certificate.html
 ```
 
-It shows the deployment, one line per block (a block that was not evaluated says so), the validity dates, every limitation the run declared, and the identifiers `verify` checks. `--url` is the published certificate page and becomes a **QR code**: paper is easy to edit, so the QR is how a reader gets from the sheet to the signature. There is no overall score or grade on it, because OPAAS has none.
+It shows the deployment, one line per block (a block that was not evaluated says so), the validity dates, every limitation the run declared, and the identifiers `verify` checks. The quantization says whose word it is, the engine's or yours (`--quantization`), and the deployment hash is spelled out: engine and version, model digest, GPU and driver, and which of those the deployment did not expose. `--url` is the published certificate page and becomes a **QR code**: paper is easy to edit, so the QR is how a reader gets from the sheet to the signature. There is no overall score or grade on it, because OPAAS has none.
 
 It checks the signature first, with the same key resolution as `verify`, and writes nothing if the credential does not verify.
 

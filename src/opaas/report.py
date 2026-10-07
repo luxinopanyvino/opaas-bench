@@ -41,6 +41,11 @@ class ModelInfo(_Base):
     name: str
     source: str | None = None
     quantization: str | None = None
+    #: Where `quantization` came from: 'engine' (reported by the engine) or
+    #: 'declared' (the operator's --quantization). Never merged silently (D37).
+    quantization_source: str | None = None
+    #: What the engine reported, kept even when the operator also declared one.
+    quantization_reported: str | None = None
     weights_hash: dict[str, Any] = Field(default_factory=dict)
     #: Chat template, tokenizer and generation defaults beside the weights (D35).
     tokenizer_files_hash: dict[str, Any] = Field(default_factory=dict)

@@ -104,7 +104,7 @@ src/opaas/
 
 docs/     design.md, methodology.md, decisions.md, datasets.md, key-custody.md,
           self-evaluation.md, implementation-plan.md, mitigation-plan.md
-tests/    681 tests, one file per module, plus conftest.py with the fake backends
+tests/    692 tests, one file per module, plus conftest.py with the fake backends
 scripts/  sprite_from_png.py — regenerates cli/_sprite_data.py from docs/img/mascot.png
 web/      README describing the published site layout (the generator lives in src/)
 ```
@@ -147,7 +147,7 @@ a round trip.
 
 ### Known test state
 
-`uv run pytest` reports **681 passed** in ~4s. The suite is green: treat any failure as
+`uv run pytest` reports **692 passed** in ~4s. The suite is green: treat any failure as
 yours.
 
 ### Test conventions
