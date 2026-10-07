@@ -50,6 +50,21 @@ Signing non-reproducible bytes produces a credential nobody can verify and that 
 
 ---
 
+## D32 — Bias is measured with stereotype questions and counterfactual pairs
+
+**Status:** proposed, not implemented · **Settles (once applied):** the bias methodology left open in block D · **Affects:** [`proposals/bias.md`](proposals/bias.md)
+
+Bias has been declared unmeasured in every run. What was missing was a decision on which axes and which prompts, not a tool. The proposal makes it with two deterministic measurements inside block D:
+
+- **Stereotype questions** from BBQ (English) and EsBBQ (Spanish). When the passage gives no reason to pick anyone, picking someone is choosing on a stereotype.
+- **Counterfactual pairs** written by the operator for their own domain: does the decision change when only a protected attribute changes?
+
+Both are scored by answer extraction, with no judge. Bias is reported only when the 95% interval excludes 50%. BBQ's combined bias score is deliberately left out: it would hide which of the two failure modes produced it.
+
+**What it would cost:** about 2,000 more items per run, two more pinned sources, and inheriting the benchmark authors' judgement of which answer is stereotype-aligned. Free-generation bias and intersectionality stay unmeasured and declared.
+
+It is recorded as *proposed* so the review happens before the code: the open questions are listed at the end of the proposal.
+
 ## D31 — The operator can add context, and it is printed as unverified
 
 **Status:** applied · **Affects:** [`report.py`](../src/opaas/report.py), [`runner.py`](../src/opaas/runner.py), [`web/`](../src/opaas/web)
