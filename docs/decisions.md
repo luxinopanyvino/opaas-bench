@@ -50,6 +50,30 @@ Signing non-reproducible bytes produces a credential nobody can verify and that 
 
 ---
 
+## D35 — Weights on disk enter the fingerprint only when the server is seen holding them
+
+**Status:** applied · **Affects:** [`fingerprint.py`](../src/opaas/fingerprint.py), [`telemetry/system.py`](../src/opaas/telemetry/system.py), [`hashing.py`](../src/opaas/hashing.py)
+
+Outside Ollama the fingerprint (D34) was weak: vLLM and the OpenAI-compatible servers (`llama-server`, TGI, LM Studio) publish no model digest and no template. That is exactly the setup where the operator has the weights on disk, and `--weights-path` already hashed them. But hashing files proves what is in the files, not what the engine loaded. Putting that hash in the fingerprint as if the deployment had reported it would be D14's mistake, a declaration passing for an observation.
+
+**So it is checked.** When the server runs on this host, OPAAS already knows its PID (block A uses it for RAM). `psutil` lists the files that process **and its children** have memory-mapped or open. The children matter: Ollama serves from a runner spawned by `ollama serve`, and vLLM runs its engine core in a separate process. The declared weight files are compared with that set:
+
+| `weightsCheck` | Meaning | In the fingerprint |
+|---|---|---|
+| `confirmed` | Every declared weight file is held by the server's process tree | `weightsHash` and `tokenizerFilesHash` |
+| `partial` | Only some are: it may be serving a different set | No |
+| `not-observed` | None are | No |
+| `unverifiable` | Remote server, unidentified process, or no permission | No |
+| `not-declared` / `not-hashed` | No `--weights-path`, or nothing hashable there | No |
+
+The declared hash stays in `model.weightsHash` in every case. Checked on Windows against a real child process that memory-maps a file and closes its handle, the way llama.cpp loads a GGUF.
+
+**Template and tokenizer files are hashed too.** `chat_template.jinja`, `tokenizer_config.json`, `generation_config.json` and their siblings change what the model is asked as much as the weights change what it knows (D25). They go in `model.tokenizerFilesHash`, and into the fingerprint alongside confirmed weights. A GGUF file embeds its template, so its weights hash already covers it.
+
+**The weights are hashed once.** The runner computes the hash and passes it to both the model section and the fingerprint. Hashing 40 GB twice to fill two fields would be absurd, and a test pins it.
+
+**What it costs:** **vLLM usually reads `not-observed`.** It copies the weights to the GPU and releases the mapping, so on vLLM the weights stay declared, and the detail says that is what `not-observed` looks like there. It is a limit of observation, not evidence of other weights. Template files are trusted to come from the confirmed model's directory: a server started with an explicit `--chat-template` elsewhere is not covered. And the check only works when OPAAS runs on the serving host.
+
 ## D34 — The report records what was serving, not only how OPAAS ran
 
 **Status:** applied · **Revises:** the fingerprint fields proposed in [D33](#d33--between-certifications-a-sentinel-checks-the-certificate-still-holds) · **Affects:** [`fingerprint.py`](../src/opaas/fingerprint.py), [`adapters/`](../src/opaas/adapters), [`telemetry/gpu.py`](../src/opaas/telemetry/gpu.py), [`credential/vc.py`](../src/opaas/credential/vc.py)

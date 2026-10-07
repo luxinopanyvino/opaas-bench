@@ -17,7 +17,7 @@ from typing import Any
 
 from opaas.adapters import get_backend
 from opaas.fingerprint import deployment_fingerprint
-from opaas.hashing import allocate_run_id, config_hash, weights_hash
+from opaas.hashing import allocate_run_id, config_hash, tokenizer_files_hash, weights_hash
 from opaas.report import (
     ConfigurationInfo,
     ModelInfo,
@@ -209,6 +209,8 @@ def execute(
 
     try:
         backend_metadata = backend.get_backend_metadata()
+        weights = weights_hash(request.weights_path)
+        tokenizer_files = tokenizer_files_hash(request.weights_path)
         report = RunReport(
             run_id=run_id,
             started_at=started_at,
@@ -216,7 +218,8 @@ def execute(
                 name=request.model,
                 source=request.model_source,
                 quantization=request.quantization or backend_metadata.get("quantization"),
-                weights_hash=weights_hash(request.weights_path),
+                weights_hash=weights,
+                tokenizer_files_hash=tokenizer_files,
             ),
             configuration=ConfigurationInfo(
                 backend=backend_metadata.get("backend")
@@ -228,7 +231,12 @@ def execute(
                 effective_config=effective_config,
             ),
             deployment_fingerprint=deployment_fingerprint(
-                backend, backend_metadata, environment
+                backend,
+                backend_metadata,
+                environment,
+                weights_path=request.weights_path,
+                weights=weights,
+                tokenizer_files=tokenizer_files,
             ),
             environment=environment,
             reference_type=request.reference_type,

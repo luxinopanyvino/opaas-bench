@@ -451,7 +451,7 @@ The ones you will actually reach for. Full list with `opaas run --help`.
 | `--concurrency` | `1,4,16` | Block A concurrency levels |
 | `--prompt-words` | `128,1024` | Prompt lengths to sweep |
 | `--quantization` | — | Declared quantization, e.g. `GGUF Q4_K_M` |
-| `--weights-path` | — | Local weights, to hash the artifact |
+| `--weights-path` | — | Local weights (a directory or a GGUF file). Hashes them and the template/tokenizer files beside them; if the server runs on this host and is seen holding those files, they enter the deployment fingerprint |
 | `--offline` | off | Cached datasets and classifiers only |
 | `--declaration` | — | Block E declaration (JSON) |
 | `--note` | — | Context you state about the run, e.g. `"shared workstation"`. Repeatable. Published as declared by the operator, never as a finding |
