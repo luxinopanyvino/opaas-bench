@@ -282,3 +282,16 @@ def test_publishing_nothing_is_an_error(tmp_path):
 def _make_dirs(tmp_path):
     (tmp_path / "a").mkdir(exist_ok=True)
     (tmp_path / "b").mkdir(exist_ok=True)
+
+
+def test_the_certificate_page_heads_operator_notes_as_unverified(tmp_path):
+    report_path, credential_path = _write_pair(
+        tmp_path, _report(operatorNotes=["Engine restarted before block A."])
+    )
+    build_site([load_entry(report_path, credential_path)], tmp_path / "site", DID)
+    page = (tmp_path / "site" / "cert" / "vega-7b-1a3c5e7f-20260813-001" / "index.html").read_text(
+        encoding="utf-8"
+    )
+    assert "Declared by the operator" in page
+    assert "not verified by OPAAS" in page
+    assert "Engine restarted before block A." in page

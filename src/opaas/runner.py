@@ -35,6 +35,9 @@ DEFAULT_RUNS_DIR = Path("runs")
 #: you lose by deploying locally, and it is **never** mixed into block A.
 REFERENCE_TYPES = ("on-prem", "cloud-baseline")
 
+#: Each operator note is printed on the certificate, so it has to fit there.
+MAX_OPERATOR_NOTE_CHARS = 500
+
 #: Blocks that make no sense against a shared cloud endpoint.
 _BLOCKED_FOR_BASELINE = {
     "performance": (
@@ -64,11 +67,22 @@ class RunRequest:
     weights_path: Path | None = None
     #: 'on-prem' or 'cloud-baseline'. See REFERENCE_TYPES.
     reference_type: str = "on-prem"
+    #: Free-text context from the operator, published as declared (D31).
+    operator_notes: list[str] = field(default_factory=list)
 
     def resolve_output(self, run_id: str) -> Path:
         return self.output or DEFAULT_RUNS_DIR / run_id / "report.json"
 
     def validate(self) -> None:
+        for note in self.operator_notes:
+            if not note.strip():
+                raise ValueError("An operator note is empty. Remove it or write the note.")
+            if len(note) > MAX_OPERATOR_NOTE_CHARS:
+                raise ValueError(
+                    f"An operator note has {len(note)} characters; the limit is "
+                    f"{MAX_OPERATOR_NOTE_CHARS}. It is printed on the certificate: split it "
+                    "into several notes or put the detail in a document the note refers to."
+                )
         if self.reference_type not in REFERENCE_TYPES:
             raise ValueError(
                 f"Unknown referenceType: {self.reference_type!r}. "
@@ -214,6 +228,7 @@ def execute(
             ),
             environment=environment,
             reference_type=request.reference_type,
+            operator_notes=[note.strip() for note in request.operator_notes],
         )
 
         for position, suite_name in enumerate(request.suites, start=1):

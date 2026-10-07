@@ -129,6 +129,8 @@ def render_printable(
     </tbody>
   </table>
 
+  {_notes_pointer(report)}
+
   <section class="validity">
     <p><strong>Valid from {esc(issued)} until {esc(expires)}.</strong> After that date the
     deployment requires re-certification: a new driver, engine release or quantization can
@@ -193,7 +195,29 @@ def _render_limitations(report: dict[str, Any]) -> str:
   <p class="note">The limitations the run declared about itself, as recorded in the
   certified report.</p>
   {body}
+  {_render_operator_notes(report)}
 </section>"""
+
+
+def _notes_pointer(report: dict[str, Any]) -> str:
+    """One line on the first sheet, so the notes on the second are not missed."""
+    count = len(report.get("operatorNotes") or [])
+    if not count:
+        return ""
+    return f"""<p class="note">The operator added {count} note(s) about this run, not verified
+  by OPAAS. They are on the following page.</p>"""
+
+
+def _render_operator_notes(report: dict[str, Any]) -> str:
+    """The operator's own context, under a heading that says nobody checked it (D31)."""
+    notes = report.get("operatorNotes") or []
+    if not notes:
+        return ""
+    items = "".join(f"<li>{esc(note)}</li>" for note in notes)
+    return f"""<h2 class="declared">Declared by the operator</h2>
+  <p class="note">Context the operator stated about this run. It is part of the signed
+  report, so it has not been altered since, but <strong>OPAAS did not verify it</strong>.</p>
+  <ul>{items}</ul>"""
 
 
 # ------------------------------------------------------------------ block lines
@@ -369,6 +393,7 @@ footer { display: flex; gap: 6mm; align-items: flex-start; margin-top: 4mm; }
 .note { color: #5c5a53; font-size: 8.5pt; }
 .limitations h2 { margin-top: 0; font-size: 14pt; font-weight: normal; }
 .limitations li { margin-bottom: 1.5mm; }
+.limitations h2.declared { margin-top: 8mm; border-top: 1px solid #c9c4b6; padding-top: 4mm; }
 @media print {
   body { background: #fff; }
   .sheet { margin: 0; max-width: none; box-shadow: none; }

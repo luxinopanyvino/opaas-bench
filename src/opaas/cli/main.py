@@ -297,6 +297,15 @@ Offline = Annotated[
         help="Forbids the network: cached datasets only. Fails saying what is missing.",
     ),
 ]
+OperatorNote = Annotated[
+    list[str] | None,
+    typer.Option(
+        "--note",
+        help="Context you state about this run, e.g. 'shared workstation, background load "
+        "not controlled'. Repeat for several. Published in the report and on the "
+        "certificate as declared by the operator, not verified. Do not put secrets here.",
+    ),
+]
 DeclarationFile = Annotated[
     Path | None,
     typer.Option("--declaration", help="Block E compliance declaration (JSON)."),
@@ -434,6 +443,7 @@ def run(
     offline: Offline = False,
     answer_style: AnswerStyle = "cot",
     declaration: DeclarationFile = None,
+    note: OperatorNote = None,
     context_words: ContextWords = "256,1024,4096",
     faithfulness_model: FaithfulnessModel = None,
     faithfulness_profile: FaithfulnessProfile = "nli",
@@ -576,6 +586,7 @@ def run(
         quantization=quantization,
         weights_path=weights_path,
         reference_type=reference_type,
+        operator_notes=note or [],
     )
 
     try:
@@ -1583,6 +1594,13 @@ def _print_run_summary(report: dict[str, Any]) -> None:
         console.print("\n[yellow]Known limitations of this run:[/yellow]")
         for limitation in limitations:
             console.print(f"  * {_plain(limitation)}")
+
+    if notes := report.get("operatorNotes"):
+        console.print(
+            "\n[bold]Declared by the operator[/bold] [dim](not verified by OPAAS):[/dim]"
+        )
+        for entry in notes:
+            console.print(f"  * {_plain(entry)}")
 
 
 def _unmeasured_dimensions(report: dict[str, Any]) -> list[str]:

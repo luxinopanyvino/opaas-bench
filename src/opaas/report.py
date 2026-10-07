@@ -84,6 +84,11 @@ class RunReport(_Base):
     coverage: dict[str, Any] = Field(default_factory=dict)
     suites: list[SuiteResult] = Field(default_factory=list)
     limitations: list[str] = Field(default_factory=list)
+    #: Context the operator states about the run ("shared workstation", "engine
+    #: restarted before block A"). Kept apart from `limitations`, which is what
+    #: the tool itself could not measure: a claim nobody checked is never mixed
+    #: with a finding (D14, D31).
+    operator_notes: list[str] = Field(default_factory=list)
 
     def payload(self) -> dict[str, Any]:
         return self.model_dump(by_alias=True, mode="json")

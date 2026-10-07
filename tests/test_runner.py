@@ -183,3 +183,29 @@ def test_the_default_run_is_on_prem(tmp_path):
 def test_publishable_config_drops_runtime_objects():
     clean = _publishable_config({"transport": object(), "api_key": "x", "api": "chat"})
     assert clean == {"api_key": "***", "api": "chat"}
+
+
+# ---------------------------------------------------------------- operator notes
+
+
+def test_operator_notes_are_published_apart_from_the_limitations(tmp_path):
+    """A claim nobody checked never lands among what the tool could not measure (D31)."""
+    note = "Shared workstation; background load was not controlled."
+    outcome = execute(_request(tmp_path, operator_notes=[f"  {note} "]))
+    report = json.loads(outcome.report_path.read_text(encoding="utf-8"))
+    assert report["operatorNotes"] == [note]
+    assert not any(note in limitation for limitation in report["limitations"])
+
+
+def test_a_run_without_notes_says_so_with_an_empty_list(tmp_path):
+    report = json.loads(execute(_request(tmp_path)).report_path.read_text(encoding="utf-8"))
+    assert report["operatorNotes"] == []
+
+
+@pytest.mark.parametrize(
+    ("note", "message"), [("   ", "empty"), ("x" * 501, "the limit is 500")]
+)
+def test_an_unprintable_note_is_refused_before_the_backend_loads(tmp_path, note, message):
+    with pytest.raises(ValueError, match=message):
+        execute(_request(tmp_path, operator_notes=[note]))
+    assert not (tmp_path / "runs").exists()
