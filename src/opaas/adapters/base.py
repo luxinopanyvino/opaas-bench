@@ -169,6 +169,25 @@ class InferenceBackend(ABC):
             return None
         return value if value > 0 else None
 
+    def model_digest(self) -> str | None:
+        """Content digest of the model build being served, if the engine publishes one.
+
+        The model id is a name, and a name can be re-pulled onto different
+        weights: `llama3:8b` today need not be `llama3:8b` next month. The
+        digest is what the deployment fingerprint (D34) compares to tell them
+        apart. Ollama publishes one per model; vLLM and generic OpenAI-compatible
+        servers do not. None means unknown, and the fingerprint says so.
+        """
+        return None
+
+    def chat_template_hash(self) -> str | None:
+        """SHA-256 of the chat template the engine applies, if it exposes it.
+
+        The template changes what is measured as much as the weights do (D25),
+        and it can change under an unchanged model id. None means unknown.
+        """
+        return None
+
     def server_pid(self) -> int | None:
         """PID of the process serving the model, if it runs on this machine.
 

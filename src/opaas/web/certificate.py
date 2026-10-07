@@ -144,6 +144,8 @@ def render_printable(
       <p class="mono command">opaas verify --credential credential.json --report report.json</p>
       <dl>
         <dt>Report SHA-256</dt><dd class="mono">{esc(entry.eval_run.get("reportHash"))}</dd>
+        <dt>Deployment</dt><dd class="mono">{esc(configuration.get("deploymentHash")
+          or "not recorded")}</dd>
         <dt>Credential</dt><dd class="mono">{esc(credential.get("id"))}</dd>
         <dt>Issuer key</dt><dd class="mono">{esc(proof.get("verificationMethod"))}</dd>
       </dl>

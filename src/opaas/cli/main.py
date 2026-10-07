@@ -1561,6 +1561,13 @@ def _print_run_summary(report: dict[str, Any]) -> None:
     console.print(f"  backend  : {_plain(configuration.get('backend'))}")
     console.print(f"  hardware : {_plain(configuration.get('hardware'))}")
     console.print(f"  configHash: {configuration.get('configHash')}")
+    if fingerprint := report.get("deploymentFingerprint"):
+        console.print(f"  deployment: {fingerprint.get('hash')}")
+        if unknown := fingerprint.get("unknown"):
+            console.print(
+                f"           : [yellow]not exposed by the deployment: "
+                f"{_plain(', '.join(sorted(unknown)))}[/yellow]"
+            )
 
     if cov := report.get("coverage"):
         evaluated = ", ".join(cov.get("blocksEvaluated") or []) or "none"

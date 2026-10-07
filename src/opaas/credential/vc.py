@@ -99,6 +99,9 @@ def build_credential(
                 "hardware": configuration.get("hardware"),
                 "os": configuration.get("os"),
                 "configHash": configuration.get("configHash"),
+                # What was serving, not how OPAAS ran: a re-pulled model or an
+                # upgraded engine changes this and leaves configHash alone (D34).
+                "deploymentHash": (report.get("deploymentFingerprint") or {}).get("hash"),
             },
             "evalRun": {
                 "runId": report.get("runId"),

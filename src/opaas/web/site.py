@@ -292,6 +292,8 @@ def _render_certificate(
         <td class="identifier">{esc(entry.eval_run.get("reportHash"))}</td></tr>
     <tr><th>Configuration hash</th>
         <td class="identifier">{esc(configuration.get("configHash"))}</td></tr>
+    <tr><th>Deployment fingerprint</th>
+        <td>{_render_fingerprint(report, configuration)}</td></tr>
     <tr><th>Methodology</th><td>OPAAS {esc(report.get("opaasVersion"))}</td></tr>
   </tbody>
 </table>
@@ -310,6 +312,23 @@ def _render_certificate(
 <script src="../../assets/verify.js"></script>""",
         depth=2,
     )
+
+
+def _render_fingerprint(report: dict[str, Any], configuration: dict[str, Any]) -> str:
+    """The hash, then every field the deployment did not expose: a match proves nothing there."""
+    fingerprint = report.get("deploymentFingerprint") or {}
+    digest = configuration.get("deploymentHash") or fingerprint.get("hash")
+    if not digest:
+        return "<span class='note'>not recorded: the report predates the fingerprint</span>"
+    unknown = fingerprint.get("unknown") or {}
+    if not unknown:
+        return f"<span class='identifier'>{esc(digest)}</span>"
+    missing = "".join(
+        f"<li>{esc(name)}: {esc(reason)}</li>" for name, reason in sorted(unknown.items())
+    )
+    return f"""<span class='identifier'>{esc(digest)}</span>
+        <p class='note'>Not exposed by the deployment, so not part of what this hash
+        proves:</p><ul class='limitations'>{missing}</ul>"""
 
 
 def _render_operator_notes(report: dict[str, Any]) -> str:

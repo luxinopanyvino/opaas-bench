@@ -51,7 +51,7 @@ The identity of what is serving. It is compared field by field with what the cer
 
 **A field that is unknown both at certification and now is not a match.** It is reported as *not comparable*. A deployment whose engine exposes nothing can never be `current` on the fingerprint alone: the result says so, and the behaviour checks have to carry it.
 
-**Prerequisite change to `run`.** Today's report does not record all of this. `configHash` identifies OPAAS's own run configuration, not the deployment: it does not include the model digest or the driver version. `run` would record a `deploymentFingerprint` section in the report, signed like the rest. Without it, the sentinel would be comparing against something nobody signed.
+**Prerequisite change to `run`: applied (D34).** `configHash` identifies OPAAS's own run configuration, not the deployment, so `run` now records a signed `deploymentFingerprint`. It narrows the table above to what the deployment reports about itself: engine and version, model id and digest, chat template hash, GPUs and driver. Quantization, the served window and the prompt mode are left out, because they are declared by the operator or chosen by OPAAS, and they already live in the configuration.
 
 ### 2. Exact-output canaries (serial, temperature 0)
 

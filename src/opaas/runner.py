@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from opaas.adapters import get_backend
+from opaas.fingerprint import deployment_fingerprint
 from opaas.hashing import allocate_run_id, config_hash, weights_hash
 from opaas.report import (
     ConfigurationInfo,
@@ -225,6 +226,9 @@ def execute(
                 config_hash=config_hash(effective_config),
                 backend_metadata=backend_metadata,
                 effective_config=effective_config,
+            ),
+            deployment_fingerprint=deployment_fingerprint(
+                backend, backend_metadata, environment
             ),
             environment=environment,
             reference_type=request.reference_type,
