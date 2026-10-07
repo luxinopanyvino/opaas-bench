@@ -285,6 +285,72 @@ def _sign_flow(tmp_path):
     return tmp_path / "result.json", tmp_path / "credential.json", keys
 
 
+def test_sign_takes_the_issuer_from_the_keys_own_did_document(tmp_path):
+    _, credential, keys = _sign_flow(tmp_path)
+    document = json.loads(credential.read_text(encoding="utf-8"))
+    did = json.loads((keys / "did.json").read_text(encoding="utf-8"))
+    assert document["issuer"] == did["id"]
+    assert document["issuer"].startswith("did:key:")
+    assert document["proof"]["verificationMethod"] == did["verificationMethod"][0]["id"]
+
+
+def _sign(tmp_path, keys, *extra):
+    return runner.invoke(
+        app,
+        ["sign", "--input", str(tmp_path / "result.json"),
+         "--key", str(keys / "opaas-root-ed25519.pem"), "--passphrase", PASSPHRASE,
+         "--out", str(tmp_path / "other.json"), *extra],
+    )
+
+
+def test_sign_refuses_to_sign_under_a_name_the_key_does_not_carry(tmp_path):
+    """Defaulting to someone else's name is how test keys claimed to be onpremIALabs."""
+    _, _, keys = _sign_flow(tmp_path)
+    result = _sign(tmp_path, keys, "--issuer", "did:web:onpremialabs.com")
+    assert result.exit_code == 2
+    assert "could not be verified" in _flat(result.output)
+
+
+def test_sign_without_a_did_document_needs_an_explicit_issuer(tmp_path):
+    _, _, keys = _sign_flow(tmp_path)
+    (keys / "did.json").unlink()
+    refused = _sign(tmp_path, keys)
+    assert refused.exit_code == 2
+    assert "no name to sign under" in _flat(refused.output)
+    assert _sign(tmp_path, keys, "--issuer", "did:web:example.com").exit_code == 0
+
+
+def test_sign_refuses_a_did_document_that_lists_another_key(tmp_path):
+    _, _, keys = _sign_flow(tmp_path)
+    assert _keygen(tmp_path / "other").exit_code == 0
+    (keys / "did.json").write_text(
+        (tmp_path / "other" / "did.json").read_text(encoding="utf-8"), encoding="utf-8"
+    )
+    result = _sign(tmp_path, keys)
+    assert result.exit_code == 2
+    assert "does not list the key" in _flat(result.output)
+
+
+def test_a_did_key_is_printed_verbatim_not_as_an_emoji(tmp_path):
+    """Rich renders ":key:" as an emoji unless told not to."""
+    result = _keygen(tmp_path / "keys")
+    assert "did:key:z6Mk" in _flat(result.output)
+
+
+def test_keygen_with_a_domain_signs_under_that_domain(tmp_path):
+    assert _run(tmp_path).exit_code == 0
+    keys = tmp_path / "web-keys"
+    generated = runner.invoke(
+        app, ["keygen", "--out", str(keys), "--passphrase", PASSPHRASE,
+              "--did", "did:web:example.com"],
+    )
+    assert generated.exit_code == 0, generated.output
+    assert _sign(tmp_path, keys).exit_code == 0
+    issued = json.loads((tmp_path / "other.json").read_text(encoding="utf-8"))
+    assert issued["issuer"] == "did:web:example.com"
+    assert issued["proof"]["verificationMethod"] == "did:web:example.com#key-1"
+
+
 def test_sign_produces_a_verifiable_credential(tmp_path):
     report, credential, keys = _sign_flow(tmp_path)
     document = json.loads(credential.read_text(encoding="utf-8"))

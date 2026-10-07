@@ -5,12 +5,12 @@ and `trust` resolves where the public key comes from when verifying offline.
 """
 
 from opaas.credential.keys import (
-    DEFAULT_DID,
-    DEFAULT_KEY_ID,
+    ONPREMIALABS_DID,
     KeyPairPaths,
     b58decode,
     b58encode,
     build_did_document,
+    did_key,
     fingerprint,
     generate_root_keypair,
     load_private_key,
@@ -34,9 +34,8 @@ from opaas.credential.vc import (
 
 __all__ = [
     "CRYPTOSUITE",
-    "DEFAULT_DID",
-    "DEFAULT_KEY_ID",
     "DEFAULT_VALIDITY_DAYS",
+    "ONPREMIALABS_DID",
     "CredentialError",
     "KeyPairPaths",
     "TrustAnchorError",
@@ -46,6 +45,7 @@ __all__ = [
     "build_credential",
     "build_did_document",
     "credential_id",
+    "did_key",
     "fingerprint",
     "generate_root_keypair",
     "load_private_key",

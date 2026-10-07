@@ -50,7 +50,11 @@ from opaas.credential import (
     sign_credential,
     verify_credential,
 )
-from opaas.credential.keys import public_key_from_did_document
+from opaas.credential.keys import (
+    DID_DOCUMENT_FILENAME,
+    public_key_from_did_document,
+    public_key_multibase,
+)
 from opaas.credential.trust import user_anchor_dir
 from opaas.credential.vc import DEFAULT_VALIDITY_DAYS
 from opaas.datasets import (
@@ -103,8 +107,10 @@ app = typer.Typer(
     help="OPAAS — evaluation and digital credential for on-prem LLM models (onpremIALabs).",
     add_completion=False,
 )
-console = Console()
-err_console = Console(stderr=True)
+# emoji=False: Rich turns ":key:" into a key emoji, so "did:key:z6Mk…" printed
+# as "did🔑z6Mk…". A tool that prints identifiers must print them verbatim.
+console = Console(emoji=False)
+err_console = Console(stderr=True, emoji=False)
 
 
 def _menu_items() -> list[MenuItem]:
@@ -689,7 +695,15 @@ Passphrase = Annotated[
         "keyboard, which is the recommended way: it stays out of the history.",
     ),
 ]
-Did = Annotated[str, typer.Option("--did", help="Issuer DID for the credentials.")]
+Did = Annotated[
+    str | None,
+    typer.Option(
+        "--did",
+        help="Issuer DID, e.g. did:web:yourdomain.com, if you control that domain and will "
+        "publish the DID document there. Without it the key is named by itself (did:key), "
+        "which claims no organisation.",
+    ),
+]
 Overwrite = Annotated[
     bool, typer.Option("--overwrite", help="Overwrites an existing root key.")
 ]
@@ -1137,10 +1151,10 @@ def _ask_passphrase() -> str | None:
 def keygen(
     out_dir: KeysDir = Path("keys"),
     passphrase: Passphrase = None,
-    did: Did = "did:web:onpremialabs.com",
+    did: Did = None,
     overwrite: Overwrite = False,
 ) -> None:
-    """Generates the onpremIALabs root Ed25519 pair (root of trust)."""
+    """Generates a root Ed25519 pair (root of trust) and its DID document."""
     if passphrase is None:
         passphrase = _ask_passphrase()
     elif not os.environ.get("OPAAS_KEY_PASSPHRASE"):
@@ -1151,19 +1165,26 @@ def keygen(
         )
 
     try:
-        paths = generate_root_keypair(
-            out_dir, passphrase=passphrase, did=did, key_id=f"{did}#key-1", overwrite=overwrite
-        )
+        paths = generate_root_keypair(out_dir, passphrase=passphrase, did=did, overwrite=overwrite)
     except FileExistsError as exc:
         err_console.print(f"[red]{exc}[/red]")
         raise typer.Exit(code=2) from None
 
     public_key = load_public_key(paths.public_key)
+    issuer = json.loads(paths.did_document.read_text(encoding="utf-8"))["id"]
     console.print("[green]Root key pair generated.[/green]")
+    console.print(f"  issuer      : {issuer}")
     console.print(f"  private     : {paths.private_key}")
     console.print(f"  public      : {paths.public_key}")
-    console.print(f"  document    : {paths.did_document}  → publish at /.well-known/did.json")
+    where = "  → publish at /.well-known/did.json" if issuer.startswith("did:web:") else ""
+    console.print(f"  document    : {paths.did_document}{where}")
     console.print(f"  fingerprint : {fingerprint(public_key)}")
+    if did is None:
+        console.print(
+            "[dim]Named by its own key (did:key): it claims no organisation. To sign as one, "
+            "generate with --did did:web:<a domain you control> and publish the document "
+            "there.[/dim]"
+        )
     if not passphrase:
         console.print(
             "[yellow]The private key is unencrypted.[/yellow] See docs/key-custody.md before "
@@ -1180,7 +1201,14 @@ SigningKey = Annotated[
 CredentialOut = Annotated[
     Path, typer.Option("--out", "-o", help="Credential file to write.")
 ]
-Issuer = Annotated[str, typer.Option("--issuer", help="Issuer DID for the credential.")]
+Issuer = Annotated[
+    str | None,
+    typer.Option(
+        "--issuer",
+        help="Issuer DID. Defaults to the one in the did.json that keygen wrote next to the "
+        "key; must match it when both are present.",
+    ),
+]
 Validity = Annotated[
     int, typer.Option("--validity-days", help="Days of validity before re-certifying.")
 ]
@@ -1207,12 +1235,56 @@ def _load_signing_key(key: Path, passphrase: str | None) -> Any:
     return load_private_key(key, getpass.getpass(f"Passphrase for {key.name}: "))
 
 
+def _signing_identity(key: Path, private_key: Any, issuer: str | None) -> tuple[str, str]:
+    """Which name a credential is signed under, and with which verification method (D39).
+
+    The name comes from the DID document keygen wrote beside the key, unless
+    `--issuer` says otherwise, and then the two must agree. Signing under a
+    name whose document does not list this key produces a credential nobody
+    can verify against that name; signing under someone else's name by
+    default is how every test key used to claim to be onpremIALabs.
+    """
+    document_path = key.parent / DID_DOCUMENT_FILENAME
+    document = None
+    if document_path.is_file():
+        try:
+            document = json.loads(document_path.read_text(encoding="utf-8-sig"))
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"{document_path} is not valid JSON: {exc}") from None
+
+    if document is None:
+        if issuer is None:
+            raise ValueError(
+                f"No --issuer and no {DID_DOCUMENT_FILENAME} next to {key.name}: there is no "
+                "name to sign under. Keep the did.json keygen wrote beside the key, or pass "
+                "--issuer with a DID whose published document lists this key."
+            )
+        return issuer, f"{issuer}#key-1"
+
+    named = str(document.get("id") or "")
+    if issuer is not None and issuer != named:
+        raise ValueError(
+            f"{document_path} names this key {named!r}, not {issuer!r}. A credential signed "
+            f"as {issuer!r} could not be verified against that issuer's document. Use "
+            f"--issuer {named}, or the key that belongs to {issuer!r}."
+        )
+    methods = document.get("verificationMethod") or []
+    own = public_key_multibase(private_key.public_key())
+    for method in methods:
+        if method.get("publicKeyMultibase") == own:
+            return named, str(method.get("id"))
+    raise ValueError(
+        f"{document_path} does not list the key in {key.name}: it belongs to another key "
+        "pair. Signing would produce a credential its own issuer document cannot verify."
+    )
+
+
 @app.command("sign")
 def sign(
     input_path: InputReport,
     key: SigningKey,
     out: CredentialOut = Path("credential.json"),
-    issuer: Issuer = "did:web:onpremialabs.com",
+    issuer: Issuer = None,
     passphrase: Passphrase = None,
     validity_days: Validity = DEFAULT_VALIDITY_DAYS,
     report_url: ReportUrl = None,
@@ -1235,7 +1307,12 @@ def sign(
         err_console.print(f"[red]The private key could not be loaded:[/red] {exc}")
         raise typer.Exit(code=2) from None
 
-    key_id = f"{issuer}#key-1"
+    try:
+        issuer, key_id = _signing_identity(key, private_key, issuer)
+    except ValueError as exc:
+        err_console.print(f"[red]{_plain(exc)}[/red]")
+        raise typer.Exit(code=2) from None
+
     try:
         credential = build_credential(
             report,

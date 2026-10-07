@@ -1,10 +1,16 @@
-"""onpremIALabs root Ed25519 key pair (root of trust, Phase 0).
+"""Ed25519 root key pair (root of trust, Phase 0).
 
-The private key signs the Phase 4 credentials. The public one is published in
-the DID document (`did:web:onpremialabs.com`) so anyone can verify a credential
-without depending on onpremIALabs infrastructure.
+The private key signs the credentials. The public one is published in a DID
+document so anyone can verify a credential without depending on the issuer's
+infrastructure.
 
-Custody: see `docs/key-custody.md`.
+**Whose name a key signs under is chosen, never assumed (D39).** Without
+`did`, a new pair is named by itself: `did:key:z6Mk…`, derived from the public
+key, which claims nothing about any organisation. A `did:web` name is only
+used when asked for, by whoever controls that domain and will publish the
+document there. onpremIALabs' production key is generated with
+`did="did:web:onpremialabs.com"` (see `docs/key-custody.md`); before D39 that
+was the default, and every key anyone generated claimed to be onpremIALabs.
 """
 
 from __future__ import annotations
@@ -27,8 +33,8 @@ PRIVATE_KEY_FILENAME = "opaas-root-ed25519.pem"
 PUBLIC_KEY_FILENAME = "opaas-root-ed25519.pub.pem"
 DID_DOCUMENT_FILENAME = "did.json"
 
-DEFAULT_DID = "did:web:onpremialabs.com"
-DEFAULT_KEY_ID = f"{DEFAULT_DID}#key-1"
+#: onpremIALabs' own issuer DID. Named, not defaulted: see the module docstring.
+ONPREMIALABS_DID = "did:web:onpremialabs.com"
 
 
 @dataclass(slots=True)
@@ -42,8 +48,8 @@ def generate_root_keypair(
     out_dir: Path,
     *,
     passphrase: str | None = None,
-    did: str = DEFAULT_DID,
-    key_id: str = DEFAULT_KEY_ID,
+    did: str | None = None,
+    key_id: str | None = None,
     overwrite: bool = False,
 ) -> KeyPairPaths:
     """Generates the root pair and the DID document that publishes the public key."""
@@ -88,10 +94,23 @@ def generate_root_keypair(
     return paths
 
 
+def did_key(public_key: Ed25519PublicKey) -> str:
+    """`did:key` for an Ed25519 key: the key's own multibase, so it names nothing else."""
+    return f"did:key:{public_key_multibase(public_key)}"
+
+
 def build_did_document(
-    public_key: Ed25519PublicKey, *, did: str = DEFAULT_DID, key_id: str = DEFAULT_KEY_ID
+    public_key: Ed25519PublicKey, *, did: str | None = None, key_id: str | None = None
 ) -> dict:
-    """`did:web` document to be served at `/.well-known/did.json`."""
+    """The DID document for the key. `did:web` is served at `/.well-known/did.json`.
+
+    Without `did`, the key is named by `did:key`, whose verification method id
+    is, by that method's convention, the DID followed by the key's multibase.
+    """
+    if did is None:
+        did = did_key(public_key)
+        key_id = key_id or f"{did}#{public_key_multibase(public_key)}"
+    key_id = key_id or f"{did}#key-1"
     return {
         "@context": ["https://www.w3.org/ns/did/v1", "https://w3id.org/security/suites/ed25519-2020/v1"],
         "id": did,

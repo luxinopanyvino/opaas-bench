@@ -224,6 +224,8 @@ opaas keygen --out keys
 
 It asks for a passphrase at the keyboard and writes `keys/opaas-root-ed25519.pem` (private), `keys/opaas-root-ed25519.pub.pem` and `keys/did.json`.
 
+**Whose name the key signs under.** By default the key is named by itself (`did:key:z6Mk…`), which claims no organisation. To sign as your organisation, add `--did did:web:yourdomain.com` and publish `did.json` at `https://yourdomain.com/.well-known/did.json`. `sign` takes the issuer from that `did.json`, and refuses an `--issuer` the key's document does not carry.
+
 ```bash
 opaas sign --input result.json --key keys/opaas-root-ed25519.pem --out credential.json --log ledger.jsonl
 ```
