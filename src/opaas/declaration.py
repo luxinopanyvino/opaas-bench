@@ -36,27 +36,30 @@ class Requirement:
     evidence_required: bool = True
 
 
-#: Block E requirements, derived from the design document.
+#: Block E requirements, derived from the design document. Each reference is
+#: cited to the clause and checked against the official text (D30); the wider
+#: mapping, including ISO/IEC 42001 and the NIST AI RMF, is in
+#: docs/standards-mapping.md.
 REQUIREMENTS: tuple[Requirement, ...] = (
     Requirement(
         id="trainingDataDocumented",
         title="The provider documents the training data",
         kind="declared",
-        frameworks=("AI Act art. 53(1)(d)", "ENS op.pl.2"),
+        frameworks=("AI Act art. 53(1)(d)", "AI Act annex XII 2(c)"),
         why="Without data provenance there is no way to assess bias, licensing or leakage.",
     ),
     Requirement(
         id="licenseDocumented",
         title="Model license explicit and compatible with the intended use",
         kind="declared",
-        frameworks=("AI Act art. 53", "ENS mp.info.1"),
+        frameworks=("AI Act art. 53(1)(b)", "AI Act annex XII 1(h)"),
         why="Many open weights restrict commercial use or redistribution.",
     ),
     Requirement(
         id="provenanceDocumented",
         title="Verifiable provenance of the weights (repository, hash, version)",
         kind="declared",
-        frameworks=("AI Act art. 53", "ENS op.exp.1"),
+        frameworks=("AI Act art. 53(1)(b)", "ENS op.exp.1"),
         why="It is what allows claiming that the deployed model is the certified one.",
     ),
     Requirement(
@@ -78,14 +81,14 @@ REQUIREMENTS: tuple[Requirement, ...] = (
         id="nativeLogging",
         title="The deployment logs inferences in an auditable way",
         kind="declared",
-        frameworks=("AI Act art. 12", "ENS op.exp.8"),
+        frameworks=("AI Act art. 12", "AI Act art. 26(6)", "ENS op.exp.8"),
         why="Without traces there is no way to reconstruct what the system answered and when.",
     ),
     Requirement(
         id="airGappedDeployment",
         title="The deployment can operate without internet access",
         kind="declared",
-        frameworks=("ENS mp.com.1", "ENS op.acc.5"),
+        frameworks=("ENS mp.com.1",),
         why="It is the reason a customer chooses on-prem. It is cross-checked against the "
         "network probe.",
     ),
@@ -93,7 +96,7 @@ REQUIREMENTS: tuple[Requirement, ...] = (
         id="logprobsAvailable",
         title="The engine exposes log-probabilities",
         kind="probed",
-        frameworks=("AI Act art. 13",),
+        frameworks=("AI Act art. 13(3)(b)(iv)",),
         why="Minimum explainability: it allows measuring the model's confidence in its output.",
         evidence_required=False,
     ),
@@ -101,7 +104,7 @@ REQUIREMENTS: tuple[Requirement, ...] = (
         id="reasoningExposed",
         title="The engine can expose the model's reasoning",
         kind="probed",
-        frameworks=("AI Act art. 13",),
+        frameworks=("AI Act art. 13(3)(b)(iv)",),
         why="Alternative minimum explainability when there are no logprobs.",
         evidence_required=False,
     ),

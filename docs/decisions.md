@@ -50,6 +50,23 @@ Signing non-reproducible bytes produces a credential nobody can verify and that 
 
 ---
 
+## D30 — Block E's regulatory references are cited to the clause and checked
+
+**Status:** applied · **Revises:** the framework references of the first block E catalogue · **Affects:** [`declaration.py`](../src/opaas/declaration.py), [`standards-mapping.md`](standards-mapping.md)
+
+Each block E requirement carries the regulatory references it relates to, and they travel in every report. Checked against the official texts, several did not hold:
+
+- **ENS op.acc.5** is *Mecanismo de autenticación (usuarios externos)* and was cited for air-gapped operation. **ENS mp.info.1** is *Datos personales* and was cited for the model licence. **ENS op.pl.2** (*Arquitectura de seguridad*) was cited for training-data documentation. None of the three is about what the requirement asks; they are removed.
+- **"AI Act art. 53"** pointed at a list of provider obligations without saying which. Now **53(1)(b)** with **annex XII 1(h)** (the licence) and **2(c)** (training data), and **53(1)(d)** for the public summary of training content.
+- **"AI Act art. 13"** for logprobs and exposed reasoning is now **13(3)(b)(iv)**, the capabilities to provide information that explains the output. The article as a whole is about the provider's instructions for use.
+- Inference logging adds **art. 26(6)**, the deployer's duty to keep logs, alongside art. 12.
+
+A reference in a signed report is a claim. A wrong one tells an auditor the requirement concerns something it does not, and a reference that is too broad cannot be checked at all. A test now pins the ENS measures the catalogue may cite, with their official titles, so a new one has to be checked before it goes in.
+
+**ISO/IEC 42001 and the NIST AI RMF are not added to the catalogue.** The NIST subcategories that fit OPAAS (MEASURE 1.1, 2.3, 2.5…) describe the measurement blocks, not block E's documentary requirements. ISO/IEC 42001 is not freely available, so its control numbers cannot be checked the way the others were. Both are mapped in [standards-mapping.md](standards-mapping.md), which also records the gaps: adversarial security testing and bias.
+
+**What it costs:** air-gapped operation is left with a single ENS reference, mp.com.1, and nothing in the AI Act. That is accurate, not a loss: the AI Act does not require air-gapped operation. And the blocks where OPAAS fits the frameworks best, A to D (art. 15, mp.sw.2, op.pl.4, MEASURE 2.3), still carry no references in the report; doing that is a separate change.
+
 ## D29 — The printable certificate is a rendering, and only of a credential that verifies
 
 **Status:** applied · **Affects:** [`web/certificate.py`](../src/opaas/web/certificate.py), [`cli/main.py`](../src/opaas/cli/main.py)
