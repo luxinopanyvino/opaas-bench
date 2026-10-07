@@ -211,3 +211,72 @@ def test_no_contradiction_when_the_probe_agrees(tmp_path, monkeypatch):
     )
     result = _run({"declaration": str(path)})
     assert not any("CONTRADICTION" in lim for lim in result.limitations)
+
+
+# ------------------------------------------------- egress probe sample floor (D38)
+
+
+class _Watcher:
+    """Stands in for EgressWatcher: a watchable process with scripted observations."""
+
+    samples = 20
+    external: tuple = ()
+
+    def __init__(self, pid, interval_s):
+        self.pid = 4242
+
+    def start(self):
+        return self
+
+    def stop(self):
+        from opaas.telemetry.network import EgressReport, Endpoint
+
+        endpoints = [Endpoint(address=a, port=443, scope="external") for a in self.external]
+        return EgressReport(available=True, endpoints=endpoints, samples=self.samples,
+                            duration_s=3.1)
+
+
+def _probe(monkeypatch, *, samples=20, external=(), responder=None, **kwargs):
+    from opaas.suites import compliance
+
+    monkeypatch.setattr(
+        compliance, "EgressWatcher",
+        type("W", (_Watcher,), {"samples": samples, "external": external}),
+    )
+    backend = ScriptedBackend(responder or (lambda prompt: "OK"))
+    backend.load("fake/model-1b", {})
+    defaults = {"requests": 3, "interval_s": 0.25, "min_duration_s": 0.0}
+    return compliance.probe_egress(backend, **{**defaults, **kwargs}), backend
+
+
+def test_one_sample_is_not_evidence_of_no_egress(monkeypatch):
+    """Three requests to a warm 7B model took 0.19 s and gave one sample, reported as pass."""
+    result, _ = _probe(monkeypatch, samples=1)
+    assert result["status"] == "unknown"
+    assert "too few" in result["detail"]
+
+
+def test_enough_samples_and_no_external_connections_pass(monkeypatch):
+    result, _ = _probe(monkeypatch)
+    assert result["status"] == "pass"
+    assert result["requests"] == {"sent": 3, "succeeded": 3}
+
+
+def test_an_external_connection_still_fails(monkeypatch):
+    result, _ = _probe(monkeypatch, external=("203.0.113.9",))
+    assert result["status"] == "fail"
+
+
+def test_watching_an_engine_that_answered_nothing_proves_nothing(monkeypatch):
+    def broken(prompt):
+        raise RuntimeError("engine down")
+
+    result, _ = _probe(monkeypatch, responder=broken)
+    assert result["status"] == "unknown"
+    assert "never observed" in result["detail"]
+
+
+def test_the_probe_keeps_the_engine_busy_for_the_minimum_window(monkeypatch):
+    result, backend = _probe(monkeypatch, min_duration_s=0.2)
+    assert backend.calls > 3
+    assert result["requests"]["sent"] == backend.calls

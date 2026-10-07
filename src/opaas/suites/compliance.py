@@ -13,6 +13,7 @@ certified.
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, ClassVar
@@ -36,6 +37,12 @@ class ComplianceOptions:
     declaration: str | None = None
     egress_probe_requests: int = 3
     egress_interval_s: float = 0.25
+    #: The probe keeps the engine busy at least this long, and needs at least
+    #: this many samples, before it claims anything (D38). Three short
+    #: requests to a warm 7B model finished in 0.19 s and produced a single
+    #: sample, which the probe then reported as "no external connections".
+    egress_min_duration_s: float = 3.0
+    egress_min_samples: int = 8
 
     @classmethod
     def from_dict(cls, options: dict[str, Any]) -> ComplianceOptions:
@@ -117,7 +124,13 @@ class ComplianceSuite(Suite):
             backend,
             requests=self.opts.egress_probe_requests,
             interval_s=self.opts.egress_interval_s,
+            min_duration_s=self.opts.egress_min_duration_s,
+            min_samples=self.opts.egress_min_samples,
         )
+
+
+#: Upper bound on probe requests while filling the minimum observation window.
+_MAX_EGRESS_REQUESTS = 200
 
 
 def _probe_logprobs(backend: InferenceBackend) -> dict[str, Any]:
@@ -132,7 +145,7 @@ def _probe_logprobs(backend: InferenceBackend) -> dict[str, Any]:
         return {"status": "pass", "detail": "The engine returns logprobs"}
     return {
         "status": "fail",
-        "detail": "The engine accepted the parameter but returned no logprobs in the response",
+        "detail": "Logprobs were requested and the response carried none",
     }
 
 
@@ -230,27 +243,61 @@ def _summarize(items: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def probe_egress(
-    backend: InferenceBackend, *, requests: int, interval_s: float
+    backend: InferenceBackend,
+    *,
+    requests: int,
+    interval_s: float,
+    min_duration_s: float = 3.0,
+    min_samples: int = 8,
 ) -> dict[str, Any]:
-    """Generates a little load and watches whether the engine talks to the outside.
+    """Generates load and watches whether the engine talks to the outside.
 
     Module-level so the sentinel (D36) repeats exactly the probe that was
     certified, rather than a lookalike.
+
+    **It does not claim what it did not observe (D38).** It keeps sending
+    requests until `min_duration_s` has passed, then requires `min_samples`
+    samples and at least one request that succeeded. Short of either, the
+    result is `unknown`: a single sample, or watching an engine that answered
+    nothing, says nothing about what it does during inference.
     """
     watcher = EgressWatcher(backend.server_pid(), interval_s).start()
+    # Filling the window only makes sense if there is a process to watch; with
+    # none, the answer is `unknown` however long the engine is kept busy.
+    window = min_duration_s if watcher.pid is not None else 0.0
+    started = time.monotonic()
+    sent = succeeded = 0
     try:
-        for _ in range(max(1, requests)):
+        # A cap, so an engine failing instantly cannot spin this loop forever.
+        while sent < max(1, requests) or (
+            time.monotonic() - started < window and sent < _MAX_EGRESS_REQUESTS
+        ):
+            sent += 1
             try:
                 backend.generate(_PROBE_PROMPT, max_tokens=16, temperature=0.0)
-            except Exception:  # noqa: BLE001 - the network probe does not depend on success
+                succeeded += 1
+            except Exception:  # noqa: BLE001 - counted below, not raised
                 continue
     finally:
         report = watcher.stop()
 
     payload = report.as_dict()
+    payload["requests"] = {"sent": sent, "succeeded": succeeded}
     if not report.available:
         payload["status"] = "unknown"
         payload["detail"] = report.note or "the server process could not be observed"
+    elif not succeeded:
+        payload["status"] = "unknown"
+        payload["detail"] = (
+            f"None of the {sent} probe requests succeeded: the engine was never observed "
+            "during inference, so nothing can be said about its outbound traffic."
+        )
+    elif report.samples < min_samples:
+        payload["status"] = "unknown"
+        payload["detail"] = (
+            f"Only {report.samples} sample(s) in {report.duration_s:.1f}s: too few to claim "
+            f"the engine opened no external connections (at least {min_samples} are required)."
+        )
     elif report.external:
         destinations = ", ".join(f"{e.address}:{e.port}" for e in report.external)
         payload["status"] = "fail"

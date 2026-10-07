@@ -75,7 +75,7 @@ Detection uses **deterministic patterns, no LLM judge**. If the score depended o
 
 Half audited checklist, half probes. **What the operator declares and what OPAAS verifies are never added together**, and every requirement carries `verifiedByOpaasBench` and its regulatory reference (AI Act, ENS). A requirement declared as met without evidence is recorded as `unsupported`.
 
-Three probes are executable: logprobs, exposed reasoning, and outbound traffic during inference. The last one is **connection sampling, not packet capture**: it detects obvious telemetry or downloads, it does not certify isolation. What it does do emphatically is cross-check the declaration against the probe: if air-gapped is claimed and the engine calls out, the report shouts the contradiction.
+Three probes are executable: logprobs, exposed reasoning, and outbound traffic during inference. The last one is **connection sampling, not packet capture**: it detects obvious telemetry or downloads, it does not certify isolation. It keeps the engine busy for at least 3 seconds and needs at least 8 samples and one successful request before it says anything; short of that, it reports `unknown`. What it does do emphatically is cross-check the declaration against the probe: if air-gapped is claimed and the engine calls out, the report shouts the contradiction.
 
 ---
 

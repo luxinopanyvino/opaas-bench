@@ -50,6 +50,18 @@ Signing non-reproducible bytes produces a credential nobody can verify and that 
 
 ---
 
+## D38 — Block E's probes no longer report what they did not observe
+
+**Status:** applied · **Fixes:** two errors found running against a real Ollama 0.40 · **Affects:** [`suites/compliance.py`](../src/opaas/suites/compliance.py), [`adapters/ollama.py`](../src/opaas/adapters/ollama.py)
+
+The first run against a real deployment (Ollama 0.40, `qwen2.5:7b-instruct` on an RTX 3070 Ti Laptop) finished block E in 0.25 seconds. That was too fast to be right, and two of its three probes turned out to be stating things they had not observed.
+
+**The egress probe passed on one sample.** It sent three short requests while sampling the server's connections every 0.25 s. A warm 7B model answered all three in 0.19 s, so the watcher took **one** sample, and the probe reported "No external connections across 1 samples". The requests were real: the loopback connections are in the report. But one sample proves nothing about what an engine does during inference, and invariant 2 says what was not measured is declared, not reported as a clean result. Now the probe keeps sending requests until 3 seconds have passed, with a cap of 200 requests, and requires **at least 8 samples and one successful request** before it says `pass` or `fail`. Short of either, it is `unknown` and says why. Against the same Ollama it now records 15 samples over 3.9 s. When there is no process to watch, it does not fill the window, because the answer is `unknown` however long it waits.
+
+**The logprobs probe blamed the engine for the adapter.** The report read "The engine accepted the parameter but returned no logprobs". The Ollama adapter never sent the parameter: `generate()` built its request from the options it knew and dropped the rest, `logprobs` included. Asked directly, the same Ollama returns logprobs. The adapter now forwards `logprobs` (with `top_logprobs` following the OpenAI `logprobs=N` convention) and collects them from both streaming and single responses. The probe's wording no longer guesses whose fault an empty response is: "Logprobs were requested and the response carried none".
+
+**What this costs:** block E takes at least 3 seconds on an observable local engine instead of a fraction of one, and the sentinel's egress check does the same. **What it does not fix:** an adapter can still drop a parameter it does not know without saying so. This one was found because the result looked too fast. A general guard, making adapters reject or report unknown parameters, is a separate change.
+
 ## D37 — The certificate says whose word each value is, and what its deployment hash covers
 
 **Status:** applied · **Affects:** [`web/certificate.py`](../src/opaas/web/certificate.py), [`web/site.py`](../src/opaas/web/site.py), [`runner.py`](../src/opaas/runner.py), [`adapters/`](../src/opaas/adapters)

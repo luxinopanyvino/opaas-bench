@@ -213,3 +213,50 @@ def test_a_meaningless_declaration_is_unknown_not_zero(declared):
 def test_a_nonsensical_num_ctx_is_rejected_at_load_time():
     with pytest.raises(BackendError, match="num_ctx"):
         _load(_handler(), num_ctx=0)
+
+
+# ------------------------------------------------------------- logprobs (D38)
+
+
+LOGPROB = {"token": "OK", "logprob": 0.0, "top_logprobs": [{"token": "OK", "logprob": 0.0}]}
+
+
+def test_logprobs_are_requested_and_collected_from_the_stream():
+    """Dropping the parameter made the report blame the engine for returning none."""
+    seen = {}
+
+    def generate(request: httpx.Request) -> httpx.Response:
+        seen.update(json.loads(request.content))
+        return httpx.Response(
+            200,
+            text=_ndjson(
+                {"response": "O", "done": False, "logprobs": [LOGPROB]},
+                {"response": "K", "done": False, "logprobs": [LOGPROB]},
+                _done(response=""),
+            ),
+        )
+
+    result = _load(_handler(generate=generate)).generate("prompt", max_tokens=4, logprobs=1)
+    assert seen["logprobs"] is True
+    assert seen["top_logprobs"] == 1
+    assert result.raw["logprobs"] == [LOGPROB, LOGPROB]
+
+
+def test_logprobs_are_read_from_a_single_response():
+    def generate(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=_done(response="OK", logprobs=[LOGPROB]))
+
+    result = _load(_handler(generate=generate)).generate("p", stream=False, logprobs=1)
+    assert result.raw["logprobs"] == [LOGPROB]
+
+
+def test_logprobs_are_not_requested_unless_asked():
+    seen = {}
+
+    def generate(request: httpx.Request) -> httpx.Response:
+        seen.update(json.loads(request.content))
+        return httpx.Response(200, text=_ndjson(_done(response="x")))
+
+    result = _load(_handler(generate=generate)).generate("prompt")
+    assert "logprobs" not in seen
+    assert result.raw["logprobs"] is None
