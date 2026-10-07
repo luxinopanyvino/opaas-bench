@@ -22,6 +22,7 @@ dependencies = [
     # System and server-process RAM. For GPU, nvidia-smi is enough, but for
     # memory there is no universal CLI and doing it per-OS by hand is more fragile.
     "psutil>=5.9",
+    "segno>=1.6",
 ]
 
 [project.optional-dependencies]

@@ -60,7 +60,7 @@ The throwaway key was discarded. Nothing about the rehearsal is committed: bundl
 
 - A planned rotation adds `#key-2` to the DID document and keeps `#key-1` published for as long as live credentials signed with it exist: withdrawing it would invalidate verification of legitimate credentials that have not yet expired.
 - On suspicion of compromise: publish the new key, mark the previous one as revoked in the DID document with the date, and reissue the credentials that have not expired.
-- The credentials' 6-month expiry limits the reach of a compromise on its own.
+- The credentials' 90-day expiry (D28) limits the reach of a compromise on its own.
 
 ## Open decisions
 

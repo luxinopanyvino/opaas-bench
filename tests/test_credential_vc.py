@@ -70,12 +70,12 @@ def test_credential_follows_the_designed_shape(keypair):
     assert subject["evalRun"]["reportHash"] == "sha256:deadbeef"
 
 
-def test_default_validity_is_about_six_months(keypair):
+def test_default_validity_is_ninety_days(keypair):
     credential = _signed(keypair)
     # The dates end in "Z", which fromisoformat only reads from 3.11 on.
     issued = datetime.fromisoformat(credential["issuanceDate"].replace("Z", "+00:00"))
     expires = datetime.fromisoformat(credential["expirationDate"].replace("Z", "+00:00"))
-    assert 180 <= (expires - issued).days <= 185
+    assert (expires - issued).days == 90
 
 
 def test_report_without_run_id_is_rejected():
