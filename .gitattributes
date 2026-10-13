@@ -9,6 +9,8 @@
 *.md text eol=lf
 *.toml text eol=lf
 *.yml text eol=lf
+# Shell scripts must stay LF even in a Windows clone, or bash fails on the \r.
+*.sh text eol=lf
 
 # Keys and certificates: never touch.
 *.pem binary
