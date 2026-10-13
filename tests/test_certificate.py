@@ -72,6 +72,20 @@ def test_every_declared_limitation_is_printed(tmp_path):
         assert limitation in page
 
 
+def test_the_hallucination_rate_reaches_the_certificate(tmp_path):
+    grounded = {"type": "grounded_qa", "subsets": {
+        "answerable": {"extractionRate": {"point": 0.9}},
+        "unanswerable": {"hallucinationRate": {"point": 0.6}},
+    }}
+    report = _report(
+        coverage={"complete": True, "blocksEvaluated": ["A", "B", "C", "D", "E"],
+                  "blocksMissing": []},
+        suites=[{"suite": "safety", "block": "D", "status": "completed",
+                 "metrics": {"safetyBalance": {}, "tasks": [grounded]}}],
+    )
+    assert "answers 60% of questions its passage cannot answer" in _render(tmp_path, report)
+
+
 def test_declared_and_probed_compliance_stay_separate(tmp_path):
     report = _report(
         coverage={"complete": True, "blocksEvaluated": ["A", "B", "C", "D", "E"],

@@ -56,6 +56,16 @@ KNOWN_SOURCES: dict[str, Source] = {
         description="250 benign prompts that look dangerous + 200 harmful ones",
         block="D",
     ),
+    "squad2": Source(
+        name="squad2",
+        url="https://rajpurkar.github.io/SQuAD-explorer/dataset/dev-v2.0.json",
+        filename="dev-v2.0.json",
+        importer="squad2",
+        license="CC-BY-SA-4.0 (Rajpurkar, Jia and Liang, ACL 2018)",
+        sha256="80a5225e94905956a6446d296ca1093975c4d3b3260f1d6c8f68bc2ab77182d8",
+        description="Passages with answerable and unanswerable questions (200 of 11,873)",
+        block="D",
+    ),
 }
 
 

@@ -136,6 +136,34 @@ def test_answering_an_unanswerable_question_counts_as_hallucination():
     assert unanswerable_failures
 
 
+def test_the_refusal_balance_ignores_grounded_subsets_listed_before_it():
+    """Composing squad2 put a grounded task first, and the balance read its subsets."""
+    from opaas.bench.suites.safety import _balance
+
+    grounded = {"type": "grounded_qa", "subsets": {"answerable": {}, "unanswerable": {}}}
+    refusal = {
+        "type": "refusal",
+        "subsets": {
+            "harmful": {"correctRefusalRate": {"point": 0.9}, "nonComplianceRate": {"point": 0.95}},
+            "benign": {"overRefusalRate": {"point": 0.05}},
+        },
+    }
+    assert _balance([grounded, refusal])["correctRefusalRate"] == {"point": 0.9}
+    assert _balance([grounded]) == {}
+
+
+def test_hallucination_is_reported_apart_from_extraction():
+    """A combined rate hid 6 hallucinations in 10 behind "65% correct" (D53)."""
+    result = _run(lambda prompt: "48 GB, support, 24, Apache, three. It cost 15,000 euros.")
+    grounded = next(t for t in result.metrics["tasks"] if t["type"] == "grounded_qa")
+    answerable = grounded["subsets"]["answerable"]
+    unanswerable = grounded["subsets"]["unanswerable"]
+    assert answerable["extractionRate"]["point"] == 1.0
+    assert unanswerable["hallucinationRate"]["point"] == 1.0
+    assert unanswerable["abstentionRate"]["point"] == 0.0
+    assert answerable["items"] + unanswerable["items"] == grounded["items"]
+
+
 def test_abstaining_on_unanswerable_questions_is_scored_correct():
     def responder(prompt: str) -> str:
         lowered = prompt.lower()

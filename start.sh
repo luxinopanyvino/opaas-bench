@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # One command from a fresh clone to a verified certificate:
 #
-#   uv → run (blocks A–E) → keygen (first time only) → sign → verify
-#      → printable certificate → static site
+#   uv → datasets + classifiers (first time only) → run (blocks A–E)
+#      → keygen (first time only) → sign → verify → printable certificate
+#      → static site
 #
 # Runs on Linux, macOS, and Windows under Git Bash (or WSL). uv is installed if
 # missing, and uv in turn fetches a Python if the machine has none, so the only
@@ -14,8 +15,17 @@
 #   OPAAS_MODEL     model id exactly as the backend serves it  (llama3.2:1b)
 #   OPAAS_BACKEND   vllm | ollama | openai                      (ollama)
 #   OPAAS_BASE_URL  server endpoint                             (adapter's own)
-#   OPAAS_NUM_CTX   context window Ollama must serve; without it Ollama uses
-#                   its own, usually small, default and trims long prompts
+#   OPAAS_NUM_CTX   context window Ollama must serve               (8192 on Ollama)
+#                   Without it Ollama uses its own default, about 2048 tokens,
+#                   and silently drops the start of longer prompts: block C
+#                   confirmed exactly that on a real run.
+#   OPAAS_DATASET   datasets to evaluate                       (ifeval,xstest,squad2)
+#                   squad2 adds passages with unanswerable questions, which is
+#                   what measures hallucination; a local path composes your own.
+#   OPAAS_CLASSIFIERS  1 installs and fetches the block D classifiers
+#                   (toxicity, faithfulness), 0 skips them         (1)
+#                   It pulls in torch: several hundred MB to a few GB the
+#                   first time, depending on the platform.
 #   OPAAS_KEY_PASSPHRASE  passphrase of the signing key; asked for if unset
 #
 # Any argument is passed through to `opaas run`, e.g.
@@ -30,6 +40,9 @@ MODEL="${OPAAS_MODEL:-llama3.2:1b}"
 BACKEND="${OPAAS_BACKEND:-ollama}"
 BASE_URL="${OPAAS_BASE_URL:-}"
 NUM_CTX="${OPAAS_NUM_CTX:-}"
+[ -z "$NUM_CTX" ] && [ "$BACKEND" = "ollama" ] && NUM_CTX=8192
+DATASET="${OPAAS_DATASET:-ifeval,xstest,squad2}"
+CLASSIFIERS="${OPAAS_CLASSIFIERS:-1}"
 
 KEY_DIR="keys"
 PRIVATE_KEY="$KEY_DIR/opaas-root-ed25519.pem"
@@ -76,9 +89,22 @@ uv --version
 step "Installing OPAAS exactly as uv.lock pins it"
 # --locked refuses to run if uv.lock drifted from pyproject.toml: a run is only
 # reproducible by a third party if it used the dependencies the lock records.
-uv sync --locked
+# --inexact keeps what is already installed but not requested here (the dev
+# extra), instead of uninstalling a developer's tools.
+sync_args=(--locked --inexact)
+[ "$CLASSIFIERS" = "1" ] && sync_args+=(--extra classifiers)
+uv sync "${sync_args[@]}"
 
 opaas() { uv run --locked --no-sync opaas "$@"; }
+
+# --- Datasets and classifiers -------------------------------------------------
+
+# Everything is fetched up front, verified against its pinned hash, and the run
+# then goes --offline. Finding out a download fails, or a classifier is
+# missing, must happen here, not an hour into the evaluation. `fetch` skips
+# whatever is already cached, so on later runs this step is instant.
+step "Fetching datasets$( [ "$CLASSIFIERS" = "1" ] && echo " and classifiers" ) (first time only)"
+opaas fetch
 
 # --- Evaluation ---------------------------------------------------------------
 
@@ -86,7 +112,8 @@ mkdir -p "$OUT_DIR"
 REPORT="$OUT_DIR/report.json"
 CREDENTIAL="$OUT_DIR/credential.json"
 
-run_args=(--model "$MODEL" --backend "$BACKEND" --suite all --output "$REPORT")
+run_args=(--model "$MODEL" --backend "$BACKEND" --suite all --dataset "$DATASET" --offline
+          --output "$REPORT")
 [ -n "$BASE_URL" ] && run_args+=(--base-url "$BASE_URL")
 [ -n "$NUM_CTX" ] && run_args+=(--num-ctx "$NUM_CTX")
 

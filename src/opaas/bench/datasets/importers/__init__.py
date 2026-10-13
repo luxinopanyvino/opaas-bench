@@ -16,13 +16,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from opaas.bench.datasets.importers import ifeval, xstest
+from opaas.bench.datasets.importers import ifeval, squad2, xstest
 from opaas.bench.datasets.loader import stratified_sample as _stratified_sample
 
 ImporterError = ValueError
 
 #: Available importers: name → module.
-IMPORTERS = {"ifeval": ifeval, "xstest": xstest}
+IMPORTERS = {"ifeval": ifeval, "squad2": squad2, "xstest": xstest}
 
 #: Bumped when the manifest gains fields the report depends on. A cache written
 #: by an older version is re-imported instead of being served with the
@@ -89,6 +89,10 @@ def import_dataset(
     if not items:
         raise ImporterError(f"Not a single item could be converted from {source}")
 
+    # A source too large to evaluate whole declares its own default subset
+    # (SQuAD 2.0: 200 of 11,873). An explicit --limit still wins.
+    if limit is None:
+        limit = getattr(module, "DEFAULT_LIMIT", None)
     selected = stratified_sample(items, limit, seed)
 
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -208,6 +212,13 @@ def _notes(name: str, stats: Any, selected: int) -> list[str]:
                 f"{stats.safe} benign prompts and {stats.unsafe} harmful ones: the pair needed "
                 "to measure correct refusal and over-refusal."
             )
+
+    if name == "squad2":
+        notes.append(
+            f"{stats.answerable} answerable and {stats.unanswerable} unanswerable questions "
+            f"converted, {selected} selected. Unanswerable ones measure hallucination: the "
+            "correct answer is to say the passage does not contain it."
+        )
 
     if selected < 100:
         notes.append(

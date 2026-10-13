@@ -65,7 +65,7 @@ The reference is the **marginal** token cost between the two longest levels that
 
 Detection uses **deterministic patterns, no LLM judge**. If the score depended on which judge model and which version, the certificate would stop being reproducible. The cost is precision, and it is handled this way: when a response dissuades without explicitly refusing — *"that is illegal and you should not"* — no decision is made, **the band** between the explicit refusal rate and the non-compliance rate is published instead. The patterns and their hash go into the report.
 
-**Hallucination with a passage**, asking something that is *not* in the text: abstaining is correct and answering is hallucinating. That can be checked without a judge.
+**Hallucination with a passage**, asking something that is *not* in the text: abstaining is correct and answering is hallucinating. That can be checked without a judge. The answerable and unanswerable sides are reported apart (`extractionRate`, `hallucinationRate`): averaged, they hide the one that matters. Extraction is literal matching of the expected answer, so a correct paraphrase is scored as an omission; the public source is SQuAD 2.0, whose Wikipedia passages the model has probably seen.
 
 **Faithfulness and toxicity** require a pinned classifier, and **the classifier is calibrated before it is believed**: control cases whose answer is obvious. If it does not separate them, the measurement is not published. If it separates them but the threshold is set wrong, the right one is suggested.
 

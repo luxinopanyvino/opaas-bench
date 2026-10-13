@@ -130,7 +130,7 @@ error is caught before the model is loaded, never counted as a model failure.
 
 No third-party datasets are distributed here: each has its own license, and GPQA in particular is *gated* and explicitly asks that its content not be republished. Two of them download themselves; the rest are converted by hand to the format above.
 
-### Automatic download: IFEval and XSTest
+### Automatic download: IFEval, XSTest and SQuAD 2.0
 
 Just naming them is enough. The first run downloads them; later ones use the cache and do not touch the network.
 
@@ -154,12 +154,21 @@ opaas datasets
 |---|---|---|---|
 | `ifeval` | B | Apache-2.0 | 541 → 510 converted (94%) |
 | `xstest` | D | CC-BY-4.0 | 450 (250 benign + 200 harmful) |
+| `squad2` | D | CC-BY-SA-4.0 | 11,873 → **200** sampled (100 answerable + 100 unanswerable) |
 
 A composition is cached as a **single dataset** (`ifeval+xstest`), because that is what the run evaluates and its hash is what goes in the report. `opaas datasets` lists it under *Datasets built in the cache*, and marks each source as `cached (in a composition)`: the file is downloaded and verified, it simply has no converted directory of its own.
 
 **What is downloaded is verified against a pinned hash.** If the source file changes, the run stops with both hashes on screen instead of certifying against something else. It may be a legitimate new version: review it and update the hash in [`datasets/sources.py`](../src/opaas/bench/datasets/sources.py).
 
 From IFEval, 31 items are discarded, all of them `language:response_language`: checking the response's language would require an automatic identifier, and its version would become part of the result. **An item whose constraints cannot all be checked is discarded whole**; scoring it while checking only part would give an inflated score.
+
+**SQuAD 2.0 is the public `grounded_qa` source.** Rajpurkar, Jia and Liang (ACL 2018) wrote about half its questions to be unanswerable from their passage while looking answerable. That is exactly the hallucination check: the correct response is to say the passage does not contain it.
+
+How it is imported:
+- **A fixed subset.** The dev set has 11,873 questions, each one a generation. The importer draws 200 by stratified sampling over answerable and unanswerable, with seed 1234, and writes the selection into the manifest. `--limit` overrides it.
+- **One gold answer, the shortest.** SQuAD's answers are alternatives from different annotators, and `expected_facts` requires every listed fact to appear.
+- **Literal matching.** A correct paraphrase counts as an omission.
+- **Wikipedia passages.** The model has probably seen them. That helps on answerable questions and not on unanswerable ones, which are the point. For your own case, use your own documents (below).
 
 ### Without internet access
 
