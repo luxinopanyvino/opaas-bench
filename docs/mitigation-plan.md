@@ -48,7 +48,7 @@ so it costs 3.58 tokens per word against 1.15 for a long prompt. That dilution
 inflated the observed growth ratio to 47.6 against a threshold of 43.4, and the
 truncation passed as healthy by 10%.
 
-**Fix.** `_truncation_evidence` in [`suites/consistency.py`](../src/opaas/suites/consistency.py)
+**Fix.** `_truncation_evidence` in [`suites/consistency.py`](../src/opaas/bench/suites/consistency.py)
 replaces it, and reasons over the *marginal* token cost:
 
 - The reference rate is the slope between the two longest levels that came back

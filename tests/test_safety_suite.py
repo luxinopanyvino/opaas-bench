@@ -2,13 +2,13 @@ from pathlib import Path
 
 import pytest
 
-from opaas.refusal import (
+from opaas.bench.refusal import (
     classify_abstention,
     classify_refusal,
     contains_facts,
     patterns_hash,
 )
-from opaas.suites.safety import SafetySuite
+from opaas.bench.suites.safety import SafetySuite
 
 from .conftest import ScriptedBackend
 
@@ -224,7 +224,7 @@ class StubClassifier:
     """
 
     def __init__(self, scorer, threshold=0.5, name="stub", note=None, blind=False):
-        from opaas.classifiers.calibration import CASES
+        from opaas.bench.classifiers.calibration import CASES
 
         self.scorer = scorer
         self.threshold = threshold
@@ -251,7 +251,7 @@ class StubClassifier:
         return scores
 
     def metadata(self):
-        from opaas.classifiers.base import ClassifierMetadata
+        from opaas.bench.classifiers.base import ClassifierMetadata
 
         return ClassifierMetadata(
             name=self.name,
@@ -264,7 +264,7 @@ class StubClassifier:
 
 
 def _with_classifier(monkeypatch, classifier):
-    import opaas.suites.safety as safety_module
+    import opaas.bench.suites.safety as safety_module
 
     monkeypatch.setattr(
         safety_module, "load_classifier", lambda *args, **kwargs: classifier
@@ -368,8 +368,8 @@ def test_calibration_evidence_travels_with_a_published_measure(monkeypatch):
 
 
 def test_a_broken_classifier_degrades_instead_of_failing_the_run(monkeypatch):
-    import opaas.suites.safety as safety_module
-    from opaas.classifiers import ClassifierError
+    import opaas.bench.suites.safety as safety_module
+    from opaas.bench.classifiers import ClassifierError
 
     def _boom(*args, **kwargs):
         raise ClassifierError("corrupt weights")
@@ -404,7 +404,7 @@ def _with_default_available(monkeypatch, classifier, *, offline_error=None):
     """No --toxicity-model / --faithfulness-model given: simulates the
     classifiers extra being installed and the pinned default resolving to a
     (fake) local path, without touching torch, transformers or the network."""
-    import opaas.suites.safety as safety_module
+    import opaas.bench.suites.safety as safety_module
 
     monkeypatch.setattr(safety_module, "classifiers_available", lambda: True)
 
@@ -437,7 +437,7 @@ def test_an_explicit_path_is_never_swapped_for_the_default(monkeypatch):
     explicit choice is not silently replaced by the pinned one. (Faithfulness
     has no explicit path here, so it legitimately falls through to its own
     default — this test only asserts about toxicity.)"""
-    import opaas.suites.safety as safety_module
+    import opaas.bench.suites.safety as safety_module
 
     calls: list = []
     monkeypatch.setattr(safety_module, "classifiers_available", lambda: True)
@@ -460,7 +460,7 @@ def test_an_explicit_path_is_never_swapped_for_the_default(monkeypatch):
 def test_without_the_extra_the_default_is_never_attempted(monkeypatch):
     """classifiers_available() False (torch/transformers not installed):
     behaves exactly as if nothing had changed."""
-    import opaas.suites.safety as safety_module
+    import opaas.bench.suites.safety as safety_module
 
     monkeypatch.setattr(safety_module, "classifiers_available", lambda: False)
     monkeypatch.setattr(
@@ -481,7 +481,7 @@ def test_a_profile_chosen_without_a_path_does_not_get_an_unrelated_default(monke
     silently scored with the nli default. (Toxicity has no path either here,
     so it legitimately gets its own default — this test only asserts about
     faithfulness.)"""
-    import opaas.suites.safety as safety_module
+    import opaas.bench.suites.safety as safety_module
 
     calls: list = []
     monkeypatch.setattr(safety_module, "classifiers_available", lambda: True)
@@ -500,7 +500,7 @@ def test_a_profile_chosen_without_a_path_does_not_get_an_unrelated_default(monke
 
 
 def test_offline_blocks_the_default_download_and_says_so(monkeypatch):
-    from opaas.classifiers import ClassifierError
+    from opaas.bench.classifiers import ClassifierError
 
     _with_default_available(
         monkeypatch,

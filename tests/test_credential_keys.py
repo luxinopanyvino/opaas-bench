@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from opaas.credential import (
+from opaas.core.credential import (
     build_did_document,
     fingerprint,
     generate_root_keypair,

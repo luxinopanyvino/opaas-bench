@@ -68,9 +68,9 @@ MIN_HEIGHT_SPRITE = SPRITE_HEIGHT + 2
 
 def status_lines() -> list[tuple[str, str, str]]:
     """Environment status: (mark, text, style). It checks, it does not decorate."""
-    from opaas.classifiers import classifiers_available
-    from opaas.datasets import available_sources, cache_dir, source_is_downloaded
-    from opaas.suites import BLOCKS, available_suites
+    from opaas.bench.classifiers import classifiers_available
+    from opaas.bench.datasets import available_sources, cache_dir, source_is_downloaded
+    from opaas.bench.suites import BLOCKS, available_suites
 
     lines: list[tuple[str, str, str]] = [
         (
@@ -93,7 +93,7 @@ def status_lines() -> list[tuple[str, str, str]]:
         )
 
     if classifiers_available():
-        from opaas.classifiers import DEFAULT_CLASSIFIERS, is_default_classifier_cached
+        from opaas.bench.classifiers import DEFAULT_CLASSIFIERS, is_default_classifier_cached
 
         ready = [task for task in DEFAULT_CLASSIFIERS if is_default_classifier_cached(task)]
         if len(ready) == len(DEFAULT_CLASSIFIERS):

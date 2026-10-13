@@ -13,8 +13,6 @@ from pathlib import Path
 from typing import Annotated, Any
 
 import typer
-from rich.console import Console
-from rich.markup import escape
 from rich.progress import (
     BarColumn,
     Progress,
@@ -27,37 +25,15 @@ from rich.table import Column, Table
 
 from opaas.adapters import available_backends, get_backend
 from opaas.adapters.base import DEFAULT_PROMPT_MODE, PROMPT_MODES, BackendError
-from opaas.classifiers import (
+from opaas.bench.classifiers import (
     DEFAULT_CLASSIFIERS,
     ClassifierError,
     classifiers_available,
     ensure_default_classifier,
     is_default_classifier_cached,
 )
-from opaas.cli.banner import print_banner
-from opaas.cli.menu import MenuItem, is_interactive, present
-from opaas.compare import ComparisonError, compare, load_reports
-from opaas.credential import (
-    CredentialError,
-    TrustAnchorError,
-    build_credential,
-    fingerprint,
-    generate_root_keypair,
-    load_private_key,
-    load_public_key,
-    public_identifier,
-    resolve_public_key,
-    sign_credential,
-    verify_credential,
-)
-from opaas.credential.keys import (
-    DID_DOCUMENT_FILENAME,
-    public_key_from_did_document,
-    public_key_multibase,
-)
-from opaas.credential.trust import user_anchor_dir
-from opaas.credential.vc import DEFAULT_VALIDITY_DAYS
-from opaas.datasets import (
+from opaas.bench.compare import ComparisonError, compare, load_reports
+from opaas.bench.datasets import (
     DEFAULT_DATASET,
     CacheError,
     DatasetError,
@@ -70,10 +46,40 @@ from opaas.datasets import (
     is_cached,
     load_dataset,
 )
-from opaas.datasets.importers import ImporterError, import_dataset
-from opaas.declaration import template as declaration_template
-from opaas.fingerprint import deployment_fingerprint
-from opaas.hashing import (
+from opaas.bench.datasets.importers import ImporterError, import_dataset
+from opaas.bench.declaration import template as declaration_template
+from opaas.bench.registry import REJECTED, admit
+from opaas.bench.runner import RunEvent, RunRequest, execute
+from opaas.bench.scoring import ScoringError, prompt_template_hash
+from opaas.bench.suites import PLANNED_SUITES, available_suites, get_suite, planned_suite_hint
+from opaas.cli.banner import print_banner
+from opaas.cli.common import (  # noqa: E402 - shared with the module command groups
+    _load_signing_key,
+    _plain,
+    _signing_identity,
+    console,
+    err_console,
+)
+from opaas.cli.menu import MenuItem, is_interactive, present
+from opaas.core.credential import (
+    CredentialError,
+    TrustAnchorError,
+    build_credential,
+    fingerprint,
+    generate_root_keypair,
+    load_public_key,
+    public_identifier,
+    resolve_public_key,
+    sign_credential,
+    verify_credential,
+)
+from opaas.core.credential.keys import (
+    public_key_from_did_document,
+)
+from opaas.core.credential.trust import user_anchor_dir
+from opaas.core.credential.vc import DEFAULT_VALIDITY_DAYS
+from opaas.core.fingerprint import deployment_fingerprint
+from opaas.core.hashing import (
     canonical_json,
     file_digest,
     short_hash,
@@ -81,25 +87,22 @@ from opaas.hashing import (
     tokenizer_files_hash,
     weights_hash,
 )
-from opaas.registry import REJECTED, admit
-from opaas.report import REPORT_FILENAME, describe_environment
-from opaas.runner import RunEvent, RunRequest, execute
-from opaas.scoring import ScoringError, prompt_template_hash
-from opaas.sentinel import (
-    EXIT_CODES,
-    SentinelError,
-    append_watch_log,
-    result_envelope,
-)
-from opaas.sentinel import watch as run_watch
-from opaas.suites import PLANNED_SUITES, available_suites, get_suite, planned_suite_hint
-from opaas.transparency import (
+from opaas.core.report import REPORT_FILENAME, describe_environment
+from opaas.core.transparency import (
     TransparencyError,
     append_entry,
     inclusion_check,
     load_log,
     verify_log,
 )
+from opaas.discover import inventory as discovery
+from opaas.sentinel.drift import (
+    EXIT_CODES,
+    SentinelError,
+    append_watch_log,
+    result_envelope,
+)
+from opaas.sentinel.drift import watch as run_watch
 from opaas.web import SiteError, build_site, check_verify_url, load_entry, render_printable
 
 app = typer.Typer(
@@ -107,10 +110,6 @@ app = typer.Typer(
     help="OPAAS — evaluation and digital credential for on-prem LLM models (onpremIALabs).",
     add_completion=False,
 )
-# emoji=False: Rich turns ":key:" into a key emoji, so "did:key:z6Mk…" printed
-# as "did🔑z6Mk…". A tool that prints identifiers must print them verbatim.
-console = Console(emoji=False)
-err_console = Console(stderr=True, emoji=False)
 
 
 def _menu_items() -> list[MenuItem]:
@@ -1221,62 +1220,6 @@ LogFile = Annotated[
 ]
 
 
-def _load_signing_key(key: Path, passphrase: str | None) -> Any:
-    """Loads the key, asking for the passphrase at the keyboard if needed.
-
-    Signing happens many times, so the passphrase would end up in the shell
-    history if `--passphrase` were the only way.
-    """
-    try:
-        return load_private_key(key, passphrase)
-    except TypeError:
-        if passphrase is not None or not sys.stdin.isatty():
-            raise
-    return load_private_key(key, getpass.getpass(f"Passphrase for {key.name}: "))
-
-
-def _signing_identity(key: Path, private_key: Any, issuer: str | None) -> tuple[str, str]:
-    """Which name a credential is signed under, and with which verification method (D39).
-
-    The name comes from the DID document keygen wrote beside the key, unless
-    `--issuer` says otherwise, and then the two must agree. Signing under a
-    name whose document does not list this key produces a credential nobody
-    can verify against that name; signing under someone else's name by
-    default is how every test key used to claim to be onpremIALabs.
-    """
-    document_path = key.parent / DID_DOCUMENT_FILENAME
-    document = None
-    if document_path.is_file():
-        try:
-            document = json.loads(document_path.read_text(encoding="utf-8-sig"))
-        except json.JSONDecodeError as exc:
-            raise ValueError(f"{document_path} is not valid JSON: {exc}") from None
-
-    if document is None:
-        if issuer is None:
-            raise ValueError(
-                f"No --issuer and no {DID_DOCUMENT_FILENAME} next to {key.name}: there is no "
-                "name to sign under. Keep the did.json keygen wrote beside the key, or pass "
-                "--issuer with a DID whose published document lists this key."
-            )
-        return issuer, f"{issuer}#key-1"
-
-    named = str(document.get("id") or "")
-    if issuer is not None and issuer != named:
-        raise ValueError(
-            f"{document_path} names this key {named!r}, not {issuer!r}. A credential signed "
-            f"as {issuer!r} could not be verified against that issuer's document. Use "
-            f"--issuer {named}, or the key that belongs to {issuer!r}."
-        )
-    methods = document.get("verificationMethod") or []
-    own = public_key_multibase(private_key.public_key())
-    for method in methods:
-        if method.get("publicKeyMultibase") == own:
-            return named, str(method.get("id"))
-    raise ValueError(
-        f"{document_path} does not list the key in {key.name}: it belongs to another key "
-        "pair. Signing would produce a credential its own issuer document cannot verify."
-    )
 
 
 @app.command("sign")
@@ -1635,6 +1578,14 @@ WatchLog = Annotated[
     Path | None,
     typer.Option("--log", help="Hash-chained JSONL history of results to append to."),
 ]
+WatchInventory = Annotated[
+    bool,
+    typer.Option(
+        "--inventory/--no-inventory",
+        help="Also re-discover what the host serves and compare it with the certified "
+        "inventory (D40). It reports, but never decides 'current' on its own.",
+    ),
+]
 
 
 @app.command("watch")
@@ -1649,6 +1600,7 @@ def watch_command(
     full: WatchFull = False,
     out: WatchOut = Path("watch.json"),
     log: WatchLog = None,
+    inventory: WatchInventory = False,
 ) -> None:
     """Checks that a certificate still describes the deployment (exit 0/1/3, 2 on error).
 
@@ -1740,7 +1692,9 @@ def watch_command(
             weights=weights,
             tokenizer_files=tokenizer_files_hash(weights_path) if weights_path else None,
         )
-        body = run_watch(entry.report, backend, current, full=full)
+        current_inventory = discovery.discover_environment() if inventory else None
+        body = run_watch(entry.report, backend, current, full=full,
+                         current_inventory=current_inventory)
     finally:
         backend.close()
     finish(body["state"], body)
@@ -1782,17 +1736,6 @@ def version_command() -> None:
     """Tool and methodology version."""
     print_banner(console)
 
-
-def _plain(value: Any) -> str:
-    """Report text, never read as Rich markup.
-
-    A limitation that begins with '[faithfulness]' is a label, not a style: printed
-    as-is, Rich swallows it and the line comes out missing the word that said which
-    dimension went unmeasured. In a tool that promises to omit nothing, the renderer
-    eating part of a limitation is worse than the limitation itself. It also means a
-    third party's report cannot break `show` with a stray bracket.
-    """
-    return escape(str(value))
 
 
 def _print_run_summary(report: dict[str, Any]) -> None:
@@ -2245,6 +2188,26 @@ def _fmt(value: Any, digits: int = 1) -> str:
     if isinstance(value, (int, float)):
         return f"{value:.{digits}f}"
     return str(value)
+
+
+# The modules beyond model certification, one command group each (D41):
+# `opaas <module> <command>`. Imported here, at the end, because they register
+# on `app` and share nothing else with the bench commands above.
+from opaas.cli import card as _card_cli  # noqa: E402
+from opaas.cli import discover as _discover_cli  # noqa: E402
+from opaas.cli import evidence as _evidence_cli  # noqa: E402
+from opaas.cli import inquest as _inquest_cli  # noqa: E402
+from opaas.cli import sentinel as _sentinel_cli  # noqa: E402
+from opaas.cli import smith as _smith_cli  # noqa: E402
+from opaas.cli import swarm as _swarm_cli  # noqa: E402
+
+app.add_typer(_discover_cli.app, name="discover")
+app.add_typer(_smith_cli.app, name="smith")
+app.add_typer(_swarm_cli.app, name="swarm")
+app.add_typer(_sentinel_cli.app, name="sentinel")
+app.add_typer(_inquest_cli.app, name="inquest")
+app.add_typer(_card_cli.app, name="card")
+app.add_typer(_evidence_cli.app, name="evidence")
 
 
 if __name__ == "__main__":

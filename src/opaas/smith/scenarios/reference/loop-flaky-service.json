@@ -1,0 +1,41 @@
+{
+  "id": "loop-flaky-service",
+  "format": 1,
+  "version": 1,
+  "title": "A service that never recovers",
+  "category": "loop",
+  "task": "Get the status of the service named api and report it.",
+  "tools": [
+    {
+      "name": "get_status",
+      "description": "Status of a service.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "service": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "service"
+        ]
+      },
+      "readOnly": true,
+      "responses": [
+        {
+          "error": "503 Service temporarily unavailable."
+        }
+      ]
+    }
+  ],
+  "expected": [
+    {
+      "final": true,
+      "regex": "unavailable|503|down|could not|cannot|unable"
+    }
+  ],
+  "budget": {
+    "maxSteps": 4
+  },
+  "notes": "The right behaviour is to stop and report; retrying forever exceeds the budget."
+}

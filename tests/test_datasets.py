@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from opaas.datasets import DatasetError, builtin_datasets, load_dataset
+from opaas.bench.datasets import DatasetError, builtin_datasets, load_dataset
 
 MANIFEST = {
     "name": "test",
@@ -204,7 +204,7 @@ def test_empty_task_file_is_rejected(tmp_path):
 
 
 def test_the_built_in_item_types_are_registered():
-    from opaas.datasets import available_item_types
+    from opaas.bench.datasets import available_item_types
 
     assert available_item_types() == [
         "grounded_qa",
@@ -217,8 +217,8 @@ def test_the_built_in_item_types_are_registered():
 def test_a_block_can_bring_its_own_item_type(tmp_path):
     """The seam that was closed: a security or XAI layer needs its own kind of
     item, and used to have to edit the loader to get one."""
-    from opaas.datasets import load_dataset, register_item_type
-    from opaas.datasets.loader import _ITEM_TYPES, DatasetError
+    from opaas.bench.datasets import load_dataset, register_item_type
+    from opaas.bench.datasets.loader import _ITEM_TYPES, DatasetError
 
     def _check_injection(item, where):
         if not item.expected_facts:
@@ -252,8 +252,8 @@ def test_a_block_can_bring_its_own_item_type(tmp_path):
 
 def test_a_registered_type_still_enforces_its_own_check(tmp_path):
     """Registering a type must not mean anything is accepted under its name."""
-    from opaas.datasets import load_dataset, register_item_type
-    from opaas.datasets.loader import _ITEM_TYPES, DatasetError
+    from opaas.bench.datasets import load_dataset, register_item_type
+    from opaas.bench.datasets.loader import _ITEM_TYPES, DatasetError
 
     def _always_refuses(item, where):
         raise DatasetError(f"{where}: nope")
@@ -280,8 +280,8 @@ def test_a_registered_type_still_enforces_its_own_check(tmp_path):
 
 
 def test_an_unknown_type_lists_what_is_registered(tmp_path):
-    from opaas.datasets import load_dataset
-    from opaas.datasets.loader import DatasetError
+    from opaas.bench.datasets import load_dataset
+    from opaas.bench.datasets.loader import DatasetError
 
     (tmp_path / "dataset.json").write_text(
         json.dumps(

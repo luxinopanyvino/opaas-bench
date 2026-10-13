@@ -1,12 +1,12 @@
 import pytest
 
-from opaas.scoring import (
+from opaas.bench.scoring import (
     ScoringError,
     extract_choice,
     prompt_template_hash,
     render_multiple_choice,
 )
-from opaas.stats import wilson_interval
+from opaas.core.stats import wilson_interval
 
 
 def test_multiple_choice_prompt_labels_options_with_letters():

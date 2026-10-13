@@ -6,7 +6,7 @@ comparison means anything. It states what a registry of reports accepts, what
 it accepts with a caveat, and what it refuses.
 
 **It is not prose.** Every rule here is implemented in
-[`registry.py`](../src/opaas/registry.py) and pinned by tests, and anyone can
+[`registry.py`](../src/opaas/bench/registry.py) and pinned by tests, and anyone can
 run it on their own report before submitting:
 
 ```bash

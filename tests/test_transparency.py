@@ -2,8 +2,8 @@ import json
 
 import pytest
 
-from opaas.credential import CredentialError, build_credential
-from opaas.transparency import (
+from opaas.core.credential import CredentialError, build_credential
+from opaas.core.transparency import (
     GENESIS,
     TransparencyError,
     append_entry,

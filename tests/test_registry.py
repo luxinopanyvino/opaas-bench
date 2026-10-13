@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import pytest
 
-from opaas.registry import ACCEPTED, FLAGGED, MAX_RANKABLE_INTERVAL, REJECTED, admit
+from opaas.bench.registry import ACCEPTED, FLAGGED, MAX_RANKABLE_INTERVAL, REJECTED, admit
 
 
 def _report(**overrides):

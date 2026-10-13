@@ -4,8 +4,8 @@ import json
 import httpx
 import pytest
 
-from opaas.datasets import DatasetError, load_dataset, resolve_dataset_path
-from opaas.datasets.cache import (
+from opaas.bench.datasets import DatasetError, load_dataset, resolve_dataset_path
+from opaas.bench.datasets.cache import (
     CacheError,
     cache_dir,
     describe_cache,
@@ -14,7 +14,7 @@ from opaas.datasets.cache import (
     is_cached,
     source_path,
 )
-from opaas.datasets.sources import Source, available_sources, get_source
+from opaas.bench.datasets.sources import Source, available_sources, get_source
 
 IFEVAL_LINE = (
     '{"key": 1, "prompt": "Answer in lowercase.", '
@@ -165,7 +165,7 @@ def test_offline_works_once_the_cache_is_populated(monkeypatch):
 def test_ensure_dataset_downloads_converts_and_caches(monkeypatch):
     payload = IFEVAL_LINE.encode()
     monkeypatch.setitem(
-        __import__("opaas.datasets.sources", fromlist=["KNOWN_SOURCES"]).KNOWN_SOURCES,
+        __import__("opaas.bench.datasets.sources", fromlist=["KNOWN_SOURCES"]).KNOWN_SOURCES,
         "test",
         _source(payload),
     )
@@ -185,7 +185,7 @@ def test_a_cache_from_an_older_importer_is_rebuilt(monkeypatch):
     """Serving a stale manifest would drop the provenance from the report."""
     payload = IFEVAL_LINE.encode()
     monkeypatch.setitem(
-        __import__("opaas.datasets.sources", fromlist=["KNOWN_SOURCES"]).KNOWN_SOURCES,
+        __import__("opaas.bench.datasets.sources", fromlist=["KNOWN_SOURCES"]).KNOWN_SOURCES,
         "test",
         _source(payload),
     )
@@ -207,7 +207,7 @@ def test_a_cache_from_an_older_importer_is_rebuilt(monkeypatch):
 def test_a_source_name_resolves_like_a_dataset(monkeypatch):
     payload = IFEVAL_LINE.encode()
     monkeypatch.setitem(
-        __import__("opaas.datasets.sources", fromlist=["KNOWN_SOURCES"]).KNOWN_SOURCES,
+        __import__("opaas.bench.datasets.sources", fromlist=["KNOWN_SOURCES"]).KNOWN_SOURCES,
         "test",
         _source(payload),
     )
@@ -229,7 +229,7 @@ def test_an_unknown_reference_lists_both_options(_no_network):
 
 def _register(monkeypatch, name, payload, importer="ifeval", filename="data.jsonl"):
     monkeypatch.setitem(
-        __import__("opaas.datasets.sources", fromlist=["KNOWN_SOURCES"]).KNOWN_SOURCES,
+        __import__("opaas.bench.datasets.sources", fromlist=["KNOWN_SOURCES"]).KNOWN_SOURCES,
         name,
         _source(payload, name=name, importer=importer, filename=filename),
     )
@@ -250,7 +250,7 @@ def _serve_many(monkeypatch, by_url: dict[str, bytes]):
 
 def test_two_sources_compose_into_one_dataset(monkeypatch):
     """A certificate is issued from one run: B and D have to fit in one dataset."""
-    from opaas.datasets.cache import ensure_composite
+    from opaas.bench.datasets.cache import ensure_composite
 
     mc = IFEVAL_LINE.encode()
     _register(monkeypatch, "one", mc)
@@ -270,7 +270,7 @@ def test_two_sources_compose_into_one_dataset(monkeypatch):
 
 
 def test_a_composite_records_every_license(monkeypatch):
-    from opaas.datasets.cache import ensure_composite
+    from opaas.bench.datasets.cache import ensure_composite
 
     mc = IFEVAL_LINE.encode()
     _register(monkeypatch, "one", mc)
@@ -318,7 +318,7 @@ def test_the_order_of_the_sources_does_not_change_the_dataset(monkeypatch):
 
 
 def test_composing_an_unknown_source_fails(_no_network):
-    from opaas.datasets.cache import CacheError, ensure_composite
+    from opaas.bench.datasets.cache import CacheError, ensure_composite
 
     with pytest.raises(CacheError, match="Neither known sources"):
         ensure_composite(["ifeval", "made-up"])
@@ -326,7 +326,7 @@ def test_composing_an_unknown_source_fails(_no_network):
 
 def test_a_local_dataset_composes_with_a_downloaded_one(monkeypatch, tmp_path):
     """The on-prem differentiator: hallucination over YOUR documents."""
-    from opaas.datasets.cache import ensure_composite
+    from opaas.bench.datasets.cache import ensure_composite
 
     own = tmp_path / "my-documents"
     own.mkdir()
@@ -371,20 +371,20 @@ def test_a_local_dataset_composes_with_a_downloaded_one(monkeypatch, tmp_path):
 
 def test_a_smoke_component_taints_the_whole_composite(monkeypatch, tmp_path):
     """If one part is a smoke set, the whole cannot be presented as a measurement."""
-    from opaas.datasets.cache import ensure_composite
+    from opaas.bench.datasets.cache import ensure_composite
 
     _register(monkeypatch, "one", IFEVAL_LINE.encode())
     _serve_many(monkeypatch, {"https://example.invalid/data.jsonl": IFEVAL_LINE.encode()})
 
     dataset = load_dataset(
-        str(ensure_composite(["one", str(__import__("opaas.datasets",
+        str(ensure_composite(["one", str(__import__("opaas.bench.datasets",
             fromlist=["BUILTIN_DIR"]).BUILTIN_DIR / "opaas-smoke")]))
     )
     assert dataset.synthetic_smoke is True
 
 
 def test_clashing_task_names_are_refused(monkeypatch, tmp_path):
-    from opaas.datasets.cache import CacheError, ensure_composite
+    from opaas.bench.datasets.cache import CacheError, ensure_composite
 
     own = tmp_path / "clash"
     own.mkdir()
@@ -412,7 +412,7 @@ def test_clashing_task_names_are_refused(monkeypatch, tmp_path):
 
 
 def test_a_composite_is_cached_and_not_rebuilt(monkeypatch):
-    from opaas.datasets.cache import ensure_composite
+    from opaas.bench.datasets.cache import ensure_composite
 
     mc = IFEVAL_LINE.encode()
     _register(monkeypatch, "one", mc)
@@ -445,7 +445,7 @@ def test_describe_cache_reports_state():
 
 
 def _compose_two(monkeypatch):
-    from opaas.datasets.cache import ensure_composite
+    from opaas.bench.datasets.cache import ensure_composite
 
     _register(monkeypatch, "one", IFEVAL_LINE.encode())
     _register(monkeypatch, "two", XSTEST_CSV, importer="xstest", filename="data.csv")
@@ -462,7 +462,7 @@ def _compose_two(monkeypatch):
 def test_a_source_used_in_a_composition_counts_as_downloaded(monkeypatch):
     """It never gets its own directory, and saying "not downloaded" about the
     data being evaluated misstates where the report's numbers came from."""
-    from opaas.datasets.cache import source_is_downloaded
+    from opaas.bench.datasets.cache import source_is_downloaded
 
     _compose_two(monkeypatch)
 
@@ -474,7 +474,7 @@ def test_a_source_used_in_a_composition_counts_as_downloaded(monkeypatch):
 
 
 def test_a_standalone_dataset_is_reported_as_such(monkeypatch):
-    from opaas.datasets.cache import source_is_downloaded
+    from opaas.bench.datasets.cache import source_is_downloaded
 
     payload = IFEVAL_LINE.encode()
     _register(monkeypatch, "one", payload)
@@ -488,7 +488,7 @@ def test_a_standalone_dataset_is_reported_as_such(monkeypatch):
 
 def test_a_corrupt_source_file_is_not_downloaded(monkeypatch):
     """`fetch_source` deletes and re-downloads it, so the cache is not populated."""
-    from opaas.datasets.cache import source_is_downloaded
+    from opaas.bench.datasets.cache import source_is_downloaded
 
     payload = IFEVAL_LINE.encode()
     _register(monkeypatch, "one", payload)
@@ -501,7 +501,7 @@ def test_a_corrupt_source_file_is_not_downloaded(monkeypatch):
 
 def test_cached_datasets_list_the_compositions(monkeypatch):
     """The composition is what a run evaluates, and its hash is what is reported."""
-    from opaas.datasets.cache import describe_cached_datasets
+    from opaas.bench.datasets.cache import describe_cached_datasets
 
     path = _compose_two(monkeypatch)
 
@@ -516,8 +516,8 @@ def test_cached_datasets_list_the_compositions(monkeypatch):
 
 
 def test_an_unreadable_cache_directory_does_not_break_the_listing(monkeypatch):
-    from opaas.datasets.cache import describe_cached_datasets
-    from opaas.datasets.importers import MANIFEST_VERSION
+    from opaas.bench.datasets.cache import describe_cached_datasets
+    from opaas.bench.datasets.importers import MANIFEST_VERSION
 
     _compose_two(monkeypatch)
 

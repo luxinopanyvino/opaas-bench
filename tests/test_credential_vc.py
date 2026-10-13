@@ -3,7 +3,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from opaas.credential import (
+from opaas.core.credential import (
     CredentialError,
     TrustAnchorError,
     build_credential,

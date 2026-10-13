@@ -1,6 +1,6 @@
 import pytest
 
-from opaas.suites.performance import PerformanceSuite, _build_prompt
+from opaas.bench.suites.performance import PerformanceSuite, _build_prompt
 
 from .conftest import FakeBackend, NoConcurrencyBackend
 
@@ -90,7 +90,7 @@ def test_energy_unavailable_without_gpu_telemetry(fake_backend):
 
 def test_queueing_is_reported_as_a_finding_not_just_ratios():
     """An engine that serializes: flat throughput and growing TTFT."""
-    from opaas.suites.performance import _observations
+    from opaas.bench.suites.performance import _observations
 
     degradation = [
         {"promptWords": 128, "concurrency": 1, "throughputSpeedupVsC1": 1.0,
@@ -106,7 +106,7 @@ def test_queueing_is_reported_as_a_finding_not_just_ratios():
 
 
 def test_real_scaling_produces_no_queueing_finding():
-    from opaas.suites.performance import _observations
+    from opaas.bench.suites.performance import _observations
 
     degradation = [
         {"promptWords": 128, "concurrency": 16, "throughputSpeedupVsC1": 7.4,
@@ -126,7 +126,7 @@ def test_a_declared_concurrency_the_engine_does_not_honour_is_a_contradiction():
     """Declared and observed are compared, never added: if the operator says the
     engine serves 8 at once and it demonstrably serializes, the finding is the
     disagreement, not a vague 'check your config'."""
-    from opaas.suites.performance import _observations
+    from opaas.bench.suites.performance import _observations
 
     observation = _observations([], _queueing_degradation(), 8)[0]
 
@@ -137,7 +137,7 @@ def test_a_declared_concurrency_the_engine_does_not_honour_is_a_contradiction():
 
 
 def test_without_a_declaration_the_finding_stays_a_plain_observation():
-    from opaas.suites.performance import _observations
+    from opaas.bench.suites.performance import _observations
 
     observation = _observations([], _queueing_degradation(), None)[0]
 
@@ -149,14 +149,14 @@ def test_without_a_declaration_the_finding_stays_a_plain_observation():
 def test_declaring_a_single_stream_is_not_a_contradiction():
     """An operator who declares the engine serves one at a time and sees it
     serialize has an accurate declaration, not a broken deployment."""
-    from opaas.suites.performance import _observations
+    from opaas.bench.suites.performance import _observations
 
     observation = _observations([], _queueing_degradation(), 1)[0]
     assert observation["kind"] == "no-concurrency-scaling"
 
 
 def test_vram_pressure_is_reported():
-    from opaas.suites.performance import _observations
+    from opaas.bench.suites.performance import _observations
 
     scenarios = [
         {
@@ -173,7 +173,7 @@ def test_vram_pressure_is_reported():
 
 
 def test_failed_requests_surface_as_a_finding():
-    from opaas.suites.performance import _observations
+    from opaas.bench.suites.performance import _observations
 
     scenarios = [
         {
@@ -188,7 +188,7 @@ def test_failed_requests_surface_as_a_finding():
 
 
 def test_observations_are_deduplicated_across_prompt_lengths():
-    from opaas.suites.performance import _observations
+    from opaas.bench.suites.performance import _observations
 
     degradation = [
         {"promptWords": words, "concurrency": 16, "throughputSpeedupVsC1": 1.0,

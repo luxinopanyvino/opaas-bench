@@ -186,7 +186,7 @@ def test_the_status_mentions_the_cache_location():
 def test_the_status_counts_sources_downloaded_inside_a_composition(monkeypatch):
     """A source used in a composition has no converted directory of its own, and
     the cover page was calling the data being evaluated 'not downloaded'."""
-    import opaas.datasets as datasets
+    import opaas.bench.datasets as datasets
 
     monkeypatch.setattr(datasets, "source_is_downloaded", lambda name: name == "ifeval")
     text = " ".join(message for _, message, _ in status_lines())
@@ -198,14 +198,14 @@ def test_the_status_counts_sources_downloaded_inside_a_composition(monkeypatch):
 
 
 def _with_classifiers_available(monkeypatch, *, cached):
-    import opaas.classifiers as classifiers
+    import opaas.bench.classifiers as classifiers
 
     monkeypatch.setattr(classifiers, "classifiers_available", lambda: True)
     monkeypatch.setattr(classifiers, "is_default_classifier_cached", lambda task: task in cached)
 
 
 def test_the_status_says_classifiers_are_unavailable_without_the_extra(monkeypatch):
-    import opaas.classifiers as classifiers
+    import opaas.bench.classifiers as classifiers
 
     monkeypatch.setattr(classifiers, "classifiers_available", lambda: False)
     text = " ".join(message for _, message, _ in status_lines())
