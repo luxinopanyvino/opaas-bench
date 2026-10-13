@@ -7,9 +7,10 @@ from typer.testing import CliRunner
 
 from opaas.adapters import register_backend
 from opaas.adapters.base import BackendError, GenerationResult
+from opaas.bench.runner import RunRequest, execute
 from opaas.cli.main import app
-from opaas.runner import RunRequest, execute
-from opaas.sentinel import (
+from opaas.core.stats import intervals_separate, median_interval
+from opaas.sentinel.drift import (
     CANARY_PROMPTS,
     EXIT_CODES,
     SentinelError,
@@ -21,7 +22,6 @@ from opaas.sentinel import (
     load_watch_log,
     watch,
 )
-from opaas.stats import intervals_separate, median_interval
 
 from .conftest import FakeBackend
 from .test_cli import PASSPHRASE, _flat, _sign_flow

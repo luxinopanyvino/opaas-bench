@@ -93,7 +93,7 @@ rankings if the admission rules are written down.
 | 4.2 | Document the output contract | ✅ done |
 | 4.3 | A submission flow for hardware vendors | open — needs the site |
 
-**4.1 is code, not prose.** [`registry.py`](../src/opaas/registry.py) decides
+**4.1 is code, not prose.** [`registry.py`](../src/opaas/bench/registry.py) decides
 accepted / flagged / rejected from the report alone, and `opaas admit` exposes
 it so a submitter can check their own report before sending it. Published as
 [admission-policy.md](admission-policy.md), for the same reason the methodology

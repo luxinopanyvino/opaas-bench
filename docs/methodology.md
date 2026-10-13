@@ -128,10 +128,38 @@ A hash chain of the issuances. Altering, deleting or reordering an entry breaks 
 - A `drifted` says the deployment differs from what was certified. It does not say the new deployment is worse.
 - A canary check is only as strong as the deployment's determinism when certified. If the canaries disagreed with themselves then, the check is disabled and says so.
 
-## 7. What OPAAS does not do
+## 7. Agents: how auditable a deployment is
+
+The agent modules measure the five dimensions of *Auditable Agents* (Nian et al.): action recoverability, lifecycle coverage, policy checkability, responsibility attribution and evidence integrity. Definitions are in [D44](decisions.md#d44--the-auditability-metrics-defined-so-a-third-party-can-recompute-them). Every proportion carries a Wilson interval, and there is no figure across dimensions.
+
+**Three vantage points, kept apart.**
+
+- **`discover` (detect)** reads what is deployed and finds missing preconditions for auditing.
+- **`smith` (ground truth)** runs fixed scenarios against mock tools that record every call. It measures behaviour, and it measures the agent's own record against what really happened.
+- **`sentinel` (enforce)** records live traffic as signed, chained events. **`inquest` (recover)** audits records that already exist.
+
+A figure from one vantage point is not a figure from another. A `smith` ACR says how much of a *scenario's* actions the agent recorded. It says nothing about production traffic.
+
+**What may not be claimed.**
+
+- **A gap is not a violation.** A gap-scan finding says that if something went wrong, part of the audit could not tell. It does not say that anything went wrong.
+- **`comply` means "no recorded event contradicts the policy."** It does not mean the system complied, because unrecorded actions cannot violate a policy on paper. Read `comply` next to RF and, where ground truth exists, ACR.
+- **`undecidable` is not a soft `violate`, and not a soft `comply`** (N1). It names the fields that would settle it.
+- **ACR outside `smith` is not measured.** No audit of existing records can say what share of actions those records omitted.
+- **A `smith` result on reference scenarios is not a result about a deployment's tasks.** It is flagged `certifiable: false`. Behaviour rates hold for the scenarios run, at the repeats run. A scenario reported unstable has no single outcome.
+- **Bare-model results say nothing about an agent framework.** OPAAS drove the loop, so the auditability metrics do not apply.
+- **An IS level is what the file demonstrates.** `append-only` is only ever declared. `signed` is only as good as the provenance of the key the verifier supplied.
+- **Sentinel overhead from the benchmark excludes the network hop.** The in-service figure includes the deployment's own conditions.
+- **Policies are structural** (N2). A policy about what a text *means* is out of scope, and no figure here speaks to it.
+
+**Every result is bound to an environment** (N5): the hash of a `discover` inventory, a deployment fingerprint, or both. A result says nothing outside that environment, and `opaas sentinel inventory` says when the environment has left it.
+
+## 8. What OPAAS does not do
 
 - **It does not measure bias**, nor **code** (that needs a real sandbox), nor **long context** at RULER's level.
 - **It does not solve benchmark contamination.** Public datasets are in the training data. Mitigating this requires a private held-out set.
 - **It does not certify network isolation**, it only detects obvious traffic.
 - **It does not check operator notes.** What `--note` records is printed as declared by the operator; the signature proves it was not altered after the run, not that it is true.
+- **It does not certify an agent as safe.** It measures specified behaviour in specified scenarios and reports how auditable the system is, per dimension.
+- **It does not recover what was never recorded**, and it does not reconstruct missing fields by inference.
 - **It does not replace an audit.** It certifies that specific measurements were taken in a specific way on a specific artifact.

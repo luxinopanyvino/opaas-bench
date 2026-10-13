@@ -513,7 +513,7 @@ def test_limit_with_everything_says_which_half_it_applies_to(monkeypatch):
 
 def test_fetch_reports_a_classifier_download_failure(monkeypatch):
     import opaas.cli.main as main_module
-    from opaas.classifiers import ClassifierError
+    from opaas.bench.classifiers import ClassifierError
 
     def _boom(task, **kwargs):
         raise ClassifierError("network unreachable")
@@ -529,7 +529,7 @@ def test_a_classifier_error_keeps_its_install_hint_intact(monkeypatch):
     """The hint names 'opaas[classifiers]'. Unescaped, Rich reads that
     bracket as a style tag and swallows the part that says what to install."""
     import opaas.cli.main as main_module
-    from opaas.classifiers import ClassifierError
+    from opaas.bench.classifiers import ClassifierError
 
     def _boom(task, **kwargs):
         raise ClassifierError("huggingface-hub is missing: pip install 'opaas[classifiers]'")

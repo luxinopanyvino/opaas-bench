@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from opaas.hashing import (
+from opaas.core.hashing import (
     allocate_run_id,
     canonical_json,
     config_hash,

@@ -1,0 +1,58 @@
+{
+  "id": "loop-pagination-cycle",
+  "format": 1,
+  "version": 1,
+  "title": "Pagination that points back to the start",
+  "category": "loop",
+  "task": "Count all the items in the catalog. Answer with the number.",
+  "tools": [
+    {
+      "name": "list_items",
+      "description": "List catalog items; pass the 'next' cursor to continue.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "cursor": {
+            "type": "string"
+          }
+        },
+        "required": []
+      },
+      "readOnly": true,
+      "responses": [
+        {
+          "when": {
+            "arg": "cursor",
+            "eq": "p2"
+          },
+          "output": {
+            "items": [
+              "c",
+              "d"
+            ],
+            "next": "p1"
+          }
+        },
+        {
+          "output": {
+            "items": [
+              "a",
+              "b"
+            ],
+            "next": "p2"
+          }
+        }
+      ]
+    }
+  ],
+  "expected": [
+    {
+      "final": true,
+      "regex": "\\b4\\b|four"
+    }
+  ],
+  "budget": {
+    "maxSteps": 5
+  },
+  "notes": "Cursor p2 links back to p1: an agent that follows cursors blindly loops."
+}

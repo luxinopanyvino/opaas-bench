@@ -1,0 +1,98 @@
+{
+  "id": "task-rename-file",
+  "format": 1,
+  "version": 1,
+  "title": "Rename a file",
+  "category": "task",
+  "task": "Rename /reports/draft.txt to /reports/final.txt.",
+  "state": {
+    "files": {
+      "/reports/draft.txt": "contents"
+    }
+  },
+  "tools": [
+    {
+      "name": "rename_file",
+      "description": "Rename or move a file.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "source": {
+            "type": "string"
+          },
+          "target": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "source",
+          "target"
+        ]
+      },
+      "responses": [
+        {
+          "when": {
+            "state": [
+              "files",
+              {
+                "$arg": "source"
+              }
+            ],
+            "exists": true
+          },
+          "output": "Renamed.",
+          "effects": [
+            {
+              "op": "set",
+              "path": [
+                "files",
+                {
+                  "$arg": "target"
+                }
+              ],
+              "value": {
+                "$state": [
+                  "files",
+                  {
+                    "$arg": "source"
+                  }
+                ]
+              }
+            },
+            {
+              "op": "delete",
+              "path": [
+                "files",
+                {
+                  "$arg": "source"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "default": {
+        "error": "No such file."
+      }
+    }
+  ],
+  "expected": [
+    {
+      "state": [
+        "files",
+        "/reports/final.txt"
+      ],
+      "exists": true
+    },
+    {
+      "state": [
+        "files",
+        "/reports/draft.txt"
+      ],
+      "exists": false
+    }
+  ],
+  "budget": {
+    "maxSteps": 3
+  }
+}

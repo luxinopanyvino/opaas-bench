@@ -115,15 +115,38 @@ def _no_classifier_extra(monkeypatch):
     installed: the same test then passes in CI and fails on a developer's
     machine. Tests that exercise the default opt in by patching this back.
     """
-    import opaas.suites.safety as safety_module
+    import opaas.bench.suites.safety as safety_module
 
     monkeypatch.setattr(safety_module, "classifiers_available", lambda: False)
 
 
 @pytest.fixture(autouse=True)
+def _no_discovery(monkeypatch):
+    """No test may probe the ports of the machine it runs on.
+
+    Discovery sends GETs to whatever listens on localhost: on a developer's
+    machine that is their real Ollama, which would make results depend on
+    what is installed there. Tests of discovery call `discovery.scan` with an
+    injected transport instead.
+    """
+    from opaas.discover import inventory as discovery
+
+    def empty(*, endpoints=(), environment=None):
+        return discovery.scan({}, endpoints=(), environment=environment or {})
+
+    monkeypatch.setattr(discovery, "discover_environment", empty)
+    monkeypatch.setattr(discovery, "listening_ports", lambda: ({}, "Not enumerated in tests."))
+    # Nor ask the host's docker what it runs.
+    from opaas.discover import agents
+
+    monkeypatch.setattr(agents, "_run", lambda command: None)
+
+
+@pytest.fixture(autouse=True)
 def _isolate_registries():
     """The registries are global: a test that registers a backend must not leak it."""
-    from opaas import adapters, suites
+    from opaas import adapters
+    from opaas.bench import suites
 
     backends = dict(adapters._REGISTRY)
     suite_registry = dict(suites._REGISTRY)

@@ -20,8 +20,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from opaas.credential.vc import public_identifier
-from opaas.hashing import file_digest, slugify
+from opaas.core.credential.vc import public_identifier
+from opaas.core.hashing import file_digest, slugify
 from opaas.web.badge import badge_state, render_badge
 
 ASSETS = Path(__file__).parent / "assets"

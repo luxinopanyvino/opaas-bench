@@ -1,6 +1,6 @@
 import pytest
 
-from opaas.stats import mean, percentile, summarize
+from opaas.core.stats import mean, percentile, summarize
 
 
 def test_percentile_interpolates_linearly():

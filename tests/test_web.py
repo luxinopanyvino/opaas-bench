@@ -83,8 +83,8 @@ def _credential(report_hash, *, complete=True, expires_days=180):
 
 
 def _write_pair(tmp_path, report=None, *, complete=True, expires_days=180):
-    from opaas.canonical import canonicalize
-    from opaas.hashing import file_digest
+    from opaas.core.canonical import canonicalize
+    from opaas.core.hashing import file_digest
 
     report_path = tmp_path / "report.json"
     report_path.write_bytes(canonicalize(report or _report()))

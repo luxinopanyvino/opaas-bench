@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from opaas.compare import ComparisonError, compare, load_reports
+from opaas.bench.compare import ComparisonError, compare, load_reports
 
 
 def _report(tmp_path, name, *, quantization, accuracy, hardware="1x RTX 4090 24GB", **overrides):

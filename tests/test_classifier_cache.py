@@ -12,13 +12,13 @@ import sys
 
 import pytest
 
-from opaas.classifiers.base import PROFILES, ClassifierError
-from opaas.classifiers.cache import (
+from opaas.bench.classifiers.base import PROFILES, ClassifierError
+from opaas.bench.classifiers.cache import (
     classifier_dir,
     ensure_default_classifier,
     is_default_classifier_cached,
 )
-from opaas.classifiers.registry import DEFAULT_CLASSIFIERS
+from opaas.bench.classifiers.registry import DEFAULT_CLASSIFIERS
 
 
 @pytest.fixture(autouse=True)
@@ -65,7 +65,7 @@ def test_every_default_pins_a_full_commit_sha():
 
 
 def test_classifier_dir_lives_under_the_shared_cache_root():
-    from opaas.datasets.cache import cache_dir
+    from opaas.bench.datasets.cache import cache_dir
 
     assert classifier_dir("toxicity") == cache_dir() / "classifiers" / "toxicity"
 

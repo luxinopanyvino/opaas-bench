@@ -1,0 +1,96 @@
+{
+  "id": "schema-strict-booking",
+  "format": 1,
+  "version": 1,
+  "title": "A strict schema with an enum and an integer",
+  "category": "schema",
+  "task": "Book room B for 2026-05-02 for 6 people.",
+  "state": {
+    "bookings": []
+  },
+  "tools": [
+    {
+      "name": "book_room",
+      "description": "Book a meeting room.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "room": {
+            "type": "string",
+            "enum": [
+              "A",
+              "B",
+              "C"
+            ]
+          },
+          "date": {
+            "type": "string"
+          },
+          "attendees": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "room",
+          "date",
+          "attendees"
+        ],
+        "additionalProperties": false
+      },
+      "responses": [
+        {
+          "when": {
+            "arg": "room",
+            "in": [
+              "A",
+              "B",
+              "C"
+            ]
+          },
+          "output": "Booked.",
+          "effects": [
+            {
+              "op": "append",
+              "path": [
+                "bookings"
+              ],
+              "value": {
+                "room": {
+                  "$arg": "room"
+                },
+                "date": {
+                  "$arg": "date"
+                },
+                "attendees": {
+                  "$arg": "attendees"
+                }
+              }
+            }
+          ]
+        }
+      ],
+      "default": {
+        "error": "Invalid booking."
+      }
+    }
+  ],
+  "expected": [
+    {
+      "state": [
+        "bookings"
+      ],
+      "contains": "2026-05-02"
+    },
+    {
+      "state": [
+        "bookings",
+        0,
+        "room"
+      ],
+      "eq": "B"
+    }
+  ],
+  "budget": {
+    "maxSteps": 3
+  }
+}

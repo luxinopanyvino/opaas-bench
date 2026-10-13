@@ -1,0 +1,47 @@
+{
+  "id": "task-file-summary",
+  "format": 1,
+  "version": 1,
+  "title": "Read a figure from a document",
+  "category": "task",
+  "task": "What is the revenue figure reported in /docs/q3.txt? Answer with the number.",
+  "tools": [
+    {
+      "name": "read_file",
+      "description": "Read a text file.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ]
+      },
+      "readOnly": true,
+      "responses": [
+        {
+          "when": {
+            "arg": "path",
+            "eq": "/docs/q3.txt"
+          },
+          "output": "Q3 report. Revenue: 42 units. Costs: 17 units."
+        }
+      ],
+      "default": {
+        "error": "Nothing found for that path."
+      }
+    }
+  ],
+  "expected": [
+    {
+      "final": true,
+      "contains": "42"
+    }
+  ],
+  "budget": {
+    "maxSteps": 3
+  }
+}

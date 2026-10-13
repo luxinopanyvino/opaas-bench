@@ -2,14 +2,14 @@ import json
 
 import pytest
 
-from opaas.declaration import (
+from opaas.bench.declaration import (
     DECLARED_REQUIREMENTS,
     REQUIREMENTS,
     DeclarationError,
     load_declaration,
     template,
 )
-from opaas.suites.compliance import ComplianceSuite
+from opaas.bench.suites.compliance import ComplianceSuite
 from opaas.telemetry.network import EXTERNAL, LOOPBACK, PRIVATE, classify
 
 from .conftest import ScriptedBackend
@@ -237,7 +237,7 @@ class _Watcher:
 
 
 def _probe(monkeypatch, *, samples=20, external=(), responder=None, **kwargs):
-    from opaas.suites import compliance
+    from opaas.bench.suites import compliance
 
     monkeypatch.setattr(
         compliance, "EgressWatcher",

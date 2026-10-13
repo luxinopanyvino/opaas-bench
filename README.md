@@ -58,6 +58,10 @@ contradiction if it calls out.
 | Which engine for this workload? | same model, another `--backend` | throughput, trimming, logprobs |
 | Did the upgrade break anything? | `--suite consistency` | verified window, determinism |
 | Can I defend this in an audit? | `--suite compliance` | AI Act / ENS, declared vs probed |
+| What else is running on this host? | `discover scan` | engines, models, MCP servers, bind scope |
+| Can my agent's actions be audited at all? | `discover gaps` | gaps per dimension, Q1–Q6 |
+| Does the agent resist injections, ask before deleting? | `smith run` | rates per behaviour, against mock-tool ground truth |
+| Did it comply, and who was responsible? | `inquest audit` | comply / violate / undecidable, and the missing fields |
 
 ## Who it is for
 
@@ -69,9 +73,11 @@ purchase with something better than a vendor benchmark.
 
 **LLMs and SLMs served over HTTP**, on servers or on edge devices. Vision, detection
 and other modalities are out of scope: every measurement here assumes tokens, prompts
-and generated text. Agentic behaviour — tool calling, multi-turn state — is not
-measured either; the concurrency sweep and the real context window are the closest
-proxies.
+and generated text. Agents built on those models are measured
+by the agent modules: `discover`, `smith`, `swarm`, `sentinel`, `inquest` and `card`.
+They measure behaviour in fixed scenarios and how *auditable* the deployment is, along
+the five dimensions of *Auditable Agents* (Nian et al.). They do not measure whether
+the agent is "safe".
 
 The meerkat is the group's sentinel: it stands on its hind legs and keeps watch while
 the others eat. That is what this tool does with a deployment.
@@ -83,7 +89,8 @@ the others eat. That is what this tool does with a deployment.
 - [Requirements](#requirements)
 - [Installation](#installation)
 - [Your first run](#your-first-run)
-- [Execution flows](#execution-flows) — evaluate, certify, publish, print, compare, air-gapped, cloud baseline, classifiers
+- [Execution flows](#execution-flows) — evaluate, certify, publish, print, compare, air-gapped, cloud baseline, classifiers, watch
+- [Auditing agents](#auditing-agents) — discover, smith, sentinel, inquest, swarm, card
 - [What is measured](#what-is-measured) — the five blocks
 - [Datasets](#datasets)
 - [`run` options](#run-options)
@@ -386,6 +393,95 @@ It is a one-shot command for cron, a systemd timer or Windows Task Scheduler. It
 
 The result goes to `watch.json`; `--log` appends it to a hash-chained history, the monitoring record a deployer keeps. It stays local: nothing is published. Pass `--weights-path` to re-hash weights on disk (slow for large models). Every `run` signs the baseline the sentinel needs (`sentinelBaseline`), at the cost of about 60 extra serial requests.
 
+## Auditing agents
+
+The model commands above certify one model on one engine. An agent deployment is more
+than that: tools, MCP servers, skills, other agents, and whoever approved what. The agent
+modules answer, per dimension and with no aggregate, *how much of what this system does
+can be reconstructed, checked and attributed afterwards*. Every result is bound to the
+environment hash it was measured in, and every document can be signed with
+`opaas evidence sign`.
+
+**1. What runs here, and what cannot be audited** (`discover`):
+
+```bash
+opaas discover scan --config ~/.config/claude/mcp.json --manifest tools.json --skills ./skills -o inventory.json
+opaas discover gaps -i inventory.json --log agent-events.jsonl -o gaps.json
+```
+
+The scan is read-only. It reads the files you name and never crawls the disk, and it
+records process names, never command lines. The gap scan applies nine versioned rules:
+tool calls through a logging layer, log integrity, free-form shell or HTTP tools,
+unpinned or unsigned skills, approvals as events, anonymous engines, actor chains, and
+images pinned by digest. A gap is a missing precondition for auditing, never a predicted
+violation.
+
+**2. Behaviour against ground truth** (`smith`):
+
+```bash
+opaas smith scenarios                                  # 20 reference scenarios, hashed
+opaas smith run --agent http --endpoint http://localhost:9000/run -n 3 -o smith.json
+opaas smith run --agent bare-model --backend ollama --model qwen2.5:7b-instruct -o smith.json
+```
+
+Mock tools answer deterministically and record every call, so the outcome of each run is
+known: task completed, forbidden tool attempted, injection resisted, schema-valid calls,
+step budget, destructive action without confirmation. An HTTP agent can return its own
+record, which is then measured against that ground truth (ACR, RF, LPC, SPDR, AC, IS),
+including whether its record hides a violation. Reference scenarios alone are flagged as
+not certifiable for a specific deployment. Write your own in the same JSON format.
+
+**3. Live traffic** (`sentinel`):
+
+```bash
+opaas sentinel observe -u http://127.0.0.1:11434 --log events.jsonl -p policies.json --key ops.pem
+```
+
+The sentinel is a reverse proxy. Point clients at it instead of the engine. Each call
+becomes a hash-chained `AuditEvent`, sealed with an *operational* key (never the root
+key). Bodies are recorded as digests: only the model, sampling settings, usage and tool
+*names* are kept in clear. Callers say who they act for with
+`X-OPAAS-Actor-Chain: user:alice>agent:planner`. In `observe` mode nothing in the
+traffic changes. `--mode gate` (opt-in) blocks what `enforce: block` policies forbid and
+holds `enforce: approve` actions until `opaas sentinel approve <id> --by <name>`. An
+action a policy cannot decide is held, not allowed. `opaas sentinel overhead` measures
+the latency the proxy adds. `opaas sentinel inventory -b inventory.json` alerts when the
+environment changes: a new uncertified model, a widened bind, a changed skill.
+
+**4. Post-hoc audit** (`inquest`):
+
+```bash
+opaas inquest audit events.jsonl -p policies.json --key ops.pub.pem --phases attempt,retry,approval
+opaas inquest audit spans.json -f otel -p policies.json --degrade drop-field:actorChain -o degraded.json
+```
+
+The audit establishes integrity first: the level the file demonstrates (`none`,
+`hash-chained`, `signed`) and what checking it cost. Every policy then gets **comply,
+violate or undecidable**, and every undecidable names the fields that would settle it.
+It reads OPAAS logs, OpenTelemetry GenAI spans and JSONL traces. `--degrade` audits a
+deliberately damaged copy, which shows what the audit loses when logs are incomplete.
+
+Policies are structural predicates over recorded fields, in JSON:
+
+```json
+[{"id": "confirm-before-delete", "kind": "precedes", "enforce": "approve",
+  "scope": {"field": "action", "eq": "tool_call"},
+  "match": {"field": "target", "eq": "delete_file"},
+  "before": {"field": "action", "eq": "approval"}, "sameField": "trace.traceId"}]
+```
+
+**5. Multi-agent flows** (`swarm`): `opaas swarm analyze events.jsonl -t topology.json`
+compares the declared edges with the observed ones, gives latency, error rate and tokens
+per edge, and recovers the subgraph behind an outcome (`swarm attribute`). Scripted
+faults (`sentinel observe --faults plan.json`, on test deployments) show whether a
+failure is contained, retried visibly or cascaded.
+
+**6. The card** (`card`): `opaas card build gaps.json smith.json audit.json degraded.json --html card.html`
+answers the Auditability Card's Q1–Q6 from that evidence. Each answer cites its file and
+hash, and a question no evidence answers says so. `opaas card manifest` lists every
+report behind a deployment by hash and checks that they share one environment. Sign
+both with `opaas evidence sign`.
+
 ## What is measured
 
 | Block | `--suite` | What it answers |
@@ -508,6 +604,15 @@ The ones you will actually reach for. Full list with `opaas run --help`.
 | `opaas backends` | Registered adapters and their limitations |
 | `opaas suites` | Evaluation blocks |
 | `opaas version` | Tool and methodology version |
+| `opaas discover scan` / `gaps` | Inventory of engines and agent stack; auditability gap scan |
+| `opaas smith scenarios` / `run` | Validate scenarios; run them against an agent |
+| `opaas sentinel observe` | Recording (and opt-in gating) reverse proxy |
+| `opaas sentinel approvals` / `approve` / `deny` | The gate's approval queue |
+| `opaas sentinel inventory` / `overhead` | Environment watch (exit 0/1/3); proxy overhead benchmark |
+| `opaas inquest audit` | Post-hoc audit with three-valued verdicts |
+| `opaas swarm analyze` / `attribute` | Flow topology, per-edge figures, faults; attribution subgraph |
+| `opaas card build` / `manifest` | Auditability Card; deployment manifest |
+| `opaas evidence sign` / `verify` | Sign and verify any evidence document |
 
 ## How verification works
 
@@ -536,6 +641,9 @@ Stated here as plainly as the report states it:
 - **Faithfulness**, unless the classifiers extra is installed *and* the dataset carries `grounded_qa` items; the default sources provide none.
 - **Hallucination with a passage**, unless the dataset carries `grounded_qa` items. No classifier can substitute for the data.
 - **Model-generated code is not executed.** Without a sandbox, running it would be the tool's problem, not the model's.
+- **Whether an agent is safe.** The agent modules measure behaviour in the scenarios run and how auditable the deployment is. Semantic policies ("did it say something harmful") are out of scope: only structural predicates are decided, with no judge.
+- **ACR on existing records.** How much of what happened a log omits cannot be read from the log; only `smith`, which has ground truth, measures it.
+- **Agents reachable only over MCP.** The MCP agent adapter is not implemented yet.
 - **Determinism under load.** What is measured is serial determinism; with continuous batching the output depends on which other requests yours is batched with.
 
 A run that skips blocks is certified as `evaluated-partial`. The report's `limitations` field is where all of this lands — nothing is quietly reported as a zero.
@@ -546,23 +654,26 @@ Context only you know — the machine was shared, the engine was restarted befor
 
 ```
 src/opaas/
-├── adapters/      InferenceBackend + adapters (vllm, ollama, openai)
-├── suites/        Evaluation blocks A–E
-├── datasets/      Loading of hashed local datasets + importers
-├── classifiers/   Pinned block D classifiers (optional dependency)
-├── credential/    Ed25519 root of trust, VC credential, trust anchors
-├── cli/           opaas commands
-├── telemetry/     GPU sampling (VRAM, power)
-├── runner.py      Orchestration of a run
-├── report.py      Structured report + hash
-├── canonical.py   RFC 8785 JSON canonicalization (JCS)
-├── scoring.py     Templates and answer extraction (block B)
-├── constraints.py Instruction-following checkers
-└── hashing.py     Model/config hashes and run ids
-web/               Certificate page and public registry
+├── core/        evidence and trust: JCS, hashes, credentials, transparency log, stats,
+│                report schema, fingerprint, AuditEvent + event log, structural policies,
+│                auditability metrics, log integrity, evidence documents
+├── bench/       model certification: runner, blocks A–E, datasets, classifiers, compare
+├── discover/    engine inventory, agent stack, auditability gap scan
+├── smith/       scenarios, mock-tool oracle, agent adapters, 20 reference scenarios
+├── swarm/       declared vs observed topology, attribution, fault plans
+├── sentinel/    watch (drift), inventory watch, observe/gate proxy, approval queue
+├── inquest/     importers (sentinel, OTel, JSONL), three-valued audit, degradation
+├── card/        Auditability Card, deployment manifest, rendering
+├── adapters/    InferenceBackend + adapters (vllm, ollama, openai)
+├── telemetry/   GPU, system and network sampling
+├── web/         static site, badges, printable certificate
+└── cli/         opaas commands, one group per module
 ```
 
-The suites never talk to a specific engine, only to `InferenceBackend`. Supporting another engine means adding an adapter, without touching the suites.
+Every module emits and consumes the same `AuditEvent` records and writes its result as
+canonical, signable bytes. The suites never talk to a specific engine, only to
+`InferenceBackend`; `smith` never talks to a specific agent framework, only to an agent
+adapter.
 
 ## Documentation
 
@@ -577,6 +688,7 @@ The suites never talk to a specific engine, only to `InferenceBackend`. Supporti
 - [Remediation plan](docs/remediation-plan.md) — what is left, and what each item unblocks
 - [System design](docs/design.md) — credential, A–E parameters, backend architecture, end-to-end flow
 - [Design decisions](docs/decisions.md) — where and why the implementation departs from the design
+- [Work plan: auditable agents](docs/workplan.md) — the module split and the agent work, with its status
 
 ## Development
 

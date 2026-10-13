@@ -80,7 +80,7 @@ Available constraints:
 | `no_commas` | — | absence of commas |
 | `matches_regex` | `value`, `ignore_case` | regular expression |
 
-Adding a new constraint means adding a pure function to `src/opaas/constraints.py` and registering it in `CHECKERS`.
+Adding a new constraint means adding a pure function to `src/opaas/bench/constraints.py` and registering it in `CHECKERS`.
 
 ### `refusal` items (block D)
 
@@ -157,7 +157,7 @@ opaas datasets
 
 A composition is cached as a **single dataset** (`ifeval+xstest`), because that is what the run evaluates and its hash is what goes in the report. `opaas datasets` lists it under *Datasets built in the cache*, and marks each source as `cached (in a composition)`: the file is downloaded and verified, it simply has no converted directory of its own.
 
-**What is downloaded is verified against a pinned hash.** If the source file changes, the run stops with both hashes on screen instead of certifying against something else. It may be a legitimate new version: review it and update the hash in [`datasets/sources.py`](../src/opaas/datasets/sources.py).
+**What is downloaded is verified against a pinned hash.** If the source file changes, the run stops with both hashes on screen instead of certifying against something else. It may be a legitimate new version: review it and update the hash in [`datasets/sources.py`](../src/opaas/bench/datasets/sources.py).
 
 From IFEval, 31 items are discarded, all of them `language:response_language`: checking the response's language would require an automatic identifier, and its version would become part of the result. **An item whose constraints cannot all be checked is discarded whole**; scoring it while checking only part would give an inflated score.
 

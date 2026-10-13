@@ -6,10 +6,10 @@ import httpx
 import pytest
 
 from opaas.adapters import register_backend
-from opaas.canonical import canonicalize
-from opaas.fingerprint import deployment_fingerprint
-from opaas.hashing import file_digest
-from opaas.runner import RunRequest, execute
+from opaas.bench.runner import RunRequest, execute
+from opaas.core.canonical import canonicalize
+from opaas.core.fingerprint import deployment_fingerprint
+from opaas.core.hashing import file_digest
 from opaas.telemetry import gpu as gpu_module
 from opaas.web import build_site, load_entry
 
@@ -130,7 +130,7 @@ def test_the_config_hash_cannot_see_a_repulled_model_and_the_fingerprint_can(
 
 
 def test_the_credential_carries_the_deployment_hash(tmp_path):
-    from opaas.credential import build_credential
+    from opaas.core.credential import build_credential
 
     report = _run(tmp_path, "run")
     credential = build_credential(report, "sha256:x", issuer="did:web:x", key_id="did:web:x#1")
@@ -141,7 +141,7 @@ def test_the_credential_carries_the_deployment_hash(tmp_path):
 
 
 def test_a_report_without_a_fingerprint_still_signs_and_says_so(tmp_path):
-    from opaas.credential import build_credential
+    from opaas.core.credential import build_credential
 
     report = {"runId": "r", "model": {"name": "m"}, "configuration": {"configHash": "h"}}
     credential = build_credential(report, "sha256:x", issuer="did:web:x", key_id="did:web:x#1")
@@ -235,8 +235,8 @@ def _model_dir(tmp_path):
 
 
 def _weights_fingerprint(model, held, backend_cls=LocalServerBackend, monkeypatch=None):
-    from opaas import fingerprint as module
-    from opaas.hashing import tokenizer_files_hash, weights_hash
+    from opaas.core import fingerprint as module
+    from opaas.core.hashing import tokenizer_files_hash, weights_hash
     from opaas.telemetry.system import normalise_path
 
     monkeypatch.setattr(
@@ -297,7 +297,7 @@ def test_without_weights_path_there_is_nothing_to_confirm():
 
 
 def test_tokenizer_files_are_hashed_beside_a_model_directory(tmp_path):
-    from opaas.hashing import tokenizer_files_hash
+    from opaas.core.hashing import tokenizer_files_hash
 
     model = _model_dir(tmp_path)
     (model / "chat_template.jinja").write_text("{{ messages }}")
@@ -309,7 +309,7 @@ def test_tokenizer_files_are_hashed_beside_a_model_directory(tmp_path):
 
 
 def test_a_gguf_file_carries_its_own_template(tmp_path):
-    from opaas.hashing import tokenizer_files_hash
+    from opaas.core.hashing import tokenizer_files_hash
 
     gguf = tmp_path / "model.gguf"
     gguf.write_bytes(b"GGUF")
@@ -333,7 +333,8 @@ def test_files_held_by_sees_a_file_this_process_has_open(tmp_path):
 
 
 def test_the_runner_hashes_the_weights_once_and_records_the_check(tmp_path, monkeypatch):
-    from opaas import hashing, runner
+    from opaas.bench import runner
+    from opaas.core import hashing
 
     model = _model_dir(tmp_path)
     calls = []

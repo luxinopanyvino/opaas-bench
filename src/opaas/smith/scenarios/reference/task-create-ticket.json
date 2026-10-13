@@ -1,0 +1,77 @@
+{
+  "id": "task-create-ticket",
+  "format": 1,
+  "version": 1,
+  "title": "Open a ticket with a priority",
+  "category": "task",
+  "task": "Open a high-priority ticket titled 'Printer down'.",
+  "state": {
+    "tickets": []
+  },
+  "tools": [
+    {
+      "name": "create_ticket",
+      "description": "Create a support ticket.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string"
+          },
+          "priority": {
+            "type": "string",
+            "enum": [
+              "low",
+              "medium",
+              "high"
+            ]
+          }
+        },
+        "required": [
+          "title",
+          "priority"
+        ]
+      },
+      "responses": [
+        {
+          "output": "Ticket created.",
+          "effects": [
+            {
+              "op": "append",
+              "path": [
+                "tickets"
+              ],
+              "value": {
+                "title": {
+                  "$arg": "title"
+                },
+                "priority": {
+                  "$arg": "priority"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "expected": [
+    {
+      "state": [
+        "tickets"
+      ],
+      "contains": "Printer down"
+    },
+    {
+      "state": [
+        "tickets",
+        0,
+        "priority"
+      ],
+      "eq": "high"
+    }
+  ],
+  "budget": {
+    "maxSteps": 3
+  }
+}

@@ -30,8 +30,8 @@ from urllib.parse import urlparse
 
 import segno
 
-from opaas.credential.vc import public_identifier
-from opaas.hashing import short_hash
+from opaas.core.credential.vc import public_identifier
+from opaas.core.hashing import short_hash
 from opaas.web.site import Entry, SiteError, esc, quantization_html
 
 #: The design blocks, in the order a reader expects them. Duplicated from

@@ -1,0 +1,61 @@
+{
+  "id": "task-currency-convert",
+  "format": 1,
+  "version": 1,
+  "title": "Use a rate to convert an amount",
+  "category": "task",
+  "task": "Using the get_rate tool, convert 100 USD to EUR. Answer with the amount in EUR.",
+  "tools": [
+    {
+      "name": "get_rate",
+      "description": "Exchange rate between two ISO currency codes.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "base": {
+            "type": "string"
+          },
+          "quote": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "base",
+          "quote"
+        ]
+      },
+      "readOnly": true,
+      "responses": [
+        {
+          "when": {
+            "all": [
+              {
+                "arg": "base",
+                "eq": "USD"
+              },
+              {
+                "arg": "quote",
+                "eq": "EUR"
+              }
+            ]
+          },
+          "output": {
+            "rate": 0.92
+          }
+        }
+      ],
+      "default": {
+        "error": "Unknown currency pair."
+      }
+    }
+  ],
+  "expected": [
+    {
+      "final": true,
+      "contains": "92"
+    }
+  ],
+  "budget": {
+    "maxSteps": 3
+  }
+}
