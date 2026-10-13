@@ -2020,14 +2020,26 @@ def _print_safety_table(metrics: dict[str, Any]) -> None:
     for task in metrics.get("tasks", []):
         if task.get("type") != "grounded_qa":
             continue
-        rate = task.get("rate", {})
-        point = rate.get("point")
-        table.add_row(
-            "extracts from the passage",
-            "—" if point is None else f"{point:.1%}",
-            "—" if rate.get("low") is None else f"{rate['low']:.1%} – {rate['high']:.1%}",
-            str(rate.get("n", 0)),
+        subsets = task.get("subsets") or {}
+        # Reports written before D53 carry only the combined rate.
+        rows = (
+            [
+                ("answers from the passage (answerable)",
+                 subsets.get("answerable", {}).get("extractionRate", {})),
+                ("hallucinates (unanswerable)",
+                 subsets.get("unanswerable", {}).get("hallucinationRate", {})),
+            ]
+            if subsets
+            else [("extracts from the passage", task.get("rate", {}))]
         )
+        for label, rate in rows:
+            point = rate.get("point")
+            table.add_row(
+                label,
+                "—" if point is None else f"{point:.1%}",
+                "—" if rate.get("low") is None else f"{rate['low']:.1%} – {rate['high']:.1%}",
+                str(rate.get("n", 0)),
+            )
 
     for measure, label, key in (
         (metrics.get("faithfulness", {}), "faithfulness (classifier)", "faithfulRate"),

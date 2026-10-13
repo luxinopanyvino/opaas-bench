@@ -50,6 +50,31 @@ Signing non-reproducible bytes produces a credential nobody can verify and that 
 
 ---
 
+## D53 — SQuAD 2.0 is the public source for hallucination, and the two sides are reported apart
+
+**Status:** applied · **Affects:** [`bench/datasets/importers/squad2.py`](../src/opaas/bench/datasets/importers/squad2.py), [`bench/datasets/sources.py`](../src/opaas/bench/datasets/sources.py), [`bench/suites/safety.py`](../src/opaas/bench/suites/safety.py), `start.sh`
+
+Hallucination with a passage was the dimension every run declared unmeasured: `ifeval,xstest` has no `grounded_qa` items, and the only way in was writing a dataset by hand.
+
+**SQuAD 2.0 is now a pinned source, `squad2`.** It is the dev set (Rajpurkar, Jia and Liang, ACL 2018, CC BY-SA 4.0), with SHA-256 `80a5225e…82d8`. About half its 11,873 questions were written to be unanswerable from their passage while looking answerable, which is what `grounded_qa` needs. The importer:
+- draws a **fixed subset of 200** by stratified sampling over answerable and unanswerable (seed 1234) and records it in the manifest, because the whole set would add hours to a run;
+- keeps **the shortest gold answer**, since SQuAD's answers are alternatives and `expected_facts` requires all of them;
+- drops whole any answerable question without a gold answer (D15).
+
+It is not added to the default `ifeval,xstest`: that would change what every existing configuration measures. `start.sh` includes it, and the docs say how to.
+
+**The two sides are reported apart.** The first real run, `qwen2.5:7b` on 20 items, read "extracts from the passage: 65%". That was 9 of 10 answerable questions answered, and **6 of 10 unanswerable ones answered anyway**. The hallucination rate, which is what the dataset exists to measure, was invisible inside the average. Grounded tasks now carry `subsets.answerable.extractionRate` and `subsets.unanswerable.hallucinationRate` (and its complement, `abstentionRate`). The CLI, the site and the printable certificate show them separately, the same way correct refusal and over-refusal have always been kept apart.
+
+**Found on the way:** the refusal balance took the subsets of the *first* task that had any. With a grounded task listed before XSTest, the safety block failed with `KeyError: 'harmful'`. It now reads refusal tasks only, and a test pins the order.
+
+**`start.sh` downloads everything first and then runs offline.** It installs the classifiers extra unless `OPAAS_CLASSIFIERS=0`, and runs `opaas fetch`, which is instant once cached. Only then does it evaluate, with `--offline`. A missing download now fails before the model is touched rather than an hour in. On Ollama it pins `--num-ctx 8192` by default, after a real run confirmed silent truncation at Ollama's own default.
+
+**What it costs:**
+- 200 more generations per run when `squad2` is included.
+- A first `start.sh` that downloads torch and about 800 MB of classifiers.
+- Literal answer matching: a correct paraphrase is an omission.
+- Wikipedia passages the model has probably seen. That is not a substitute for the deployment's own documents.
+
 ## D52 — The Auditability Card is assembled from evidence, and a deployment is a signed list of reports
 
 **Status:** applied · **Implements:** [work plan](workplan.md) phase 6 · **Affects:** [`card/`](../src/opaas/card), `cli/card.py`

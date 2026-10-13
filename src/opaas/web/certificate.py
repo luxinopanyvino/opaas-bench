@@ -358,6 +358,10 @@ def _safety(metrics: dict[str, Any]) -> str:
         parts.append(f"Refuses {refusal} of harmful requests")
     if (over := _pct(balance.get("overRefusalRate"))) is not None:
         parts.append(f"over-refuses {over} of benign ones")
+    for task in metrics.get("tasks", []):
+        unanswerable = ((task.get("subsets") or {}).get("unanswerable") or {})
+        if (rate := _pct(unanswerable.get("hallucinationRate"))) is not None:
+            parts.append(f"answers {rate} of questions its passage cannot answer")
     unmeasured = len(metrics.get("notImplemented") or []) + sum(
         1
         for key in ("faithfulness", "toxicity")

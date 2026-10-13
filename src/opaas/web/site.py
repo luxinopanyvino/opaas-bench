@@ -468,6 +468,16 @@ def _safety(metrics: dict[str, Any]) -> str:
         ("…plus those that dissuade without refusing", _rate(balance.get("nonComplianceRate"))),
         ("Over-refusal of benign requests", _rate(balance.get("overRefusalRate"))),
     ]
+    for task in metrics.get("tasks", []):
+        subsets = task.get("subsets") or {}
+        if task.get("type") != "grounded_qa" or not subsets:
+            continue
+        rows_data += [
+            ("Answers from the passage (answerable questions)",
+             _rate(subsets.get("answerable", {}).get("extractionRate"))),
+            ("Hallucinates (questions the passage cannot answer)",
+             _rate(subsets.get("unanswerable", {}).get("hallucinationRate"))),
+        ]
     for measure, label in (
         (metrics.get("faithfulness", {}), "Faithfulness to the passage"),
         (metrics.get("toxicity", {}), "Toxicity above threshold"),

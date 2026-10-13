@@ -88,6 +88,7 @@ the others eat. That is what this tool does with a deployment.
 
 - [Requirements](#requirements)
 - [Installation](#installation)
+- [One command: `start.sh`](#one-command-startsh) — from a fresh clone to a signed certificate
 - [Your first run](#your-first-run)
 - [Execution flows](#execution-flows) — evaluate, certify, publish, print, compare, air-gapped, cloud baseline, classifiers, watch
 - [Auditing agents](#auditing-agents) — discover, smith, sentinel, inquest, swarm, card
@@ -152,6 +153,39 @@ opaas
 ```
 
 **Optional — block D classifiers** (faithfulness and toxicity). A separate extra because torch weighs more than everything else combined. Installing it is enough: the pinned weights download once on first use and those two dimensions start being measured. Without it the tool works the same and declares them unmeasured. Details in [Measure faithfulness and toxicity](#7-measure-faithfulness-and-toxicity).
+
+## One command: `start.sh`
+
+From a fresh clone to a verified certificate, with nothing prepared beforehand. It needs bash (on Windows, Git Bash or WSL) and an inference server already serving the model:
+
+```bash
+OPAAS_MODEL=qwen2.5:7b-instruct ./start.sh
+```
+
+In order, it:
+
+1. **Installs `uv`** if it is missing, and **OPAAS exactly as `uv.lock` pins it**, including the block D classifiers (torch and transformers).
+2. **Downloads everything the evaluation needs, the first time only.** That means IFEval, XSTest, SQuAD 2.0 and the two pinned classifiers, each verified against its hash. Later runs find them in the cache and skip the step.
+3. **Evaluates blocks A–E with `--offline`**, so nothing downloads mid-run. If something is missing, it fails before the model is touched, not an hour in.
+4. Generates the signing key on first use, then **signs, verifies, renders the printable certificate and the static site**.
+
+Everything is configurable through environment variables, and every argument is passed on to `opaas run`:
+
+| Variable | Default | Effect |
+|---|---|---|
+| `OPAAS_MODEL` | `llama3.2:1b` | Model id exactly as the backend serves it |
+| `OPAAS_BACKEND` | `ollama` | `vllm`, `ollama` or `openai` |
+| `OPAAS_BASE_URL` | adapter's own | Server endpoint |
+| `OPAAS_NUM_CTX` | `8192` on Ollama | Context window to serve. Without it Ollama silently drops the start of long prompts |
+| `OPAAS_DATASET` | `ifeval,xstest,squad2` | Sources, or a local path to compose your own documents in |
+| `OPAAS_CLASSIFIERS` | `1` | `0` skips the classifiers and torch: toxicity and faithfulness are then declared unmeasured |
+| `OPAAS_KEY_PASSPHRASE` | asked for | Passphrase of the signing key |
+
+```bash
+OPAAS_MODEL=qwen2.5:7b-instruct ./start.sh --capability-max-tokens 1024 --safety-max-tokens 1024 --max-concurrency 1
+```
+
+The first run downloads more than later ones. The datasets are a few MB. The classifiers are about 800 MB. torch weighs several hundred MB to a few GB, depending on the platform.
 
 ## Your first run
 
@@ -353,7 +387,13 @@ Any model compatible with `AutoModelForSequenceClassification` works, as long as
 opaas fetch
 ```
 
-**Faithfulness also needs a passage to score against.** It only reaches items of type `grounded_qa`, and `ifeval,xstest` provides none — with the classifier ready and no such items, the report still says *"There are no items with a passage and a response to score"*. Compose in a dataset of your own documents, which is the on-prem case that matters:
+**Faithfulness also needs a passage to score against.** It only reaches items of type `grounded_qa`, and `ifeval,xstest` provides none. With the classifier ready and no such items, the report still says *"There are no items with a passage and a response to score"*. Add `squad2`, which brings public passages:
+
+```bash
+opaas run --model my-model --backend vllm --suite all --dataset ifeval,xstest,squad2
+```
+
+Or compose in a dataset of your own documents, which is the on-prem case that matters:
 
 ```bash
 opaas run --model my-model --backend vllm --suite all --dataset ifeval,xstest,/data/internal-documentation
@@ -518,6 +558,12 @@ Determinism with a fixed seed, serially — 100% there does not guarantee determ
 
 Correct refusal and over-refusal are measured with the same items and the same detector, because separately they mean nothing: a model that refuses everything scores 100% on the first and 100% on the second. Hallucination is checked by giving a passage and asking for something that is not in it.
 
+The two sides of that check are reported **apart**:
+- **answers from the passage**, on questions the passage can answer;
+- **hallucinates**, on questions it cannot.
+
+One combined rate hid the second. In a real run, "65% correct" was 9 of 10 answered and **6 of 10 hallucinated**.
+
 Scoring is deterministic pattern matching, whose hash travels in the report. **No LLM judge is used**: if the score depends on which judge model and version, the certificate stops being reproducible.
 
 With the optional classifiers, faithfulness and toxicity are added — local pinned weights, hashed like any other artifact of the run, and calibrated before use. Step by step in [Measure faithfulness and toxicity](#7-measure-faithfulness-and-toxicity).
@@ -535,6 +581,8 @@ You fill in the declaration — traceability, license, provenance, AI Act risk c
 ## Datasets
 
 **Real datasets are used by default** — `ifeval,xstest`, 960 items covering blocks B and D — downloaded on first use and reused from the cache. An unconfigured run measures something real.
+
+**`squad2` adds hallucination with a passage.** It is 200 questions from SQuAD 2.0 (CC BY-SA 4.0), half of them deliberately unanswerable from their passage. Add it with `--dataset ifeval,xstest,squad2`; `start.sh` does by default.
 
 ```bash
 opaas datasets
@@ -568,7 +616,7 @@ The ones you will actually reach for. Full list with `opaas run --help`.
 | `--capability-max-tokens` | `400` | Token cap per block B instruction item. Cut answers are counted and declared |
 | `--safety-max-tokens` | `320` | Token cap per block D item. Cut answers are counted and declared |
 | `--suite-concurrency` | `4` | Parallel requests the harness sends while scoring blocks B and D |
-| `--dataset` | `ifeval,xstest` | Sources, local paths, or `opaas-smoke` |
+| `--dataset` | `ifeval,xstest` | Sources (`ifeval`, `xstest`, `squad2`), local paths, or `opaas-smoke` |
 | `--concurrency` | `1,4,16` | Block A concurrency levels |
 | `--prompt-words` | `128,1024` | Prompt lengths to sweep |
 | `--quantization` | — | Declared quantization, e.g. `GGUF Q4_K_M` |
@@ -599,7 +647,7 @@ The ones you will actually reach for. Full list with `opaas run --help`.
 | `opaas log-verify` | Checks the transparency log |
 | `opaas compliance` | Generates the block E declaration template |
 | `opaas datasets` | Available datasets and cache status |
-| `opaas fetch` | Downloads datasets into the cache |
+| `opaas fetch` | Downloads every dataset, plus the pinned classifiers if that extra is installed, into the cache. Skips what is already there |
 | `opaas import` | Converts a local IFEval or XSTest file |
 | `opaas backends` | Registered adapters and their limitations |
 | `opaas suites` | Evaluation blocks |
@@ -638,8 +686,8 @@ Stated here as plainly as the report states it:
 
 - **Bias.** A classifier is not enough; which axes get measured, and with what prompts, is a decision still open.
 - **Toxicity**, unless the classifiers extra is installed — then it measures itself.
-- **Faithfulness**, unless the classifiers extra is installed *and* the dataset carries `grounded_qa` items; the default sources provide none.
-- **Hallucination with a passage**, unless the dataset carries `grounded_qa` items. No classifier can substitute for the data.
+- **Faithfulness**, unless the classifiers extra is installed *and* the dataset carries `grounded_qa` items. Add `squad2`, or your own documents; `ifeval,xstest` alone provides none.
+- **Hallucination with a passage**, unless the dataset carries `grounded_qa` items (`squad2`, or your own documents). No classifier can substitute for the data. Scoring is literal: a correct paraphrase of the expected answer counts as omitting it.
 - **Model-generated code is not executed.** Without a sandbox, running it would be the tool's problem, not the model's.
 - **Whether an agent is safe.** The agent modules measure behaviour in the scenarios run and how auditable the deployment is. Semantic policies ("did it say something harmful") are out of scope: only structural predicates are decided, with no judge.
 - **ACR on existing records.** How much of what happened a log omits cannot be read from the log; only `smith`, which has ground truth, measures it.

@@ -9,9 +9,11 @@ from opaas.bench.datasets.importers import (
     available_importers,
     ifeval,
     import_dataset,
+    squad2,
     stratified_sample,
     xstest,
 )
+from opaas.bench.datasets.sources import get_source
 
 # ----------------------------------------------------------------------- IFEval
 
@@ -46,7 +48,7 @@ def _write_ifeval(tmp_path, records=None):
 
 
 def test_importers_are_registered():
-    assert available_importers() == ["ifeval", "xstest"]
+    assert available_importers() == ["ifeval", "squad2", "xstest"]
 
 
 def test_word_count_relation_at_least():
@@ -304,3 +306,73 @@ def test_appending_the_same_source_replaces_instead_of_duplicating(tmp_path):
 def test_unknown_importer_lists_the_available_ones(tmp_path):
     with pytest.raises(ImporterError, match="ifeval"):
         import_dataset("made-up", tmp_path / "x.jsonl", tmp_path / "out")
+
+
+# --------------------------------------------------------------------- SQuAD 2.0
+
+
+def _squad(questions_per_side: int = 3) -> dict:
+    """A SQuAD 2.0 file in miniature: one passage, answerable and unanswerable questions."""
+    context = "The Aurora-3 server has two 48 GB accelerators and serves technical support."
+    qas = [
+        {"id": f"a{i}", "question": f"How much memory? ({i})", "is_impossible": False,
+         "answers": [{"text": "two 48 GB accelerators"}, {"text": "48 GB"}]}
+        for i in range(questions_per_side)
+    ] + [
+        {"id": f"u{i}", "question": f"How much did it cost? ({i})", "is_impossible": True,
+         "answers": []}
+        for i in range(questions_per_side)
+    ]
+    return {"version": "v2.0",
+            "data": [{"title": "Aurora", "paragraphs": [{"context": context, "qas": qas}]}]}
+
+
+def _write_squad(tmp_path, document):
+    path = tmp_path / "dev-v2.0.json"
+    path.write_text(json.dumps(document), encoding="utf-8")
+    return path
+
+
+def test_squad_keeps_the_shortest_gold_answer_as_the_fact_to_find():
+    """The gold answers are alternatives; expected_facts requires every fact it lists."""
+    items, stats = squad2.convert(squad2.read_source_rows(_squad(1)))
+    answerable = next(i for i in items if i["answerable"])
+    assert answerable["expected_facts"] == ["48 GB"]
+    unanswerable = next(i for i in items if not i["answerable"])
+    assert unanswerable["expected_facts"] == []
+    assert (stats.answerable, stats.unanswerable) == (1, 1)
+
+
+def test_an_answerable_question_without_a_gold_answer_is_dropped_whole():
+    document = _squad(1)
+    document["data"][0]["paragraphs"][0]["qas"][0]["answers"] = []
+    items, stats = squad2.convert(squad2.read_source_rows(document))
+    assert stats.skipped == 1
+    assert all(not item["answerable"] for item in items)
+
+
+def test_squad_imports_a_balanced_default_subset_and_a_limit_overrides_it(tmp_path, monkeypatch):
+    """The dev set has 11,873 questions; a run evaluates a fixed, stratified 200."""
+    monkeypatch.setattr(squad2, "DEFAULT_LIMIT", 4)
+    source = _write_squad(tmp_path, _squad(5))
+    import_dataset("squad2", source, tmp_path / "default")
+    task = load_dataset(str(tmp_path / "default")).tasks[0]
+    assert len(task.items) == 4
+    assert sum(item.answerable for item in task.items) == 2
+
+    import_dataset("squad2", source, tmp_path / "limited", limit=6)
+    assert len(load_dataset(str(tmp_path / "limited")).tasks[0].items) == 6
+
+
+def test_a_file_that_is_not_squad_is_rejected(tmp_path):
+    path = tmp_path / "other.json"
+    path.write_text(json.dumps({"rows": []}), encoding="utf-8")
+    with pytest.raises(ImporterError, match="SQuAD 2.0"):
+        squad2.read_source(path)
+
+
+def test_squad_is_a_pinned_source_for_block_d():
+    source = get_source("squad2")
+    assert source is not None and source.block == "D"
+    assert len(source.sha256) == 64
+    assert "CC-BY-SA-4.0" in source.license
