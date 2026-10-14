@@ -87,7 +87,7 @@ from opaas.core.hashing import (
     tokenizer_files_hash,
     weights_hash,
 )
-from opaas.core.report import REPORT_FILENAME, describe_environment
+from opaas.core.report import REPORT_FILENAME, describe_environment, describe_scored_dataset
 from opaas.core.transparency import (
     TransparencyError,
     append_entry,
@@ -1866,7 +1866,7 @@ def _print_performance_table(metrics: dict[str, Any]) -> None:
 def _print_capability_table(metrics: dict[str, Any]) -> None:
     dataset = metrics.get("dataset", {})
     table = Table(
-        title=f"Block B — Capability  ·  dataset {_plain(dataset.get('name'))} "
+        title=f"Block B — Capability  ·  dataset {_plain(describe_scored_dataset(metrics))} "
         f"{_plain(dataset.get('version'))} "
         f"({short_hash(str(dataset.get('datasetHash', '')), 12)})"
         f"  ·  style {_plain(metrics.get('answerStyle', '?'))}"

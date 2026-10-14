@@ -158,3 +158,19 @@ def describe_hardware(environment: dict[str, Any]) -> str:
     vram = first.get("vramTotalMb")
     vram_gb = f" {round(vram / 1024)}GB" if isinstance(vram, (int, float)) else ""
     return f"{len(gpus)}x {first.get('name')}{vram_gb}"
+
+
+def describe_scored_dataset(metrics: dict[str, Any]) -> str:
+    """Which part of the dataset a block scored, for a table or page header.
+
+    A run composes every source into one dataset and each block scores only
+    its own tasks. Naming the whole composition over block B's table read as
+    if IFEval scores had been computed on BBQ, SQuAD and XSTest too. The
+    composition stays named, because its hash is what identifies the input.
+    """
+    dataset = metrics.get("dataset") or {}
+    name = str(dataset.get("name") or "?")
+    scored = sorted({str(t["name"]) for t in metrics.get("tasks") or [] if t.get("name")})
+    if not scored or "+".join(scored) == name:
+        return name
+    return f"{', '.join(scored)}, from {name}"

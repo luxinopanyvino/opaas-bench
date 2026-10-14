@@ -295,3 +295,15 @@ def test_the_certificate_page_heads_operator_notes_as_unverified(tmp_path):
     assert "Declared by the operator" in page
     assert "not verified by OPAAS" in page
     assert "Engine restarted before block A." in page
+
+
+def test_a_block_header_names_the_tasks_it_scored_not_the_whole_composition():
+    """Block B's header read "dataset bbq+ifeval+squad2+xstest" over IFEval scores."""
+    from opaas.core.report import describe_scored_dataset
+
+    composed = {"dataset": {"name": "bbq+ifeval+squad2+xstest"}, "tasks": [{"name": "ifeval"}]}
+    assert describe_scored_dataset(composed) == "ifeval, from bbq+ifeval+squad2+xstest"
+    alone = {"dataset": {"name": "ifeval"}, "tasks": [{"name": "ifeval"}]}
+    assert describe_scored_dataset(alone) == "ifeval"
+    assert describe_scored_dataset({"dataset": {"name": "old"}}) == "old"
+
