@@ -180,7 +180,7 @@ def exclusion_limitations(tasks: Iterable[Task]) -> list[str]:
         )
         limitations.append(
             f"Task '{task.name}': {excluded['count']} of {task.items_available} source items are "
-            f"NOT evaluated because their instructions cannot be checked here — {reasons}. "
+            f"NOT evaluated: the import dropped them whole — {reasons}. "
             "The score covers the rest and is not directly comparable with figures published "
             "over the full dataset."
         )

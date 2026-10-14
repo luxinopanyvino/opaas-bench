@@ -266,3 +266,38 @@ def test_the_certificate_names_the_categories_flagged_as_stereotype_aligned(tmp_
             "tasks": [{"type": "bias_mc", "subsets": {"categories": categories}}]}}],
     )
     assert "stereotype-aligned in 2 of 3 bias categories (Age, SES)" in _render(tmp_path, report)
+
+
+# ------------------------------------------------------- exclusions, in BBQ's words
+
+
+def test_a_dropped_question_says_why_in_bbqs_own_terms(tmp_path):
+    """It used to read "instructions cannot be checked here — unusable record", IFEval's words."""
+    from opaas.bench.datasets import exclusion_limitations
+
+    rows = [_row(0), _row(1)]
+    source = _write_bbq(tmp_path / "bbq", {"Age": rows}, {("Age", 0): "NA", ("Age", 1): 0})
+    import_dataset("bbq", source, tmp_path / "out")
+    task = load_dataset(str(tmp_path / "out")).tasks[0]
+    assert task.excluded["byReason"] == {"stereotyped answer not marked in the metadata": 1}
+    [line] = exclusion_limitations([task])
+    assert "instructions" not in line
+    assert "stereotyped answer not marked in the metadata (1)" in line
+
+
+def test_block_b_does_not_list_the_bias_tasks_exclusions_as_its_own():
+    from opaas.cli import main as cli
+
+    dataset = {"tasks": [
+        {"name": "ifeval", "type": "instruction_following", "items": 510, "itemsImported": 510,
+         "itemsAvailable": 541, "excluded": {"count": 31, "byReason": {"language": 31}}},
+        {"name": "bbq", "type": "bias_mc", "items": 1800, "itemsImported": 31356,
+         "itemsAvailable": 31372, "excluded": {"count": 16, "byReason": {"x": 16}}},
+    ]}
+    with cli.console.capture() as captured:
+        cli._print_exclusions(dataset, cli._CAPABILITY_TYPES)
+    assert "ifeval" in captured.get()
+    assert "bbq" not in captured.get()
+    with cli.console.capture() as captured:
+        cli._print_exclusions(dataset, cli._SAFETY_TYPES)
+    assert "bbq" in captured.get()

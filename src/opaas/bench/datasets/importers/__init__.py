@@ -177,6 +177,11 @@ def _excluded(stats: Any) -> dict[str, Any]:
         str(instruction): int(count)
         for instruction, count in getattr(stats, "skipped_by_instruction", {}).items()
     }
+    # An importer whose reasons are not instructions names them itself, so the
+    # report says why in that dataset's own terms rather than "unusable record".
+    by_reason.update(
+        {str(reason): int(n) for reason, n in getattr(stats, "skipped_by_reason", {}).items()}
+    )
     count = int(getattr(stats, "skipped", 0))
     if count and not by_reason:
         by_reason = {"unusable record": count}

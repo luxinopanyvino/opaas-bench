@@ -1906,22 +1906,7 @@ def _print_capability_table(metrics: dict[str, Any]) -> None:
             )
             console.print(f"  [dim]constraints failed (failed/checked): {detail}[/dim]")
 
-    for task in dataset.get("tasks", []):
-        excluded = task.get("excluded") or {}
-        if excluded.get("count"):
-            reasons = ", ".join(
-                f"{_plain(reason)} {count}"
-                for reason, count in sorted(excluded["byReason"].items())
-            )
-            # Three different numbers: what the source has, what could be
-            # checked, and what this run evaluated after --limit. Collapsing
-            # them into one ratio is how the exclusions got lost in the first
-            # place.
-            console.print(
-                f"  [yellow]{_plain(task['name'])}: {task['items']} items evaluated of "
-                f"{task['itemsImported']} checkable; {excluded['count']} of "
-                f"{task['itemsAvailable']} source items excluded ({reasons})[/yellow]"
-            )
+    _print_exclusions(dataset, _CAPABILITY_TYPES)
 
 
 def _print_consistency_table(metrics: dict[str, Any]) -> None:
@@ -1993,6 +1978,31 @@ def _context_detail(context: dict[str, Any]) -> str:
         "confirmed": "the engine trimmed the prompt (silent truncation)",
         "ruled-out": "the prompt arrives whole; the model loses its beginning",
     }.get(str(context.get("enginePromptTruncation")), "beginning of the prompt lost, cause unknown")
+
+
+#: Which item types each block scores. A composed dataset carries every task, and
+#: block B used to list BBQ's exclusions as if they were its own.
+_CAPABILITY_TYPES = ("multiple_choice", "instruction_following")
+_SAFETY_TYPES = ("refusal", "grounded_qa", "bias_mc")
+
+
+def _print_exclusions(dataset: dict[str, Any], types: tuple[str, ...]) -> None:
+    for task in dataset.get("tasks", []):
+        excluded = task.get("excluded") or {}
+        if task.get("type") not in types or not excluded.get("count"):
+            continue
+        reasons = ", ".join(
+            f"{_plain(reason)} {count}" for reason, count in sorted(excluded["byReason"].items())
+        )
+        # Three different numbers: what the source has, what could be
+        # checked, and what this run evaluated after --limit. Collapsing
+        # them into one ratio is how the exclusions got lost in the first
+        # place.
+        console.print(
+            f"  [yellow]{_plain(task['name'])}: {task['items']} items evaluated of "
+            f"{task['itemsImported']} usable; {excluded['count']} of "
+            f"{task['itemsAvailable']} source items excluded ({reasons})[/yellow]"
+        )
 
 
 def _print_bias_table(metrics: dict[str, Any]) -> None:
@@ -2096,6 +2106,7 @@ def _print_safety_table(metrics: dict[str, Any]) -> None:
         )
     console.print(table)
     _print_bias_table(metrics)
+    _print_exclusions(metrics.get("dataset") or {}, _SAFETY_TYPES)
 
     for name, entry in (metrics.get("classifiers") or {}).items():
         console.print(
