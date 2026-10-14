@@ -77,6 +77,9 @@ class ClassifierMetadata:
     resolved_labels: dict[str, int] = field(default_factory=dict)
     max_length: int = 512
     truncated_inputs: int = 0
+    #: Single-text inputs longer than max_length, scored in overlapping windows
+    #: with the highest window kept (D56). Not truncated: every token was seen.
+    windowed_inputs: int = 0
     note: str | None = None
 
     def as_dict(self) -> dict[str, Any]:
@@ -91,6 +94,7 @@ class ClassifierMetadata:
             "resolvedLabels": self.resolved_labels,
             "maxLength": self.max_length,
             "truncatedInputs": self.truncated_inputs,
+            "windowedInputs": self.windowed_inputs,
             "note": self.note,
         }
 

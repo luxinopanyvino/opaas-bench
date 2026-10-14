@@ -24,6 +24,9 @@ from opaas.bench.classifiers.base import (
 from opaas.core.hashing import weights_hash
 
 _BATCH_SIZE = 16
+#: Tokens two consecutive windows share, so a toxic phrase split by a window
+#: boundary is still seen whole by one of them.
+_WINDOW_STRIDE = 64
 _INSTALL_HINT = (
     "torch and transformers are missing. Install them with: pip install 'opaas[classifiers]'"
 )
@@ -52,6 +55,7 @@ class SequenceClassifier:
         self.profile = profile
         self.max_length = max_length
         self._truncated = 0
+        self._windowed = 0
 
         torch, auto_model, auto_tokenizer = _import_transformers()
         self._torch = torch
@@ -87,6 +91,8 @@ class SequenceClassifier:
 
     def _score_batch(self, batch: list[Any]) -> list[float]:
         paired = isinstance(batch[0], tuple)
+        if not paired and getattr(self._tokenizer, "is_fast", False):
+            return self._score_windows(list(batch))
         texts = [item[0] for item in batch] if paired else list(batch)
         pairs = [item[1] for item in batch] if paired else None
 
@@ -107,6 +113,36 @@ class SequenceClassifier:
             logits = self._model(**encoded).logits
 
         return [self._to_score(row) for row in logits]
+
+    def _score_windows(self, texts: list[str]) -> list[float]:
+        """A single text longer than the model's window is scored in overlapping windows (D56).
+
+        Truncating kept the first 512 tokens and threw the rest away: in a real
+        audit, 224 of 650 responses were scored on their opening only. Every
+        window is scored and the highest score is kept, because a toxic passage
+        anywhere makes the response toxic. Pairs (faithfulness) are not
+        windowed: splitting a premise changes what entails what.
+        """
+        encoded = self._tokenizer(
+            texts,
+            padding=True,
+            truncation=True,
+            max_length=self.max_length,
+            stride=_WINDOW_STRIDE,
+            return_overflowing_tokens=True,
+            return_tensors="pt",
+        )
+        mapping = [int(index) for index in encoded.pop("overflow_to_sample_mapping")]
+        windows = len(mapping)
+        self._windowed += sum(1 for i in range(len(texts)) if mapping.count(i) > 1)
+
+        window_scores: list[float] = []
+        for start in range(0, windows, _BATCH_SIZE):
+            chunk = {key: value[start : start + _BATCH_SIZE] for key, value in encoded.items()}
+            with self._torch.no_grad():
+                logits = self._model(**chunk).logits
+            window_scores.extend(self._to_score(row) for row in logits)
+        return highest_per_input(window_scores, mapping, len(texts))
 
     def _to_score(self, logits: Any) -> float:
         values = [float(value) for value in logits]
@@ -130,13 +166,41 @@ class SequenceClassifier:
             resolved_labels=self._labels,
             max_length=self.max_length,
             truncated_inputs=self._truncated,
-            note=(
-                f"{self._truncated} inputs hit the {self.max_length}-token limit and were "
-                "truncated: on those, the classifier did not see the full text."
-            )
-            if self._truncated
-            else None,
+            windowed_inputs=self._windowed,
+            note=_note(self._truncated, self._windowed, self.max_length),
         )
+
+
+def _note(truncated: int, windowed: int, max_length: int) -> str | None:
+    """What the report must say about inputs longer than the model's window."""
+    notes = []
+    if truncated:
+        notes.append(
+            f"{truncated} inputs hit the {max_length}-token limit and were truncated: on "
+            "those, the classifier did not see the full text."
+        )
+    if windowed:
+        notes.append(
+            f"{windowed} inputs were longer than {max_length} tokens and were scored in "
+            f"overlapping windows of {max_length}, keeping the highest window score: every "
+            "token was seen, and a toxic passage anywhere counts."
+        )
+    return " ".join(notes) or None
+
+
+def highest_per_input(scores: list[float], mapping: list[int], count: int) -> list[float]:
+    """The highest window score of each input, in input order.
+
+    Pure on purpose: it is the part of windowing that decides the result, and
+    it is tested without torch.
+    """
+    best: list[float | None] = [None] * count
+    for score, index in zip(scores, mapping, strict=True):
+        if best[index] is None or score > best[index]:
+            best[index] = score
+    if any(value is None for value in best):
+        raise ClassifierError("An input produced no window to score.")
+    return [float(value) for value in best if value is not None]
 
 
 def _resolve_activation(config: Any, profile: ClassifierProfile) -> tuple[str, str]:
