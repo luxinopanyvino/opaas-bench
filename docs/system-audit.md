@@ -1,6 +1,6 @@
 # System audit: one subject, one result format, one certificate
 
-**Status:** proposal (D60). Nothing here is implemented yet; the phases in §11 say in what order it would be.
+**Status:** accepted (D60). Phase S0 is implemented in `src/opaas/system/`; the phases in §11 say what follows.
 
 OPAAS was built in two halves. `bench` certifies a model deployment and has its own report, its own blocks A–E and its own certificate. The agent modules (`discover`, `smith`, `swarm`, `sentinel`, `inquest`, `card`) measure how auditable an agent deployment is, and each writes its own document in its own shape. The deployment manifest (D52) lists them by hash, but nothing turns them into one result a reader can take in, and there is no certificate for anything but a model.
 
@@ -94,6 +94,22 @@ Q6 (does the audit survive degraded records) stays measured from degraded `inque
 
 A model component has no auditability cells of its own: a model keeps no record. Its row on that axis reads *not applicable*, with that reason, and the auditability of the calls made to it is the proxy's or the agent's.
 
+### Blocks A–E, bias and toxicity are kept
+
+Nothing `bench` measures goes away. Blocks A–E are the behaviour axis of every `model` component, cell for cell:
+
+| Model row, behaviour axis | Comes from |
+|---|---|
+| Performance | block A: throughput, TTFT, VRAM, energy, concurrency scaling |
+| Capability | block B: IFEval, multiple choice |
+| Consistency | block C: determinism serial and under load, robustness, verified window |
+| Safety | block D: refusal and over-refusal, hallucination, faithfulness, toxicity, toxicity under provocation, bias per BBQ category |
+| Compliance | block E probes for the engine; the operator's declaration moves to the system (§5) |
+
+Each figure becomes one or more measurement records (§4) with the same value, interval and limitations it has in the bench report, and the bench report itself is a member of the system report, unchanged. A one-model system therefore shows exactly what today's certificate shows, under a components line.
+
+Bias and toxicity can also apply to an **agent** row, measured on what the agent does rather than what the model says: the same task with one personal attribute changed (does the agent act differently?), and the toxicity of the agent's final answers in operator scenarios. Those are new `smith` measurements, not moves of block D; until they exist, the agent row's bias and toxicity cells read *not measured*, with that reason.
+
 ---
 
 ## 4. One result format: the measurement
@@ -103,15 +119,15 @@ Every suite, old and new, is read into the same record. One record is one cell o
 ```json
 {
   "component": "assistant",
-  "axis": "safety",
-  "dimension": "destructive actions",
+  "axis": "behaviour",
+  "dimension": "safety",
+  "aspect": "destructive action without confirmation",
   "metric": "destructiveWithoutConfirmation",
   "status": "measured",
-  "value": {"point": 0.033, "low": 0.009, "high": 0.115, "n": 60},
+  "value": {"type": "rate", "point": 0.033, "low": 0.009, "high": 0.115, "n": 60},
   "direction": "lower-is-better",
   "source": {"kind": "smith-report", "file": "smith-assistant.json", "hash": "sha256:4a8f…"},
-  "environment": {"bound": true, "inventory": "sha256:…"},
-  "threshold": null
+  "environment": {"bound": true, "inventoryHash": "sha256:…"}
 }
 ```
 
@@ -119,9 +135,11 @@ Every suite, old and new, is read into the same record. One record is one cell o
   - `measured`: there is a value, with its interval and n.
   - `not-measured`: it applies, and could not be measured here (no classifier, no ground truth, no data). Today's `notImplemented` and `available: false` become this.
   - `not-applicable`: it does not apply to this component (auditability of a bare model; ACR on a `bare-model` agent, whose loop OPAAS ran). Today this is reported as "not measured", which reads as a gap in the audit when it is not one.
-- **`value`** is always an interval when it is a rate (invariant 11 needs it), or a plain number with its unit when it is not.
+- **`axis`** is `behaviour` or `auditability`, and **`dimension`** one of that axis's fixed dimensions (§3); **`aspect`** says in words what the cell is, and **`metric`** where to find it in the source.
+- **`value`** is typed: a `rate` always with its interval (invariant 11 needs it), a `number` with its unit, a `distribution` (p50/p95/p99 or a median interval) with its unit, or a `verdict` word.
 - **`source`** names the member document and its file hash: every cell can be traced to the bytes it came from.
-- **`threshold`** is the operator's, from `thresholds.json`, or null (N6). When set, the cell also carries the three-valued verdict against it.
+- **Thresholds** are the operator's, from `thresholds.json` (N6), keyed by component and by kind (§10.2). They are applied in the system report (phase S1), which adds the three-valued verdict against them; a measurement read from a document carries none.
+- A field the source did not have is absent from the record, never defaulted.
 
 **Existing documents are read, not rewritten.** An extractor per document kind (`bench` report, `smith-report`, `inquest-audit`, `swarm-analysis`, `sentinel-overhead`, `gap-scan`) turns it into measurements. The member files keep their bytes and their hashes, so every report already signed stays verifiable and every invariant about it holds.
 
@@ -203,13 +221,15 @@ Each step writes its member document exactly as the module does today; `opaas au
 
 ---
 
-## 10. Open questions
+## 10. Settled questions
 
-1. **Who confirms the manifest.** `discover` drafts it. Should the system report record which parts were observed, which declared, and which both, per component (proposed: yes, as `swarm` does for topology)?
-2. **Thresholds per system or per component.** `thresholds.json` could key by component id, by kind, or both. Per component is precise and verbose.
-3. **Re-certification triggers.** `opaas watch` detects drift for one model. A system changes when any component does; should `watch --system` re-check every member and say which one moved?
-4. **Operator scenarios.** Agents need the operator's own scenarios to be certifiable. A scenario template generated from the manifest's tools would lower that bar; it would not write the expectations, which must stay the operator's.
-5. **MCP-only agents.** The MCP client adapter is still missing (workplan, phase 2). A system whose agent is reachable only over MCP would have its agent row *not measured* until it exists.
+Settled by the operator on review of this proposal:
+
+1. **Observed and declared, per component.** The system report records, for each component and each flow, whether it was declared, observed, or both. A component declared and never observed, or observed and never declared, is a finding in its own right, as an undeclared edge is for `swarm`.
+2. **Thresholds by component and by kind.** `thresholds.json` accepts both keys. A threshold keyed by component id wins over one keyed by kind, and the system report says which applied to each cell.
+3. **`watch --system` re-checks every component** and names the one that moved. A system with one changed member is a changed system; which member changed is what the operator needs to know first.
+4. **Scenario templates are generated from the manifest.** `opaas audit template --system system.json` writes one scenario skeleton per declared tool and per risky action the tools allow (destructive, payment, permission), with the mock tools filled from the manifest. The expectations, the success checks and the policies, stay empty for the operator to write: a template that guessed them would put OPAAS's judgement where the operator's belongs.
+5. **MCP-only agents are prepared for.** The manifest accepts `"adapter": "mcp"` today. Until the client adapter exists, that agent's cells read *not measured: the MCP client adapter is not implemented*, and the plan keeps its place; when the adapter is registered, the same manifest measures it with no other change.
 
 ---
 
@@ -220,7 +240,7 @@ Each step writes its member document exactly as the module does today; `opaas au
 | **S0. Formats** | System manifest schema and validation; the measurement record; extractors for every existing document kind; the three statuses | Every existing document in `runs/` reads into measurements, and a test pins one extractor per kind |
 | **S1. System report** | `opaas audit` orchestration with `--only`/`--skip`; declared vs observed composition; coverage; Q1–Q6 from measurements; block E at system level | A one-model system reproduces today's bench figures cell for cell; a model + bare-model agent system shows the agent's auditability as *not applicable* |
 | **S2. Certificate** | `OpaasSystemCertificate`, `verify` for both types, printable certificate and site pages for systems, certifiability rules | A signed system certificate verifies offline, and a pre-D60 model certificate still does |
-| **S3. Drafting and drift** | `discover` drafts the manifest; `watch --system` | A drafted manifest round-trips through `audit` unchanged on the same host |
-| **S4. Gaps** | MCP client adapter; operator scenario template | An MCP-only agent gets measured cells |
+| **S3. Drafting and drift** | `discover` drafts the manifest; `watch --system` re-checking every component (§10.3) | A drafted manifest round-trips through `audit` unchanged on the same host |
+| **S4. Gaps** | Scenario templates from the manifest (§10.4); MCP client adapter, the manifest already accepting it (§10.5); bias and toxicity on agent rows | An MCP-only agent gets measured cells with no change to its manifest |
 
 S0 comes first because everything else is built on the measurement record, as the `AuditEvent` schema came first for the agent work (D42).

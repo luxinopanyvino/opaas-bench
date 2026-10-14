@@ -2290,6 +2290,7 @@ def _fmt(value: Any, digits: int = 1) -> str:
 # The modules beyond model certification, one command group each (D41):
 # `opaas <module> <command>`. Imported here, at the end, because they register
 # on `app` and share nothing else with the bench commands above.
+from opaas.cli import audit as _audit_cli  # noqa: E402
 from opaas.cli import card as _card_cli  # noqa: E402
 from opaas.cli import discover as _discover_cli  # noqa: E402
 from opaas.cli import evidence as _evidence_cli  # noqa: E402
@@ -2305,6 +2306,7 @@ app.add_typer(_sentinel_cli.app, name="sentinel")
 app.add_typer(_inquest_cli.app, name="inquest")
 app.add_typer(_card_cli.app, name="card")
 app.add_typer(_evidence_cli.app, name="evidence")
+app.add_typer(_audit_cli.app, name="audit")
 
 
 if __name__ == "__main__":

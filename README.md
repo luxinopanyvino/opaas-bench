@@ -524,6 +524,14 @@ hash, and a question no evidence answers says so. `opaas card manifest` lists ev
 report behind a deployment by hash and checks that they share one environment. Sign
 both with `opaas evidence sign`.
 
+**7. The system audit** (`audit`, in progress, [D60](docs/system-audit.md)): the system,
+not the model or the agent, is the audited subject. Describe it in a `system.json`
+(purpose, components, flows) and check it with `opaas audit validate system.json`.
+`opaas audit extract report.json -c llm` reads any OPAAS document into the common
+measurement format, where every cell is *measured*, *not measured* or *not applicable*,
+each with its reason; the document itself is never rewritten. The orchestrated
+`opaas audit --system` and the system certificate come in the next phases.
+
 ## What is measured
 
 | Block | `--suite` | What it answers |
@@ -675,6 +683,7 @@ The ones you will actually reach for. Full list with `opaas run --help`.
 | `opaas swarm analyze` / `attribute` | Flow topology, per-edge figures, faults; attribution subgraph |
 | `opaas card build` / `manifest` | Auditability Card; deployment manifest |
 | `opaas evidence sign` / `verify` | Sign and verify any evidence document |
+| `opaas audit validate` / `extract` | Check a system manifest; read any document into measurements (D60, phase S0) |
 
 ## How verification works
 

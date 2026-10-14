@@ -52,7 +52,7 @@ Signing non-reproducible bytes produces a credential nobody can verify and that 
 
 ## D60 — The audited subject is the system, with one result format and one certificate
 
-**Status:** proposed · **Design:** [`system-audit.md`](system-audit.md) · **Would affect:** every module's output (read, not rewritten), `core/credential/vc.py`, `web/`, a new `opaas audit`
+**Status:** accepted; phase S0 implemented (formats and extractors) · **Design:** [`system-audit.md`](system-audit.md) · **Would affect:** every module's output (read, not rewritten), `core/credential/vc.py`, `web/`, a new `opaas audit`
 
 Two audits of the same model on the same machine showed the seam the agent work left. `opaas run` produced a signed model certificate; `opaas smith run` with the model as a tool-using agent produced a document in another vocabulary (`behaviour`, `auditability`, `certifiable`), with "not measured" covering both a gap and something that does not apply, and no certificate. The deployment manifest (D52) lists such documents by hash, but nothing reads them as one result.
 
@@ -66,7 +66,7 @@ Two audits of the same model on the same machine showed the seam the agent work 
 
 **What would be lost:** the single-model certificate gains a components line and an auditability table reading *not applicable*; the measurement record and manifest become formats to version under `OPAAS_SPEC_VERSION`; reports before and after are compared by measurement, not by file; real systems get long certificates. Model certificates already issued keep verifying.
 
-Open points are listed in the design (§10). Implementation is phased S0–S4, formats first.
+Its five open points were settled on review and are recorded in the design (§10): observed vs declared per component, thresholds by component and by kind, `watch --system` over every component, scenario templates from the manifest, and MCP agents accepted by the manifest ahead of the adapter. Blocks A–E, bias and toxicity are kept as the behaviour axis of every model component (§3). Implementation is phased S0–S4, formats first.
 
 ---
 
