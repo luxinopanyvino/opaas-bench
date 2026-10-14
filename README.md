@@ -529,8 +529,15 @@ not the model or the agent, is the audited subject. Describe it in a `system.jso
 (purpose, components, flows) and check it with `opaas audit validate system.json`.
 `opaas audit extract report.json -c llm` reads any OPAAS document into the common
 measurement format, where every cell is *measured*, *not measured* or *not applicable*,
-each with its reason; the document itself is never rewritten. The orchestrated
-`opaas audit --system` and the system certificate come in the next phases.
+each with its reason; the document itself is never rewritten.
+
+`opaas audit run system.json -o out/` audits the whole system: it runs only what the
+manifest calls for (discover, bench per model, smith per agent, sentinel per proxy,
+inquest and swarm per record source) and writes `system-report.json`: every member by
+hash, declared vs observed composition, a components × dimensions coverage table, Q1–Q6,
+block E for the system's purpose, and your thresholds judged comply / violate /
+undecidable. Cite what you already have with `--member llm=report.json` instead of
+running it again. The system certificate comes in the next phase.
 
 ## What is measured
 
@@ -683,7 +690,8 @@ The ones you will actually reach for. Full list with `opaas run --help`.
 | `opaas swarm analyze` / `attribute` | Flow topology, per-edge figures, faults; attribution subgraph |
 | `opaas card build` / `manifest` | Auditability Card; deployment manifest |
 | `opaas evidence sign` / `verify` | Sign and verify any evidence document |
-| `opaas audit validate` / `extract` | Check a system manifest; read any document into measurements (D60, phase S0) |
+| `opaas audit run` | Audit a system from its manifest and write the system report (D60) |
+| `opaas audit validate` / `extract` | Check a system manifest; read any document into measurements (D60) |
 
 ## How verification works
 

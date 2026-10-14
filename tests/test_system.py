@@ -215,6 +215,7 @@ DOCUMENTS = {
         "Q6": {"dimension": "degradation", "text": "Degraded? More.", "answers": [],
                "notAnswered": "No degraded audit was supplied."}}},
     "deployment-manifest": {"kind": "deployment-manifest", "members": []},
+    "system-report": {"kind": "system-report", "measurements": []},
 }
 
 
@@ -233,7 +234,7 @@ def test_each_kind_reads_into_valid_measurements(kind):
     for measurement in extraction.measurements:
         check(measurement.to_record())  # every record satisfies the format
         assert measurement.source == {"kind": kind, "file": "f.json", "hash": "sha256:f"}
-    if kind in ("inventory", "deployment-manifest"):
+    if kind in ("inventory", "deployment-manifest", "system-report"):
         assert not extraction.measurements and extraction.notes
 
 

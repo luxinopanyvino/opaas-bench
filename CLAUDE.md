@@ -142,7 +142,8 @@ src/opaas/
 ├── inquest/            importers.py (sentinel, OTel GenAI, JSONL), audit.py (D48)
 ├── card/               auditability.py (Q1–Q6), manifest.py, render.py (D52)
 ├── system/             the system audit (D60): manifest.py (system manifest), measurement.py
-│                       (one cell, three statuses), extract.py (one extractor per document kind)
+│                       (one cell, three statuses), extract.py (one extractor per document kind),
+│                       report.py (system report, thresholds), orchestrate.py (`opaas audit run`)
 ├── adapters/           InferenceBackend ABC + vllm, ollama, openai_compatible
 ├── telemetry/          gpu (nvidia-smi), system (psutil), network, sampler
 ├── web/                Static site + badge generation, printable certificate (certificate.py),
@@ -153,7 +154,7 @@ src/opaas/
 docs/     design.md, methodology.md, decisions.md, workplan.md, datasets.md, key-custody.md,
           self-evaluation.md, implementation-plan.md, mitigation-plan.md,
           system-audit.md (proposal: the system as the audited subject, D60)
-tests/    882 tests, one file per module, plus conftest.py with the fake backends
+tests/    902 tests, one file per module, plus conftest.py with the fake backends
 scripts/  sprite_from_png.py — regenerates cli/_sprite_data.py from docs/img/mascot.png
 web/      README describing the published site layout (the generator lives in src/)
 ```
@@ -196,7 +197,7 @@ a round trip.
 
 ### Known test state
 
-`uv run pytest` reports **882 passed**. The suite is green: treat any failure as yours.
+`uv run pytest` reports **902 passed**. The suite is green: treat any failure as yours.
 Most of its wall time is `nvidia-smi` being called by the bench tests; on a machine without
 it the suite is much faster.
 

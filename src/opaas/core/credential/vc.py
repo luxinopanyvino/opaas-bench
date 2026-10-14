@@ -50,6 +50,9 @@ EVIDENCE_KINDS = (
     "sentinel-overhead",
     "auditability-card",
     "deployment-manifest",
+    #: The system audit's report (D60): every member by hash, the measurements read
+    #: from them, the composition declared and observed.
+    "system-report",
 )
 PROOF_TYPE = "DataIntegrityProof"
 CRYPTOSUITE = "eddsa-jcs-2022"

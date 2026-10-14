@@ -1,6 +1,6 @@
 # System audit: one subject, one result format, one certificate
 
-**Status:** accepted (D60). Phase S0 is implemented in `src/opaas/system/`; the phases in §11 say what follows.
+**Status:** accepted (D60). Phases S0 and S1 are implemented in `src/opaas/system/`; the phases in §11 say what follows.
 
 OPAAS was built in two halves. `bench` certifies a model deployment and has its own report, its own blocks A–E and its own certificate. The agent modules (`discover`, `smith`, `swarm`, `sentinel`, `inquest`, `card`) measure how auditable an agent deployment is, and each writes its own document in its own shape. The deployment manifest (D52) lists them by hash, but nothing turns them into one result a reader can take in, and there is no certificate for anything but a model.
 
@@ -187,19 +187,23 @@ On-prem systems often call something they do not run: a hosted embedding API, a 
 ## 7. One command
 
 ```bash
-opaas audit --system system.json --out runs/support/
+opaas audit run system.json --out runs/support/ --member llm=runs/certified/report.json
 ```
 
-It runs, in this order, only what the manifest calls for:
+It runs, in this order, only what the manifest calls for (implemented in S1):
 
 1. `discover scan` and `gaps`: inventory and the observed composition (everything else binds to it).
-2. `bench` for each `model` component.
-3. `smith` for each `agent` component, on the operator's scenarios plus the reference set.
-4. `swarm analyze` / `attribute` for each declared flow with records.
-5. `inquest audit` for each record source.
-6. `card build`, then the system report, then signing.
+2. `bench` (`opaas run`, every block unless `--bench-args` chooses) for each `model` component.
+3. `smith` for each `agent` component: the reference set, plus the operator's scenarios when the manifest names them. A `bare-model` agent takes its backend and model from its own fields or from the model it flows to. An MCP agent is recorded as *pending* until its adapter exists.
+4. `sentinel overhead` for each `proxy`.
+5. `inquest audit` for each record source, and again with every tenth record dropped, for Q6.
+6. `swarm analyze` against a topology built from the declared flows. A model is named by its model name, as records name a call's target; principals (users, services, schedules) may reach any declared agent or model.
 
-Each step writes its member document exactly as the module does today; `opaas audit` adds the system report on top. The module commands stay, for running one piece. `--only` and `--skip` run part of the plan; a skipped step leaves its cells *not measured*, with "skipped by the operator" as the reason.
+The card is not a separate step: Q1–Q6 are answered in the system report from its auditability cells.
+
+Each step writes its member document exactly as the module does today; `opaas audit run` adds the system report on top. A document the operator already has is cited with `--member component=path` and that step is not run again: a bench run takes hours, and the certified one is the one to cite. The module commands stay, for running one piece. `--only` and `--skip` run part of the plan; a skipped step leaves its cells *not measured*, with "skipped by the operator" as the reason, and a failed one says so and makes the command exit 1.
+
+**Thresholds** (`thresholds.json`): `{"byComponent": {id: {metric: rule}}, "byKind": {kind: {metric: rule}}}`, a rule being `{"min": x}`, `{"max": x}` (with `"stat": "p95"` for a distribution) or `{"in": [words]}` for a verdict. The metric is the cell's `metric`. Each matching cell gets the rule, its scope, and a verdict: comply or violate when the whole interval is on one side, undecidable when it straddles the bound or the cell is not measured (N1).
 
 ---
 
