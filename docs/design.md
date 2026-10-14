@@ -51,8 +51,9 @@ A format based on W3C Verifiable Credentials, designed to be verifiable without 
 
 **Public identifier (for badges/QR):**
 ```
-onpremialabs:cert:<model>:<short-config-hash>:<run-id>
-→ resolves at https://onpremialabs.com/cert/<id>
+<issuer-domain>:cert:<model>:<short-config-hash>:<run-id>
+→ e.g. onpremialabs.com:cert:… for a did:web:onpremialabs.com issuer
+→ opaas:cert:… when the issuer is a did:key, which names no domain (D58)
 ```
 
 Every certificate page shows: the methodology used, the evaluation dataset, the artifact hash, the expiry date, the detailed per-category report and a "verify signature" button.

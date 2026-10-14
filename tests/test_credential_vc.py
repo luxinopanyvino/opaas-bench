@@ -63,7 +63,9 @@ def test_credential_follows_the_designed_shape(keypair):
     assert credential["type"] == ["VerifiableCredential", "OpaasModelCertificate"]
     assert credential["issuer"] == ISSUER
     assert credential["id"] == "urn:opaas:cert:llama-3.3-70b-instruct:1a3c5e7f:20260806-001"
-    assert public_identifier(credential).startswith("onpremialabs:cert:")
+    assert public_identifier(credential) == (
+        "onpremialabs.com:cert:llama-3.3-70b-instruct:1a3c5e7f:20260806-001"
+    )
 
     subject = credential["credentialSubject"]
     assert subject["model"]["quantization"] == "GGUF Q4_K_M"
@@ -198,3 +200,11 @@ def test_without_any_anchor_it_refuses_rather_than_trusting_the_credential(tmp_p
     monkeypatch.setenv("OPAAS_ANCHOR_DIR", str(tmp_path / "empty"))
     with pytest.raises(TrustAnchorError, match="There is no trust anchor"):
         resolve_public_key("did:web:unknown.example")
+
+
+def test_a_self_issued_certificate_does_not_carry_onpremialabs_name():
+    """A did:key credential read "onpremialabs:cert:" on its badge, QR and heading (D58)."""
+    credential = {"id": "urn:opaas:cert:m:1a3c5e7f:20261014-001", "issuer": "did:key:z6Mkabc"}
+    assert public_identifier(credential) == "opaas:cert:m:1a3c5e7f:20261014-001"
+    credential["issuer"] = {"id": "did:web:audit.example.org%3A8443:certs"}
+    assert public_identifier(credential) == "audit.example.org:cert:m:1a3c5e7f:20261014-001"
