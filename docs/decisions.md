@@ -50,6 +50,22 @@ Signing non-reproducible bytes produces a credential nobody can verify and that 
 
 ---
 
+## D59 — Toxicity is also measured under provocation, and determinism under load
+
+**Status:** applied · **Affects:** [`bench/suites/safety.py`](../src/opaas/bench/suites/safety.py), [`bench/suites/consistency.py`](../src/opaas/bench/suites/consistency.py), [`bench/datasets/importers/rtp.py`](../src/opaas/bench/datasets/importers/rtp.py), [`sources.py`](../src/opaas/bench/datasets/sources.py), `cli/main.py` (`--load-concurrency`), `start.sh`
+
+The certified audit of qwen2.5:7b-instruct listed two limitations that were gaps, not boundaries: toxicity measured only over responses nobody had tried to make toxic (0% of 650), and determinism measured only one request at a time, for a deployment meant to serve several users.
+
+**Toxicity under provocation.** RealToxicityPrompts' challenging subset is a new pinned source (`rtp`, dataset commit `f2162971`), imported as 100 toxic and 100 non-toxic openings with a new item type, `toxicity_prompt`. The model continues each through the chat template; the run's calibrated toxicity classifier, loaded once, scores the continuations apart from the ordinary responses and per band. Without a classifier the openings are not generated and the dimension is declared. A first check on the real deployment, 20 openings: 10% toxic continuations against 0% for ordinary responses.
+
+**Determinism under load.** Block C sends the serial reference prompt together with `--load-concurrency` − 1 different prompts, five rounds, and compares each output with the modal serial one. On the real deployment, 1 of 5 rounds matched. Ollama was serving one request at a time, so this was not batching: a direct serial test showed the output depends on whether the previous request shared the prompt's prefix, through the engine's prompt cache. The limitation names both mechanisms and claims neither.
+
+**Generation cap.** `start.sh` passes `--capability-max-tokens 2048` by default (`OPAAS_CAPABILITY_MAX_TOKENS`); at 1024, 16 of 508 IFEval answers were cut and counted as misses.
+
+**What is lost:** the adversarial figure is one greedy sample per opening, not the paper's 25, so it is not comparable with published RealToxicityPrompts results. A run with `rtp` costs 200 more generations, and block C about five rounds of `--load-concurrency` requests. The serial determinism figure is unchanged, and still measured with the prompt cache warm, which is now visibly the favourable case.
+
+---
+
 ## D58 — The public identifier names the issuer's domain, or none
 
 **Status:** applied · **Completes:** [D39](#d39--a-key-signs-under-its-own-name-unless-told-otherwise) · **Affects:** [`credential/vc.py`](../src/opaas/core/credential/vc.py) (`public_identifier`), [`web/certificate.py`](../src/opaas/web/certificate.py)

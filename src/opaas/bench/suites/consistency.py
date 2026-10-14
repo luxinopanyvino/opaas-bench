@@ -2,7 +2,8 @@
 
 Three things, all about a single model:
 
-- **Determinism**: same seed and temperature, same output?
+- **Determinism**: same seed and temperature, same output? Serially, and
+  again with the same request sent among other users' requests (D59).
 - **Robustness**: empty prompts, malformed ones, ones with raw special tokens.
   What is measured is not the quality of the response but that the engine does
   not break or truncate silently.
@@ -18,6 +19,7 @@ from __future__ import annotations
 
 import re
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Any, ClassVar
 
@@ -50,6 +52,19 @@ _CONTROL_WORDS = 24
 #: it "silent truncation" here would prejudge the cause the token counts decide.
 _CANARY_LOST = "canary-lost"
 
+#: Other users' requests, sent alongside the reference one under load. They are
+#: different from it and from each other on purpose: what changes a batched
+#: output is the company it is batched with, and copies of itself are not that.
+_LOAD_COMPANIONS: tuple[str, ...] = (
+    "Explain in two sentences what a checksum is.",
+    "Write a short haiku about servers.",
+    "Name four uses of a relational database.",
+    "Summarise the purpose of an audit log in one paragraph.",
+    "Give three tips for writing clear error messages.",
+    "Describe a load balancer to a new engineer.",
+    "List the planets of the solar system in order.",
+)
+
 _CANARY = "OPAAS-CANARY-7Q42"
 _CANARY_PREFIX = f"The verification code is {_CANARY}. Memorize it.\n\n"
 _CANARY_SUFFIX = "\n\nRepeat exactly the verification code mentioned at the beginning."
@@ -70,6 +85,11 @@ class ConsistencyOptions:
     #: buffers — and comes out different from the rest often enough to turn a
     #: deterministic model into a "20% determinism" headline.
     determinism_warmup: int = 1
+    #: Simultaneous requests in each round of the under-load check: the
+    #: reference prompt plus concurrency - 1 different ones (D59).
+    determinism_concurrency: int = 4
+    #: Rounds of that check. Each yields one output of the reference prompt.
+    determinism_load_rounds: int = 5
     temperature: float = 0.0
     seed: int | None = 1234
     #: Prompt lengths, in words, for the context probe.
@@ -99,22 +119,48 @@ class ConsistencySuite(Suite):
         self.plan_steps(
             max(2, self.opts.determinism_repeats)
             + max(0, self.opts.determinism_warmup)
+            + max(0, self.opts.determinism_load_rounds)
             + len(_ROBUSTNESS_CASES)
             + 1
             + len(set(self.opts.context_probe_words)),
             "determinism",
         )
         determinism = self._measure_determinism(backend)
+        determinism["underLoad"] = self._measure_under_load(backend, determinism)
+        determinism.pop("modalOutput", None)
         robustness = self._measure_robustness(backend)
         context = self._probe_context(backend)
 
-        limitations = [
-            "Determinism is measured serially (one request at a time). With continuous "
-            "batching — vLLM and similar — the output can change depending on which other "
-            "requests yours is grouped with, even with the same seed: the order of "
-            "floating-point reductions changes. 100% here does not guarantee determinism "
-            "under concurrent load.",
-        ]
+        under_load = determinism["underLoad"]
+        if under_load.get("measured"):
+            limitations = [
+                f"Determinism under load is measured at {under_load['concurrency']} "
+                f"simultaneous requests over {under_load['rounds']} rounds: the reference "
+                "request sent among different ones, compared with its serial output. It covers "
+                "that level of load only: with continuous batching, other levels and other "
+                "companions can still change the output. An engine that queues requests instead "
+                "of batching "
+                "them (Ollama with OLLAMA_NUM_PARALLEL=1) serves them one at a time, and then "
+                "this measures the queue, not batching.",
+            ]
+            point = under_load["identicalToSerialRate"]["point"]
+            if point is not None and point < 1.0:
+                limitations.append(
+                    "The output is NOT stable under concurrent load: the same request, with the "
+                    f"same seed, matched its serial output in {under_load['matches']} of "
+                    f"{under_load['outputs']} rounds. What a user gets depends on who else is "
+                    "using the deployment at that moment: through batching, or through the "
+                    "engine's prompt cache, which computes a request differently when the one "
+                    "before it did not share its prefix."
+                )
+        else:
+            limitations = [
+                "Determinism is measured serially (one request at a time). With continuous "
+                "batching — vLLM and similar — the output can change depending on which other "
+                "requests yours is grouped with, even with the same seed: the order of "
+                "floating-point reductions changes. 100% here does not guarantee determinism "
+                f"under concurrent load, which was not measured: {under_load['reason']}",
+            ]
         if determinism["identicalRate"]["point"] is not None and (
             determinism["identicalRate"]["point"] < 1.0
         ):
@@ -220,7 +266,7 @@ class ConsistencySuite(Suite):
         # first as reference, four identical answers and one outlier score 20%
         # instead of 80%, and the outlier is precisely the one most likely to be
         # an artifact of the first request.
-        modal_count = max(Counter(outputs).values())
+        modal_output, modal_count = Counter(outputs).most_common(1)[0]
         return {
             "repeats": len(outputs),
             "warmupDiscarded": warmup,
@@ -232,7 +278,77 @@ class ConsistencySuite(Suite):
             "sampleLengths": sorted({len(text) for text in outputs}),
             "anchor": "modal",
             "errors": errors,
+            # The reference the under-load check compares against. Kept out of
+            # the report: it is a model response, and only its role matters.
+            "modalOutput": modal_output,
         }
+
+    def _measure_under_load(
+        self, backend: InferenceBackend, serial: dict[str, Any]
+    ) -> dict[str, Any]:
+        """The serial reference request again, this time among other users' requests (D59).
+
+        Serial determinism says nothing about a deployment several people use at
+        once: an engine that batches computes each request in the company of
+        others, and the order of floating-point reductions changes with it. Each
+        round sends the reference prompt together with concurrency - 1
+        different ones, and its output is compared with the modal serial one.
+        """
+        concurrency = self.opts.determinism_concurrency
+        rounds = max(0, self.opts.determinism_load_rounds)
+        if not backend.supports_concurrency:
+            return {"measured": False, "reason": "the backend serves one request at a time."}
+        if concurrency < 2 or rounds == 0:
+            return {"measured": False, "reason": "disabled for this run."}
+        reference = serial.get("modalOutput")
+        if reference is None:
+            return {"measured": False, "reason": "there is no serial output to compare with."}
+
+        outputs: list[str] = []
+        errors: list[str] = []
+        with ThreadPoolExecutor(max_workers=concurrency) as pool:
+            for attempt in range(1, rounds + 1):
+                self.step(0, detail=f"determinism under load · round {attempt}/{rounds}")
+                companions = [
+                    _LOAD_COMPANIONS[(attempt + n) % len(_LOAD_COMPANIONS)]
+                    for n in range(concurrency - 1)
+                ]
+                futures = [pool.submit(self._generate_determinism, backend)]
+                futures += [
+                    pool.submit(self._generate_companion, backend, prompt) for prompt in companions
+                ]
+                try:
+                    outputs.append(futures[0].result().text)
+                except Exception as exc:  # noqa: BLE001
+                    errors.append(f"{type(exc).__name__}: {exc}")
+                for future in futures[1:]:
+                    # A companion's failure does not void the round: only the
+                    # reference output is measured. It is recorded all the same.
+                    if (exc := future.exception()) is not None:
+                        errors.append(f"companion: {type(exc).__name__}: {exc}")
+                self.step()
+
+        matches = sum(1 for text in outputs if text == reference)
+        return {
+            "measured": True,
+            "concurrency": concurrency,
+            "rounds": rounds,
+            "outputs": len(outputs),
+            "matches": matches,
+            "identicalToSerialRate": wilson_interval(matches, len(outputs)),
+            "distinctOutputs": len(set(outputs)),
+            "firstDivergenceChar": _first_divergence([reference, *outputs]),
+            "errors": errors,
+        }
+
+    def _generate_companion(self, backend: InferenceBackend, prompt: str) -> Any:
+        return backend.generate(
+            prompt,
+            max_tokens=self.opts.determinism_max_tokens,
+            temperature=self.opts.temperature,
+            seed=self.opts.seed,
+            stream=backend.supports_streaming,
+        )
 
     def _generate_determinism(self, backend: InferenceBackend) -> Any:
         return backend.generate(

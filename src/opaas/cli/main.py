@@ -221,6 +221,15 @@ SuiteConcurrency = Annotated[
         "the result, only how long it takes — and only if the engine really serves them.",
     ),
 ]
+LoadConcurrency = Annotated[
+    int,
+    typer.Option(
+        "--load-concurrency",
+        help="Simultaneous requests in block C's determinism-under-load check: the reference "
+        "request plus different ones. Set it to the number of users you expect at once; 1 "
+        "skips the check and declares it unmeasured.",
+    ),
+]
 ApiKey = Annotated[
     str | None,
     typer.Option(
@@ -442,6 +451,7 @@ def run(
     num_ctx: NumCtx = None,
     max_concurrency: MaxConcurrency = None,
     suite_concurrency: SuiteConcurrency = 4,
+    load_concurrency: LoadConcurrency = 4,
     api_key: ApiKey = None,
     timeout_s: Timeout = 300.0,
     concurrency: Concurrency = "1,4,16",
@@ -521,6 +531,11 @@ def run(
             f"[red]--suite-concurrency must be greater than 0, received {suite_concurrency}.[/red]"
         )
         raise typer.Exit(code=2)
+    if load_concurrency <= 0:
+        err_console.print(
+            f"[red]--load-concurrency must be greater than 0, received {load_concurrency}.[/red]"
+        )
+        raise typer.Exit(code=2)
     if num_ctx is not None and num_ctx <= 0:
         err_console.print(f"[red]--num-ctx must be greater than 0, received {num_ctx}.[/red]")
         raise typer.Exit(code=2)
@@ -565,6 +580,7 @@ def run(
         },
         "consistency": {
             "context_probe_words": _parse_int_list(context_words, "--context-words"),
+            "determinism_concurrency": load_concurrency,
             "temperature": temperature,
             "seed": seed,
         },
@@ -1935,6 +1951,19 @@ def _print_consistency_table(metrics: dict[str, Any]) -> None:
             else ""
         ),
     )
+    under_load = determinism.get("underLoad") or {}
+    if under_load.get("measured"):
+        load_rate = under_load.get("identicalToSerialRate", {}).get("point")
+        table.add_row(
+            "determinism (under load)",
+            "—" if load_rate is None else f"{load_rate:.0%}",
+            f"{under_load.get('matches')}/{under_load.get('outputs')} rounds matched the serial "
+            f"output, {under_load.get('concurrency')} simultaneous requests per round",
+        )
+    elif under_load:
+        table.add_row(
+            "determinism (under load)", "not measured", _plain(under_load.get("reason"))
+        )
     handled = robustness.get("handledRate", {}).get("point")
     truncations = robustness.get("silentTruncations") or 0
     table.add_row(
@@ -2093,6 +2122,11 @@ def _print_safety_table(metrics: dict[str, Any]) -> None:
     for measure, label, key in (
         (metrics.get("faithfulness", {}), "faithfulness (classifier)", "faithfulRate"),
         (metrics.get("toxicity", {}), "toxicity (classifier)", "aboveThresholdRate"),
+        (
+            metrics.get("adversarialToxicity", {}),
+            "toxicity, provoked (RealToxicityPrompts)",
+            "aboveThresholdRate",
+        ),
     ):
         if not measure.get("available"):
             continue

@@ -449,12 +449,29 @@ def _consistency(metrics: dict[str, Any]) -> str:
     <tr><th>Determinism (serial)</th><td>{_rate(determinism.get("identicalRate"))}
         — {esc(determinism.get("distinctOutputs"))} distinct outputs across
         {esc(determinism.get("repeats"))} repetitions</td></tr>
+    {_under_load_row(determinism.get("underLoad") or {})}
     <tr><th>Robustness</th><td>{esc(robustness.get("handled"))} of
         {esc(robustness.get("evaluated"))} adverse prompts handled;
         {esc(robustness.get("silentTruncations"))} silent truncations</td></tr>
     <tr><th>Verified window</th><td>{esc(window_text)}</td></tr>
   </tbody>
 </table>"""
+
+
+def _under_load_row(under_load: dict[str, Any]) -> str:
+    """Absent from older reports, and then absent here too: not 'not measured'."""
+    if not under_load:
+        return ""
+    if not under_load.get("measured"):
+        value = _not_measured(under_load.get("reason"))
+    else:
+        value = (
+            f"{_rate(under_load.get('identicalToSerialRate'))} — "
+            f"{esc(under_load.get('matches'))} of {esc(under_load.get('outputs'))} rounds "
+            f"matched the serial output at {esc(under_load.get('concurrency'))} "
+            "simultaneous requests"
+        )
+    return f"<tr><th>Determinism (under load)</th><td>{value}</td></tr>"
 
 
 def _not_measured(reason: Any) -> str:
@@ -489,6 +506,14 @@ def _safety(metrics: dict[str, Any]) -> str:
         else:
             rows_data.append((label, _not_measured(measure.get("reason"))))
 
+    adversarial = metrics.get("adversarialToxicity") or {}
+    if adversarial.get("available"):
+        rows_data.append(
+            (
+                "Toxicity on provoking openings (RealToxicityPrompts, classifier)",
+                _rate(adversarial.get("aboveThresholdRate")),
+            )
+        )
     for entry in metrics.get("notImplemented", []):
         rows_data.append((entry["dimension"].capitalize(), _not_measured(entry["reason"])))
 

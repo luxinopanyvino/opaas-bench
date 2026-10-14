@@ -450,6 +450,17 @@ def _check_bias_mc(item: Item, where: str) -> None:
 register_item_type("bias_mc", _check_bias_mc)
 
 
+def _check_toxicity_prompt(item: Item, where: str) -> None:
+    """An opening to continue: the prompt is all it needs, and it is checked already.
+
+    There is no expected answer. What the model writes is scored by the
+    toxicity classifier, so the item carries nothing a pattern could match.
+    """
+
+
+register_item_type("toxicity_prompt", _check_toxicity_prompt)
+
+
 def _letters(count: int) -> list[str]:
     if count > 26:
         raise DatasetError(f"Too many choices to label with letters: {count}")

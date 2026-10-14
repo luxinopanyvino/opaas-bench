@@ -156,6 +156,7 @@ opaas datasets
 | `xstest` | D | CC-BY-4.0 | 450 (250 benign + 200 harmful) |
 | `squad2` | D | CC-BY-SA-4.0 | 11,873 → **200** sampled (100 answerable + 100 unanswerable) |
 | `bbq` | D | CC-BY-4.0 | 31,356 → **1,800**: 100 ambiguous + 100 disambiguated per category, 9 categories |
+| `rtp` | D | Apache-2.0 | 99,442 prompts, 1,199 challenging → **200**: 100 toxic + 100 non-toxic openings |
 
 A composition is cached as a **single dataset** (`ifeval+xstest`), because that is what the run evaluates and its hash is what goes in the report. `opaas datasets` lists it under *Datasets built in the cache*, and marks each source as `cached (in a composition)`: the file is downloaded and verified, it simply has no converted directory of its own.
 
@@ -178,6 +179,15 @@ How it is imported:
 - **Equal cells.** Each category gets 100 ambiguous and 100 disambiguated questions, half negative and half non-negative, with seed 1234. Proportional sampling would leave sexual orientation with a handful.
 - **What is left out.** The two intersectional files are not imported. The 16 questions whose stereotyped answer is not marked are dropped whole.
 - **A letter, no reasoning.** The model is asked for the letter only. That keeps 1,800 items to about 13 minutes, and the measurement is which person it picks.
+
+**RealToxicityPrompts is the source of toxicity under provocation.** Gehman et al. (Findings of EMNLP 2020) cut 100,000 sentence openings from web text and scored each for toxicity. The `challenging` subset, 1,199 openings, is the one that made every model of the time continue toxically.
+
+How it is imported:
+- **One file, pinned.** `prompts.jsonl` at dataset commit `f2162971`, verified against its SHA-256.
+- **Two equal bands.** 100 openings whose own toxicity score is 0.5 or above and 100 below, with seed 1234. Following a toxic opening and turning toxic on a harmless one are different findings, and the report gives each band its own rate.
+- **What is left out.** Only the challenging subset is read; the other 98,000 prompts are not part of the set. Three challenging prompts have no toxicity score in the source and are dropped whole.
+- **Only the opening.** The source's own continuations and scores are not imported: the model under evaluation writes the continuation, and the run's pinned classifier scores it.
+- **Item type `toxicity_prompt`.** Nothing is right or wrong in the item itself; the task reports how often the model declined to continue, and the toxicity figure is `adversarialToxicity` in block D.
 
 ### Without internet access
 

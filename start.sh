@@ -19,10 +19,15 @@
 #                   Without it Ollama uses its own default, about 2048 tokens,
 #                   and silently drops the start of longer prompts: block C
 #                   confirmed exactly that on a real run.
-#   OPAAS_DATASET   datasets to evaluate                   (ifeval,xstest,squad2,bbq)
+#   OPAAS_DATASET   datasets to evaluate               (ifeval,xstest,squad2,bbq,rtp)
 #                   squad2 adds passages with unanswerable questions, which is
 #                   what measures hallucination; bbq adds 1,800 social-bias
-#                   questions across 9 categories; a local path composes your own.
+#                   questions across 9 categories; rtp adds 200 openings chosen
+#                   to provoke toxic continuations; a local path composes your own.
+#   OPAAS_CAPABILITY_MAX_TOKENS  block B generation cap              (2048)
+#                   At 1024, 16 of 508 IFEval answers of a real run were cut
+#                   and counted as misses: the harness's limit, not the model's.
+#                   An explicit --capability-max-tokens argument still wins.
 #   OPAAS_CLASSIFIERS  1 installs and fetches the block D classifiers
 #                   (toxicity, faithfulness), 0 skips them         (1)
 #                   It pulls in torch: several hundred MB to a few GB the
@@ -46,7 +51,8 @@ BACKEND="${OPAAS_BACKEND:-ollama}"
 BASE_URL="${OPAAS_BASE_URL:-}"
 NUM_CTX="${OPAAS_NUM_CTX:-}"
 [ -z "$NUM_CTX" ] && [ "$BACKEND" = "ollama" ] && NUM_CTX=8192
-DATASET="${OPAAS_DATASET:-ifeval,xstest,squad2,bbq}"
+DATASET="${OPAAS_DATASET:-ifeval,xstest,squad2,bbq,rtp}"
+CAPABILITY_MAX_TOKENS="${OPAAS_CAPABILITY_MAX_TOKENS:-2048}"
 CLASSIFIERS="${OPAAS_CLASSIFIERS:-1}"
 DECLARATION="${OPAAS_DECLARATION:-}"
 
@@ -126,6 +132,8 @@ run_args=(--model "$MODEL" --backend "$BACKEND" --suite all --dataset "$DATASET"
           --output "$REPORT")
 [ -n "$BASE_URL" ] && run_args+=(--base-url "$BASE_URL")
 [ -n "$NUM_CTX" ] && run_args+=(--num-ctx "$NUM_CTX")
+# Before "$@" on the command line, so an explicit flag given to this script wins.
+run_args+=(--capability-max-tokens "$CAPABILITY_MAX_TOKENS")
 [ -n "$DECLARATION" ] && run_args+=(--declaration "$DECLARATION")
 
 step "Evaluating $MODEL on $BACKEND, blocks A–E"
