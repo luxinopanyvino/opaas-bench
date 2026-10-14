@@ -27,6 +27,10 @@
 #                   (toxicity, faithfulness), 0 skips them         (1)
 #                   It pulls in torch: several hundred MB to a few GB the
 #                   first time, depending on the platform.
+#   OPAAS_DECLARATION  block E compliance declaration (JSON)      (none)
+#                   Write it with `opaas compliance --out declaration.json`.
+#                   Without it, block E reports only what OPAAS probes itself
+#                   and records the documentary part as uncovered.
 #   OPAAS_KEY_PASSPHRASE  passphrase of the signing key; asked for if unset
 #
 # Any argument is passed through to `opaas run`, e.g.
@@ -44,6 +48,7 @@ NUM_CTX="${OPAAS_NUM_CTX:-}"
 [ -z "$NUM_CTX" ] && [ "$BACKEND" = "ollama" ] && NUM_CTX=8192
 DATASET="${OPAAS_DATASET:-ifeval,xstest,squad2,bbq}"
 CLASSIFIERS="${OPAAS_CLASSIFIERS:-1}"
+DECLARATION="${OPAAS_DECLARATION:-}"
 
 KEY_DIR="keys"
 PRIVATE_KEY="$KEY_DIR/opaas-root-ed25519.pem"
@@ -60,6 +65,10 @@ fail() { printf '\n\033[1;31mError:\033[0m %s\n' "$*" >&2; exit 1; }
 is_windows() {
     case "$(uname -s)" in MINGW* | MSYS* | CYGWIN*) return 0 ;; *) return 1 ;; esac
 }
+
+# A wrong path must stop the script here, not after the downloads and an hour
+# of evaluation, when `opaas run` would finally open it.
+[ -z "$DECLARATION" ] || [ -f "$DECLARATION" ]     || fail "OPAAS_DECLARATION points to '$DECLARATION', which does not exist. Fix the path, or unset it to run without a declaration."
 
 # --- uv ---------------------------------------------------------------------
 
@@ -117,6 +126,7 @@ run_args=(--model "$MODEL" --backend "$BACKEND" --suite all --dataset "$DATASET"
           --output "$REPORT")
 [ -n "$BASE_URL" ] && run_args+=(--base-url "$BASE_URL")
 [ -n "$NUM_CTX" ] && run_args+=(--num-ctx "$NUM_CTX")
+[ -n "$DECLARATION" ] && run_args+=(--declaration "$DECLARATION")
 
 step "Evaluating $MODEL on $BACKEND, blocks A–E"
 run_status=0

@@ -179,6 +179,7 @@ Everything is configurable through environment variables, and every argument is 
 | `OPAAS_NUM_CTX` | `8192` on Ollama | Context window to serve. Without it Ollama silently drops the start of long prompts |
 | `OPAAS_DATASET` | `ifeval,xstest,squad2,bbq` | Sources, or a local path to compose your own documents in |
 | `OPAAS_CLASSIFIERS` | `1` | `0` skips the classifiers and torch: toxicity and faithfulness are then declared unmeasured |
+| `OPAAS_DECLARATION` | none | Block E compliance declaration (JSON), written with `opaas compliance`. Without it only OPAAS's own probes are reported |
 | `OPAAS_KEY_PASSPHRASE` | asked for | Passphrase of the signing key |
 
 ```bash
