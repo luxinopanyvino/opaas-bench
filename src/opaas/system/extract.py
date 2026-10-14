@@ -629,6 +629,13 @@ def _deployment_manifest(document: dict[str, Any], cells: _Cells) -> None:
     )
 
 
+def _system_report(document: dict[str, Any], cells: _Cells) -> None:
+    cells.extraction.notes.append(
+        "A system report already holds its measurements, read from its own members: cite "
+        "it as a whole, not as a member of another system."
+    )
+
+
 EXTRACTORS: dict[str, Callable[[dict[str, Any], _Cells], None]] = {
     "model-report": _model_report,
     "smith-report": _smith_report,
@@ -639,6 +646,7 @@ EXTRACTORS: dict[str, Callable[[dict[str, Any], _Cells], None]] = {
     "inventory": _inventory,
     "auditability-card": _auditability_card,
     "deployment-manifest": _deployment_manifest,
+    "system-report": _system_report,
 }
 
 

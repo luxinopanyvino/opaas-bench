@@ -87,7 +87,7 @@ class ComplianceSuite(Suite):
             "egress": egress,
         }
 
-        items = [_declared_item(r, declaration) for r in DECLARED_REQUIREMENTS]
+        items = [declared_item(r, declaration) for r in DECLARED_REQUIREMENTS]
         items += [_probed_item(r, probes) for r in PROBED_REQUIREMENTS]
 
         if egress["status"] == "unknown":
@@ -163,7 +163,7 @@ def _probe_reasoning(backend: InferenceBackend) -> dict[str, Any]:
     }
 
 
-def _declared_item(requirement: Any, declaration: Declaration) -> dict[str, Any]:
+def declared_item(requirement: Any, declaration: Declaration) -> dict[str, Any]:
     declared = declaration.get(requirement.id)
     status = str(declared.get("status", "unknown"))
     evidence = declared.get("evidence") or None
@@ -313,4 +313,4 @@ def probe_egress(
     return payload
 
 
-__all__ = ["REQUIREMENTS", "ComplianceOptions", "ComplianceSuite", "probe_egress"]
+__all__ = ["REQUIREMENTS", "ComplianceOptions", "ComplianceSuite", "declared_item", "probe_egress"]
