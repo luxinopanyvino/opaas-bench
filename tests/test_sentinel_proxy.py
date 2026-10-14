@@ -208,3 +208,31 @@ def test_the_overhead_benchmark_reports_percentiles():
     assert result["overhead"]["count"] == 20
     assert result["overhead"]["p50"] is not None and result["overhead"]["p99"] >= 0
     assert "network hop" in result["excludes"]
+
+
+def test_a_configured_actor_chain_with_an_unknown_role_is_refused(tmp_path):
+    """A typo here made every action of the proxy's life unattributable."""
+    with pytest.raises(ValueError, match="unknown role"):
+        _proxy(tmp_path, actor_chain="service:opaas>app:demo")
+    with pytest.raises(ValueError, match="role:id"):
+        _proxy(tmp_path / "e", actor_chain="nobody")
+
+
+def test_a_header_chain_is_recorded_as_sent_even_when_incomplete(tmp_path):
+    proxy = _proxy(tmp_path)
+    _call(proxy, **{"X-OPAAS-Actor-Chain": "app:demo"})
+    assert _records(tmp_path)[0]["actorChain"] == [{"role": "app", "id": "demo"}]
+
+
+def test_a_polite_stop_exits_like_ctrl_c_so_the_log_is_sealed():
+    """SIGTERM used to kill the proxy before it sealed the tail of its log."""
+    import signal
+
+    from opaas.sentinel.proxy import _TERMINATE_SIGNALS, stop_on_terminate
+
+    before = {sig: signal.getsignal(sig) for sig in _TERMINATE_SIGNALS}
+    with stop_on_terminate():
+        for sig in _TERMINATE_SIGNALS:
+            with pytest.raises(KeyboardInterrupt):
+                signal.getsignal(sig)(sig, None)
+    assert {sig: signal.getsignal(sig) for sig in _TERMINATE_SIGNALS} == before

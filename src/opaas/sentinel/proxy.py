@@ -42,11 +42,13 @@ from __future__ import annotations
 
 import hashlib
 import json
+import signal
 import threading
 import time
 import uuid
 from collections import deque
 from collections.abc import Callable, Iterator, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Protocol
@@ -54,6 +56,7 @@ from typing import Any, Protocol
 import httpx
 
 from opaas.core.events import (
+    ACTOR_ROLES,
     PHASES,
     EventLog,
     parse_actor_chain,
@@ -186,7 +189,7 @@ class SentinelProxy:
         self.mode = mode
         self.keep = tuple(keep)
         self.keep_output = tuple(keep_output)
-        self.configured_chain = parse_actor_chain(actor_chain) if actor_chain else None
+        self.configured_chain = _configured_chain(actor_chain) if actor_chain else None
         self.queue = queue
         self.approval_timeout_s = approval_timeout_s
         self.faults = faults
@@ -532,10 +535,62 @@ def serve(proxy: SentinelProxy, host: str, port: int,
     if ready:
         ready(f"http://{host}:{server.server_address[1]}")
     try:
-        server.serve_forever()
+        with stop_on_terminate():
+            server.serve_forever()
     finally:
         server.server_close()
         proxy.close()
+
+
+#: Signals a service manager sends to stop a process: SIGTERM from `docker stop`
+#: and systemd, SIGBREAK from a Windows console close or service stop.
+_TERMINATE_SIGNALS = tuple(
+    getattr(signal, name) for name in ("SIGTERM", "SIGBREAK") if hasattr(signal, name)
+)
+
+
+@contextmanager
+def stop_on_terminate() -> Iterator[None]:
+    """Turns a polite stop into the same clean exit as Ctrl-C.
+
+    Python's default for SIGTERM is to die on the spot: no `finally`, so the
+    tail of the log was left unsealed and the overhead summary never written,
+    on exactly the stops a deployed sentinel gets. A kill that cannot be
+    caught (SIGKILL, TerminateProcess) still loses them; the unsealed tail is
+    then reported by `inquest`, not hidden.
+    """
+    if threading.current_thread() is not threading.main_thread():
+        yield  # handlers can only be installed from the main thread
+        return
+
+    def _interrupt(signum: int, frame: Any) -> None:
+        raise KeyboardInterrupt
+
+    previous = {sig: signal.signal(sig, _interrupt) for sig in _TERMINATE_SIGNALS}
+    try:
+        yield
+    finally:
+        for sig, handler in previous.items():
+            signal.signal(sig, handler)
+
+
+def _configured_chain(text: str) -> list[dict[str, str]]:
+    """The operator's --actor-chain, refused at start-up if it would never be complete.
+
+    A header chain is recorded as sent: a malformed one is the caller's
+    finding. A configured one is stamped on every request, so a typo in a role
+    silently made every action unattributable (AC) for the life of the proxy.
+    """
+    chain = parse_actor_chain(text)
+    unknown = sorted({hop["role"] for hop in chain} - set(ACTOR_ROLES))
+    if not chain or unknown:
+        what = f"unknown role(s) {', '.join(unknown)}" if unknown else "no role:id hop"
+        raise ValueError(
+            f"The actor chain '{text}' has {what}. Write it as role:id hops joined by '>', "
+            f"with roles from: {', '.join(ACTOR_ROLES)}."
+        )
+    return chain
+
 
 
 __all__ = [

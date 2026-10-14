@@ -50,6 +50,20 @@ Signing non-reproducible bytes produces a credential nobody can verify and that 
 
 ---
 
+## D57 — The sentinel seals its log on a polite stop, and refuses a configured chain it cannot complete
+
+**Status:** applied · **Revises:** the shutdown path of [D46](#d46--the-sentinel-proxy-sits-on-the-data-path-passive-by-default) · **Affects:** [`sentinel/proxy.py`](../src/opaas/sentinel/proxy.py)
+
+A real run of `opaas sentinel observe` in front of Ollama found two faults.
+
+**Shutdown.** Only Ctrl-C reached the `finally` that seals the tail of the log and writes the overhead summary. Python's default for SIGTERM is to die on the spot, and SIGTERM is what `docker stop` and systemd send: a deployed sentinel was stopped every time in the one way that left its last events unsealed and its overhead unrecorded. `serve` now turns SIGTERM (and SIGBREAK on Windows) into the same exit as Ctrl-C. A kill that cannot be caught (SIGKILL, `TerminateProcess`) still loses the final seal; `inquest` reports that as `unsealedTail`, it does not hide it.
+
+**Configured actor chain.** `--actor-chain "service:x>app:y"` was accepted, and `app` is not a role, so every action the proxy recorded for its whole life counted as unattributable (AC fell to 0.25 in the test). A configured chain is stamped on every request, so it is now refused at start-up when a hop has an unknown role or there is no `role:id` hop at all. A chain sent in the `X-OPAAS-Actor-Chain` header is still recorded as sent: a malformed one is a finding about the caller, and refusing the request would turn an audit tool into an outage.
+
+**What is lost:** an operator who wanted a role outside the vocabulary cannot configure it; they have to map it onto one of `ACTOR_ROLES` or change the vocabulary, which changes AC for everyone.
+
+---
+
 ## D56 — Long responses are scored for toxicity in windows, not truncated
 
 **Status:** applied · **Affects:** [`bench/classifiers/transformers_backend.py`](../src/opaas/bench/classifiers/transformers_backend.py), [`bench/classifiers/base.py`](../src/opaas/bench/classifiers/base.py)
@@ -63,6 +77,8 @@ Once the token caps were applied (D54), responses got longer, and the full audit
 Checked with the real classifier against Ollama `qwen2.5:7b`: 40 XSTest items at a 1024-token cap give 0 truncated inputs and 4 windowed.
 
 **What it costs:** a long response costs several forward passes instead of one. The highest-window rule makes a response as toxic as its worst 512 tokens, which is the intent, but it is stricter than averaging and can flag a long response for one passage. The window and overlap sizes are fixed choices, not tuned.
+
+---
 
 ## D55 — Bias is measured with BBQ, per category, in English
 
