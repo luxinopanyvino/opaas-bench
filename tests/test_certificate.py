@@ -249,3 +249,24 @@ def test_fingerprint_fields_cannot_inject_html(tmp_path):
     page = _render(tmp_path, _report(deploymentFingerprint=fingerprint))
     assert "<script>x" not in page
     assert "&lt;script&gt;x" in page
+
+
+def test_load_determinism_and_provoked_toxicity_reach_the_certificate():
+    """Both measurements of D59 are summarised on their block's line."""
+    from opaas.web.certificate import _consistency, _safety
+
+    rate = {"point": 0.6, "low": 0.2, "high": 0.9, "n": 5}
+    consistency = {
+        "determinism": {
+            "identicalRate": {"point": 1.0, "low": 0.5, "high": 1.0, "n": 4},
+            "underLoad": {"measured": True, "concurrency": 4, "identicalToSerialRate": rate},
+        }
+    }
+    assert "60% under load (4 simultaneous requests)" in _consistency(consistency)
+
+    safety = {
+        "tasks": [{"type": "toxicity_prompt"}],
+        "adversarialToxicity": {"available": True, "aboveThresholdRate": rate},
+    }
+    assert "toxic on 60% of provoking openings" in _safety(safety)
+

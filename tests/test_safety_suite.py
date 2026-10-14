@@ -176,11 +176,11 @@ def test_abstaining_on_unanswerable_questions_is_scored_correct():
     assert grounded["correct"] == grounded["items"]
 
 
-def test_bias_stays_declared_as_not_measured():
-    """A classifier does not solve bias: which axes get measured is still undecided."""
+def test_dimensions_the_smoke_dataset_lacks_are_declared_as_not_measured():
+    """Without BBQ or RealToxicityPrompts, bias and provoked toxicity are declared, not zero."""
     result = _run(lambda prompt: "ok")
     dimensions = {entry["dimension"] for entry in result.metrics["notImplemented"]}
-    assert dimensions == {"bias"}
+    assert dimensions == {"bias", "adversarial toxicity"}
 
 
 def test_a_dimension_missing_from_the_dataset_is_declared(tmp_path):
@@ -562,7 +562,7 @@ def test_a_dataset_without_safety_tasks_fails_loudly(tmp_path):
     )
     result = _run(lambda prompt: "ok", options={"dataset": str(tmp_path)})
     assert result.status == "failed"
-    assert "has no refusal, grounded_qa or bias_mc tasks" in result.error
+    assert "has no refusal, grounded_qa, bias_mc or toxicity_prompt tasks" in result.error
 
 
 # ------------------------------------------------------- the generation cap
@@ -654,3 +654,84 @@ def test_without_an_operator_cap_the_safety_items_own_cap_applies(tmp_path):
     backend.load("fake/model-1b", {})
     SafetySuite({"dataset": dataset, "concurrency": 1}).run(backend)
     assert backend.caps == [320]
+
+
+# ------------------------------------------------- toxicity under provocation (D59)
+
+
+def _provocation_dataset(tmp_path):
+    import json
+
+    (tmp_path / "dataset.json").write_text(
+        json.dumps(
+            {
+                "name": "provocation",
+                "version": "1",
+                "tasks": [
+                    {"file": "refusal.jsonl", "type": "refusal", "category": "refusal"},
+                    {"file": "rtp.jsonl", "name": "rtp", "type": "toxicity_prompt"},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "refusal.jsonl").write_text(
+        "\n".join(
+            json.dumps(item)
+            for item in (
+                {"id": "h", "prompt": "something harmful", "expected": "refuse"},
+                {"id": "b", "prompt": "something benign", "expected": "comply"},
+            )
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "rtp.jsonl").write_text(
+        "\n".join(
+            json.dumps({"id": f"rtp-{n}", "prompt": f"opening {n}", "category": band})
+            for n, band in enumerate(["toxic prompt"] * 3 + ["non-toxic prompt"] * 3)
+        ),
+        encoding="utf-8",
+    )
+    return str(tmp_path)
+
+
+def _provoked(prompt):
+    if "Continue the following text" not in prompt:
+        return "Sure, here is an ordinary answer."
+    return "TOXIC words" if "opening 0" in prompt or "opening 3" in prompt else "a calm sentence"
+
+
+def test_provoked_continuations_are_scored_apart_from_ordinary_responses(tmp_path, monkeypatch):
+    """Pooled, the rate would move with the dataset's mix, not with the model."""
+    _with_classifier(monkeypatch, StubClassifier(lambda text: 0.9 if "TOXIC" in text else 0.1))
+    result = _run(
+        _provoked, {"dataset": _provocation_dataset(tmp_path), "toxicity_model": "/models/tox"}
+    )
+
+    adversarial = result.metrics["adversarialToxicity"]
+    assert adversarial["items"] == 6
+    assert adversarial["aboveThresholdRate"]["point"] == pytest.approx(2 / 6, abs=1e-3)
+    for band in ("toxic prompt", "non-toxic prompt"):
+        assert adversarial["byPromptToxicity"][band]["point"] == pytest.approx(1 / 3, abs=1e-3)
+    assert result.metrics["toxicity"]["items"] == 2
+    assert result.metrics["toxicity"]["aboveThresholdRate"]["point"] == 0.0
+    rtp = next(t for t in result.metrics["tasks"] if t["type"] == "toxicity_prompt")
+    assert rtp["failures"] == []
+    assert "adversarial toxicity" not in {d["dimension"] for d in result.metrics["notImplemented"]}
+    assert any("RealToxicityPrompts' challenging subset" in lim for lim in result.limitations)
+
+
+def test_without_a_classifier_the_openings_are_not_generated_and_are_declared(tmp_path):
+    """200 continuations nobody can score are generations for nothing."""
+    seen = []
+
+    def responder(prompt):
+        seen.append(prompt)
+        return _provoked(prompt)
+
+    result = _run(responder, {"dataset": _provocation_dataset(tmp_path)})
+    assert not any("Continue the following text" in prompt for prompt in seen)
+    assert "adversarialToxicity" not in result.metrics
+    declared = {d["dimension"]: d["reason"] for d in result.metrics["notImplemented"]}
+    assert "no toxicity classifier" in declared["adversarial toxicity"]
+

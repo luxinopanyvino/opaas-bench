@@ -16,13 +16,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from opaas.bench.datasets.importers import bbq, ifeval, squad2, xstest
+from opaas.bench.datasets.importers import bbq, ifeval, rtp, squad2, xstest
 from opaas.bench.datasets.loader import stratified_sample as _stratified_sample
 
 ImporterError = ValueError
 
 #: Available importers: name → module.
-IMPORTERS = {"bbq": bbq, "ifeval": ifeval, "squad2": squad2, "xstest": xstest}
+IMPORTERS = {"bbq": bbq, "ifeval": ifeval, "rtp": rtp, "squad2": squad2, "xstest": xstest}
 
 #: Bumped when the manifest gains fields the report depends on. A cache written
 #: by an older version is re-imported instead of being served with the
@@ -230,6 +230,13 @@ def _notes(name: str, stats: Any, selected: int) -> list[str]:
             f"{stats.converted} questions converted across {len(stats.by_category)} "
             f"categories, {selected} selected. {stats.skipped} dropped for lacking the "
             "marked stereotyped answer."
+        )
+
+    if name == "rtp":
+        notes.append(
+            f"{stats.converted} challenging prompts converted of {stats.source_rows} in the "
+            f"file, {selected} selected. The model continues each one; the run's toxicity "
+            "classifier scores the continuation."
         )
 
     if name == "squad2":

@@ -177,13 +177,14 @@ Everything is configurable through environment variables, and every argument is 
 | `OPAAS_BACKEND` | `ollama` | `vllm`, `ollama` or `openai` |
 | `OPAAS_BASE_URL` | adapter's own | Server endpoint |
 | `OPAAS_NUM_CTX` | `8192` on Ollama | Context window to serve. Without it Ollama silently drops the start of long prompts |
-| `OPAAS_DATASET` | `ifeval,xstest,squad2,bbq` | Sources, or a local path to compose your own documents in |
+| `OPAAS_DATASET` | `ifeval,xstest,squad2,bbq,rtp` | Sources, or a local path to compose your own documents in |
+| `OPAAS_CAPABILITY_MAX_TOKENS` | `2048` | Block B generation cap. At 1024, a real run cut 16 of 508 IFEval answers and counted them as misses |
 | `OPAAS_CLASSIFIERS` | `1` | `0` skips the classifiers and torch: toxicity and faithfulness are then declared unmeasured |
 | `OPAAS_DECLARATION` | none | Block E compliance declaration (JSON), written with `opaas compliance`. Without it only OPAAS's own probes are reported |
 | `OPAAS_KEY_PASSPHRASE` | asked for | Passphrase of the signing key |
 
 ```bash
-OPAAS_MODEL=qwen2.5:7b-instruct ./start.sh --capability-max-tokens 1024 --safety-max-tokens 1024 --max-concurrency 1
+OPAAS_MODEL=qwen2.5:7b-instruct ./start.sh --safety-max-tokens 1024 --max-concurrency 1
 ```
 
 The first run downloads more than later ones. The datasets are a few MB. The classifiers are about 800 MB. torch weighs several hundred MB to a few GB, depending on the platform.
@@ -594,6 +595,8 @@ You fill in the declaration — traceability, license, provenance, AI Act risk c
 
 **`bbq` adds bias.** It is 1,800 questions from BBQ (CC BY 4.0), 200 per social category, answered with a letter (about 13 minutes on a laptop GPU). Add it with `--dataset ifeval,xstest,squad2,bbq`; `start.sh` does by default.
 
+**`rtp` adds toxicity under provocation.** It is 200 openings from RealToxicityPrompts' challenging subset (Apache-2.0), 100 whose own text is toxic and 100 whose text is not, each continued by the model and scored by the toxicity classifier. Without the classifier they are not generated, and the dimension is declared unmeasured. `start.sh` adds it by default.
+
 ```bash
 opaas datasets
 ```
@@ -626,6 +629,7 @@ The ones you will actually reach for. Full list with `opaas run --help`.
 | `--capability-max-tokens` | dataset's (IFEval: 700), else `400` | Token cap per block B instruction item; when set, it wins over the dataset's. Cut answers are counted and declared |
 | `--safety-max-tokens` | dataset's (XSTest: 320), else `320` | Token cap per block D item; when set, it wins over the dataset's. Cut answers are counted and declared |
 | `--suite-concurrency` | `4` | Parallel requests the harness sends while scoring blocks B and D |
+| `--load-concurrency` | `4` | Simultaneous requests in block C's determinism-under-load check. Set it to the users you expect at once; `1` skips it and declares it unmeasured |
 | `--dataset` | `ifeval,xstest` | Sources (`ifeval`, `xstest`, `squad2`), local paths, or `opaas-smoke` |
 | `--concurrency` | `1,4,16` | Block A concurrency levels |
 | `--prompt-words` | `128,1024` | Prompt lengths to sweep |
@@ -695,14 +699,14 @@ The transparency log is **not** Certificate Transparency: there are no Merkle tr
 Stated here as plainly as the report states it:
 
 - **Bias**, unless the dataset includes `bbq`. Even then it is bias in choosing between two people, in English and as stereotypes are understood in the United States: not bias in free-form writing, not combinations of attributes, not other cultural contexts.
-- **Toxicity**, unless the classifiers extra is installed — then it measures itself.
+- **Toxicity**, unless the classifiers extra is installed — then it measures itself. Toxicity *under provocation* also needs `rtp` in the dataset: 200 openings of RealToxicityPrompts' challenging subset, one greedy continuation each, not comparable with the paper's 25-sample figures.
 - **Faithfulness**, unless the classifiers extra is installed *and* the dataset carries `grounded_qa` items. Add `squad2`, or your own documents; `ifeval,xstest` alone provides none.
 - **Hallucination with a passage**, unless the dataset carries `grounded_qa` items (`squad2`, or your own documents). No classifier can substitute for the data. Scoring is literal: a correct paraphrase of the expected answer counts as omitting it.
 - **Model-generated code is not executed.** Without a sandbox, running it would be the tool's problem, not the model's.
 - **Whether an agent is safe.** The agent modules measure behaviour in the scenarios run and how auditable the deployment is. Semantic policies ("did it say something harmful") are out of scope: only structural predicates are decided, with no judge.
 - **ACR on existing records.** How much of what happened a log omits cannot be read from the log; only `smith`, which has ground truth, measures it.
 - **Agents reachable only over MCP.** The MCP agent adapter is not implemented yet.
-- **Determinism under load.** What is measured is serial determinism; with continuous batching the output depends on which other requests yours is batched with.
+- **Determinism under every load.** Block C repeats the reference request among `--load-concurrency` simultaneous ones (4 by default) and compares it with its serial output. Other levels of load, and other companions, can still change it.
 
 A run that skips blocks is certified as `evaluated-partial`. The report's `limitations` field is where all of this lands — nothing is quietly reported as a zero.
 

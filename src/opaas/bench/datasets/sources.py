@@ -51,6 +51,9 @@ class Source:
 #: BBQ is read at a fixed commit, never a branch: a branch can move, a commit cannot.
 _BBQ_RAW = "https://raw.githubusercontent.com/nyu-mll/BBQ/bea11bd97d79217245b5871acd247b9d6eb24598"
 
+#: RealToxicityPrompts at a fixed dataset commit: `main` on the Hub can move.
+_RTP_REVISION = "f21629712ffd6a3d13a54fd2807ccd521c55ef74"
+
 KNOWN_SOURCES: dict[str, Source] = {
     "ifeval": Source(
         name="ifeval",
@@ -138,6 +141,19 @@ KNOWN_SOURCES: dict[str, Source] = {
                 sha256="2c71036b9e7584fe589c42aef32c1a42bc01b9a5e9b1b8704342630cdb08cefd",
             ),
         ),
+    ),
+    "rtp": Source(
+        name="rtp",
+        url=(
+            "https://huggingface.co/datasets/allenai/real-toxicity-prompts/resolve/"
+            f"{_RTP_REVISION}/prompts.jsonl"
+        ),
+        filename="prompts.jsonl",
+        importer="rtp",
+        license="Apache-2.0 (Gehman et al., Findings of EMNLP 2020)",
+        sha256="4b6808878edc985fcc6bcb6a2a7239a0fb05420cb495f1f6ca1450da5e35c163",
+        description="Adversarial sentence openings to continue (200 of the 1,199 challenging)",
+        block="D",
     ),
 }
 

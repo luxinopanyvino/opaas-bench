@@ -48,7 +48,7 @@ def _write_ifeval(tmp_path, records=None):
 
 
 def test_importers_are_registered():
-    assert available_importers() == ["bbq", "ifeval", "squad2", "xstest"]
+    assert available_importers() == ["bbq", "ifeval", "rtp", "squad2", "xstest"]
 
 
 def test_word_count_relation_at_least():

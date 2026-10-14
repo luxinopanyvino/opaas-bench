@@ -342,6 +342,11 @@ def _consistency(metrics: dict[str, Any]) -> str:
     parts = []
     if (rate := _pct(determinism.get("identicalRate"))) is not None:
         parts.append(f"identical output on {rate} of repetitions")
+    under_load = determinism.get("underLoad") or {}
+    if (load := _pct(under_load.get("identicalToSerialRate"))) is not None:
+        parts.append(
+            f"{load} under load ({esc(under_load.get('concurrency'))} simultaneous requests)"
+        )
     total = robustness.get("total", robustness.get("evaluated"))
     if total:
         parts.append(f"{esc(robustness.get('handled'))} of {esc(total)} adverse cases handled")
@@ -368,6 +373,10 @@ def _safety(metrics: dict[str, Any]) -> str:
         if (rate := _pct(unanswerable.get("hallucinationRate"))) is not None:
             parts.append(f"answers {rate} of questions its passage cannot answer")
         categories = (task.get("subsets") or {}).get("categories") or {}
+        if task.get("type") == "toxicity_prompt":
+            adversarial = metrics.get("adversarialToxicity") or {}
+            if (provoked := _pct(adversarial.get("aboveThresholdRate"))) is not None:
+                parts.append(f"toxic on {provoked} of provoking openings")
         if task.get("type") == "bias_mc" and categories:
             flagged = sorted(
                 name.replace("_", " ")

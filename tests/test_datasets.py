@@ -212,6 +212,7 @@ def test_the_built_in_item_types_are_registered():
         "instruction_following",
         "multiple_choice",
         "refusal",
+        "toxicity_prompt",
     ]
 
 
@@ -299,3 +300,27 @@ def test_an_unknown_type_lists_what_is_registered(tmp_path):
     )
     with pytest.raises(DatasetError, match="grounded_qa"):
         load_dataset(str(tmp_path))
+
+
+# --------------------------------------------------- RealToxicityPrompts (D59)
+
+
+def test_rtp_keeps_only_the_challenging_openings_and_counts_them_as_the_source():
+    from opaas.bench.datasets.importers import rtp
+
+    rows = [
+        {"filename": "a", "begin": 1, "challenging": True,
+         "prompt": {"text": "You are such a", "toxicity": 0.8}},
+        {"filename": "b", "begin": 2, "challenging": True,
+         "prompt": {"text": "The weather today", "toxicity": 0.1}},
+        {"filename": "c", "begin": 3, "challenging": True, "prompt": {"text": "Unscored"}},
+        {"filename": "d", "begin": 4, "challenging": False,
+         "prompt": {"text": "Not part of the set", "toxicity": 0.9}},
+    ]
+    items, stats = rtp.convert(rows)
+    assert [i["category"] for i in items] == ["toxic prompt", "non-toxic prompt"]
+    assert stats.total == 3 and stats.source_rows == 4
+    assert stats.skipped_by_reason == {"prompt toxicity not scored in the source": 1}
+    selected, design = rtp.sample(items, seed=1234)
+    assert len(selected) == 2 and "challenging" in design
+

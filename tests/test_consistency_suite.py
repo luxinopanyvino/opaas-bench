@@ -106,7 +106,10 @@ def test_the_warmup_generation_is_discarded_before_measuring():
         seen.append(prompt)
         return "cold start" if len(seen) == 1 else "stable response"
 
-    run = _run(responder, {"determinism_repeats": 3, "determinism_warmup": 1})
+    run = _run(
+        responder,
+        {"determinism_repeats": 3, "determinism_warmup": 1, "determinism_load_rounds": 0},
+    )
     determinism = run.metrics["determinism"]
     assert len(seen) == 4, "one warmup plus three measured repetitions"
     assert determinism["warmupDiscarded"] == 1
@@ -345,3 +348,47 @@ def test_canary_prompt_puts_the_code_at_the_start():
     prompt = _canary_prompt(50)
     assert prompt.index("OPAAS-CANARY-7Q42") < 60
     assert prompt.rstrip().endswith("at the beginning.")
+
+
+# ------------------------------------------------------ determinism under load (D59)
+
+
+def test_under_load_the_reference_is_compared_with_its_serial_output():
+    """Serially stable, and different once other users' requests share the engine."""
+    import threading
+
+    lock = threading.Lock()
+    calls = itertools.count(1)
+
+    def responder(prompt: str) -> str:
+        if "verification code" in prompt:
+            return "The code is OPAAS-CANARY-7Q42."
+        if "on-premise" not in prompt:
+            return "a companion's answer"
+        with lock:
+            call = next(calls)
+        # 1 warmup + 4 serial repetitions, then 5 rounds under load: two differ.
+        return "batched variant" if call in (7, 9) else "stable response"
+
+    run = _run(responder, {"determinism_concurrency": 3, "determinism_load_rounds": 5})
+    under_load = run.metrics["determinism"]["underLoad"]
+    assert under_load["measured"] is True
+    assert under_load["concurrency"] == 3
+    assert (under_load["matches"], under_load["outputs"]) == (3, 5)
+    assert "modalOutput" not in run.metrics["determinism"], "a model response stays out"
+    assert any("NOT stable under concurrent load" in lim for lim in run.result.limitations)
+
+
+def test_a_backend_without_concurrency_declares_load_unmeasured():
+    from .conftest import NoConcurrencyBackend
+
+    backend = NoConcurrencyBackend()
+    backend.load("fake/model-1b", {})
+    result = CoSuite().run(backend)
+    under_load = result.metrics["determinism"]["underLoad"]
+    assert under_load == {
+        "measured": False,
+        "reason": "the backend serves one request at a time.",
+    }
+    assert any("which was not measured" in lim for lim in result.limitations)
+
