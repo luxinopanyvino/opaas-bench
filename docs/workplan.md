@@ -194,6 +194,7 @@ This is the paper's missing end-to-end audit. The ground truth comes from instru
 | **5. swarm** | Topology declared against observed; delegation attribution; scripted fault injection | 2, 3 | L |
 | **6. card** | Auto-generated Auditability Card; multi-model, multi-agent deployment certificate | all | M |
 | **7. sentinel gate** | Allow, block or pending with an approval queue (opt-in) | 3 | M |
+| **8. System audit** (proposed, D60) | The system as the audited subject; one measurement format for every suite; `opaas audit`; one system certificate. Phases S0–S4 in [`system-audit.md`](system-audit.md) | all | L |
 
 ### Status
 
@@ -207,6 +208,7 @@ This is the paper's missing end-to-end audit. The ground truth comes from instru
 | **5. swarm** | Declared vs observed topology with wildcards. Trace-subgraph attribution. Counter-based fault plans injected by the proxy. Contained, cascaded and unrecovered outcomes, with lifecycle visibility. Per-edge latency, errors and tokens (D51). | — |
 | **6. card** | Q1–Q6 from evidence, every answer citing file and hash. Q6 measured from degraded audits. Deployment manifest checking one environment. Printable rendering (D52). | The designed visual sheet drafted in `runs/mockup/`. |
 | **7. sentinel gate** | Block, or hold for a named approver through a directory queue. Undecidable actions are held. Approvals recorded as attributable events (D50). | Notification of approvers. |
+| **8. System audit** | Proposal only: [`system-audit.md`](system-audit.md) (D60). | Everything: not started. |
 
 **Open questions (§6), as settled:** 1 — `observe` changes nothing and `gate` is opt-in (D46, D50). 2 — digests by default, the operator adds fields with `--keep` and declares retention on the card; whether a third party may require fields stays open. 3 — yes: a report on reference scenarios alone is `certifiable: false` (D47). 4 — open, listed under the undecided items in `decisions.md`.
 
