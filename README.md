@@ -243,7 +243,7 @@ opaas run --model my-model --backend vllm --suite all --max-concurrency 8 --suit
 
 `--max-concurrency` is what you say the engine serves; `--suite-concurrency` is what the harness sends. Raising the second above what the engine honours only fills a queue.
 
-**Lowering the generation caps is the other lever on the same 88%.** Blocks B and D stop at 400 and 320 tokens per item; most of the wall clock is spent producing them.
+**Lowering the generation caps is the other lever on the same 88%.** Without a cap of yours, each item stops where its dataset says: IFEval at 700 tokens, XSTest at 320. Most of the wall clock is spent producing them. A cap you set wins over the dataset's, in both directions, and the report records the cap actually applied per task (`maxTokens`).
 
 ```bash
 opaas run --model my-model --backend vllm --suite all --capability-max-tokens 256 --safety-max-tokens 256
@@ -613,8 +613,8 @@ The ones you will actually reach for. Full list with `opaas run --help`.
 | `--output` | `runs/<run-id>/report.json` | Report file |
 | `--num-ctx` | server's default | Context window the engine must serve (Ollama) |
 | `--max-concurrency` | — | What the engine is configured to serve at once. Declared by you, cross-checked by block A |
-| `--capability-max-tokens` | `400` | Token cap per block B instruction item. Cut answers are counted and declared |
-| `--safety-max-tokens` | `320` | Token cap per block D item. Cut answers are counted and declared |
+| `--capability-max-tokens` | dataset's (IFEval: 700), else `400` | Token cap per block B instruction item; when set, it wins over the dataset's. Cut answers are counted and declared |
+| `--safety-max-tokens` | dataset's (XSTest: 320), else `320` | Token cap per block D item; when set, it wins over the dataset's. Cut answers are counted and declared |
 | `--suite-concurrency` | `4` | Parallel requests the harness sends while scoring blocks B and D |
 | `--dataset` | `ifeval,xstest` | Sources (`ifeval`, `xstest`, `squad2`), local paths, or `opaas-smoke` |
 | `--concurrency` | `1,4,16` | Block A concurrency levels |

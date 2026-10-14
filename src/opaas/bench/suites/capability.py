@@ -42,6 +42,8 @@ _RESPONSE_EXCERPT = 240
 #: cut off right before the conclusion, which is the worst possible error: it
 #: looks like a model failure.
 _CHOICE_TOKENS = {"direct": 24, "cot": 512}
+#: Instruction-following cap when neither the operator nor the item sets one.
+DEFAULT_INSTRUCTION_MAX_TOKENS = 400
 
 
 @dataclass(slots=True)
@@ -56,7 +58,10 @@ class CapabilityOptions:
     #: 'cot' allows reasoning before answering; 'direct' demands the bare letter.
     answer_style: str = "cot"
     choice_max_tokens: int | None = None
-    instruction_max_tokens: int = 400
+    #: The operator's cap (--capability-max-tokens). When set it wins over the
+    #: cap an importer wrote into each item; unset, the item's cap applies, then
+    #: DEFAULT_INSTRUCTION_MAX_TOKENS (D54).
+    instruction_max_tokens: int | None = None
     temperature: float = 0.0
     seed: int | None = 1234
     concurrency: int = 4
@@ -217,6 +222,9 @@ class CapabilitySuite(Suite):
             "accuracy": wilson_interval(correct, len(scored)),
             "unparsed": unparsed,
             "truncated": sum(1 for o in scored if o.truncated),
+            # The caps actually applied, so the report states what was used
+            # rather than what was asked for (D54).
+            "maxTokens": sorted({self._cap(item) for item in task.items}),
             "errors": len(outcomes) - len(scored),
             "extractionStrategies": strategies,
             "failures": [
@@ -235,13 +243,32 @@ class CapabilitySuite(Suite):
             result["constraintBreakdown"] = _constraint_breakdown(scored)
         return result
 
+    def _cap(self, item: Item) -> int:
+        if item.type == "multiple_choice":
+            return item.max_tokens or int(self.opts.choice_max_tokens or 0)
+        return self._instruction_cap(item)
+
+    def _instruction_cap(self, item: Item) -> int:
+        """Operator first, then the item, then the default (D54).
+
+        It used to be the item first. IFEval items carry 700, so
+        --capability-max-tokens 1024 was recorded in the report and never
+        applied, and the truncation warning told the operator to raise a flag
+        that changed nothing.
+        """
+        return (
+            self.opts.instruction_max_tokens
+            or item.max_tokens
+            or DEFAULT_INSTRUCTION_MAX_TOKENS
+        )
+
     def _evaluate_item(self, backend: InferenceBackend, item: Item) -> _Outcome:
         if item.type == "multiple_choice":
             prompt = render_multiple_choice(item.prompt, item.choices, self.opts.answer_style)
-            max_tokens = item.max_tokens or self.opts.choice_max_tokens
+            max_tokens = self._cap(item)
         else:
             prompt = render_instruction(item.prompt)
-            max_tokens = item.max_tokens or self.opts.instruction_max_tokens
+            max_tokens = self._instruction_cap(item)
 
         try:
             result = backend.generate(
