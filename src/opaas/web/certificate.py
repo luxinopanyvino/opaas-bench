@@ -32,6 +32,7 @@ import segno
 
 from opaas.core.credential.vc import public_identifier
 from opaas.core.hashing import short_hash
+from opaas.core.report import describe_scored_dataset
 from opaas.web.site import Entry, SiteError, esc, quantization_html
 
 #: The design blocks, in the order a reader expects them. Duplicated from
@@ -326,8 +327,12 @@ def _capability(metrics: dict[str, Any]) -> str:
     shown = ", ".join(scored[:_MAX_CATEGORIES])
     if len(scored) > _MAX_CATEGORIES:
         shown += f", and {len(scored) - _MAX_CATEGORIES} more categories"
-    name = " ".join(str(dataset.get(k)) for k in ("name", "version") if dataset.get(k))
-    return f"Accuracy on {esc(name or 'the dataset')}: {shown}"
+    # Only the tasks block B scored: a composed dataset's name read as if the
+    # score covered BBQ, SQuAD and XSTest too. A lone dataset keeps its version.
+    name = describe_scored_dataset(metrics)
+    if name == dataset.get("name") and dataset.get("version"):
+        name = f"{name} {dataset['version']}"
+    return f"Accuracy on {esc(name)}: {shown}"
 
 
 def _consistency(metrics: dict[str, Any]) -> str:

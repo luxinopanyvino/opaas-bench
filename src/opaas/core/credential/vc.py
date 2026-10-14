@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
+from urllib.parse import unquote
 
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import (
@@ -186,8 +187,27 @@ def credential_id(report: dict[str, Any]) -> str:
 
 
 def public_identifier(credential: dict[str, Any]) -> str:
-    """Short identifier for badges and QR codes."""
-    return str(credential.get("id", "")).replace("urn:opaas:cert:", "onpremialabs:cert:")
+    """Short identifier for badges, QR codes and the certificate's heading (D58).
+
+    It is prefixed with the issuer's domain when the issuer is a `did:web`,
+    and with the neutral `opaas:` otherwise. It used to read
+    `onpremialabs:cert:` for every credential, so a certificate self-issued
+    under a `did:key` said onpremIALabs had issued it: the name D39 removed
+    from the issuer field had survived in the identifier.
+    """
+    suffix = str(credential.get("id", "")).removeprefix("urn:opaas:cert:")
+    return f"{_issuer_domain(credential) or 'opaas'}:cert:{suffix}"
+
+
+def _issuer_domain(credential: dict[str, Any]) -> str | None:
+    issuer = credential.get("issuer")
+    if isinstance(issuer, dict):
+        issuer = issuer.get("id")
+    if not isinstance(issuer, str) or not issuer.startswith("did:web:"):
+        return None
+    # did:web:example.com:path encodes a port as %3A; only the host names the issuer.
+    host = issuer.removeprefix("did:web:").split(":", 1)[0]
+    return unquote(host).split(":", 1)[0].lower() or None
 
 
 # ----------------------------------------------------------------------- signing

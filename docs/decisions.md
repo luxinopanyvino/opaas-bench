@@ -50,6 +50,20 @@ Signing non-reproducible bytes produces a credential nobody can verify and that 
 
 ---
 
+## D58 — The public identifier names the issuer's domain, or none
+
+**Status:** applied · **Completes:** [D39](#d39--a-key-signs-under-its-own-name-unless-told-otherwise) · **Affects:** [`credential/vc.py`](../src/opaas/core/credential/vc.py) (`public_identifier`), [`web/certificate.py`](../src/opaas/web/certificate.py)
+
+D39 stopped every key from signing as `did:web:onpremialabs.com`. The short identifier printed on the certificate's heading, the badge and the QR code kept the name anyway: `public_identifier` turned every `urn:opaas:cert:…` into `onpremialabs:cert:…`, whoever had signed. The first certificate self-issued under a `did:key` read *onpremialabs:cert:qwen2.5-7b-instruct:…* at the top of the page, a claim nobody had made.
+
+**Now:** the prefix is the issuer's host when the issuer is a `did:web` (`onpremialabs.com:cert:…`, `audit.example.org:cert:…`; a port or path is dropped), and the neutral `opaas:cert:…` otherwise. The identifier is not part of the signed credential (its `id` stays `urn:opaas:cert:…`), so existing credentials keep verifying and only their renderings change.
+
+The same review found the certificate's block B line naming the whole composed dataset (*Accuracy on bbq+ifeval+squad2+xstest*); it now uses the scored-task label the CLI and the site already use.
+
+**What is lost:** onpremIALabs' own identifiers become `onpremialabs.com:cert:…` rather than the shorter `onpremialabs:cert:…` the design sketched. No production credential had been issued under the old form.
+
+---
+
 ## D57 — The sentinel seals its log on a polite stop, and refuses a configured chain it cannot complete
 
 **Status:** applied · **Revises:** the shutdown path of [D46](#d46--the-sentinel-proxy-sits-on-the-data-path-passive-by-default) · **Affects:** [`sentinel/proxy.py`](../src/opaas/sentinel/proxy.py)
