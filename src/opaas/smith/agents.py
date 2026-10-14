@@ -297,6 +297,16 @@ def available_agents() -> list[str]:
     return sorted(_REGISTRY)
 
 
+def agent_keeps_record(name: str | None) -> bool | None:
+    """Whether the named adapter's agent keeps a record of its own; None if unknown.
+
+    The system audit reads a smith report's auditability as *not applicable*
+    when it is False: OPAAS ran that loop, and its record is OPAAS's (D60).
+    """
+    adapter = _REGISTRY.get(name or "")
+    return None if adapter is None else adapter.keeps_record
+
+
 __all__ = [
     "PROTOCOL",
     "AgentAdapter",
@@ -304,6 +314,7 @@ __all__ = [
     "AgentRun",
     "BareModelAgent",
     "HttpAgent",
+    "agent_keeps_record",
     "available_agents",
     "parse_reply",
 ]
