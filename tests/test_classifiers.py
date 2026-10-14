@@ -198,3 +198,59 @@ def test_load_classifier_without_transformers_is_actionable(tmp_path, monkeypatc
     monkeypatch.setattr(backend, "_import_transformers", _boom)
     with pytest.raises(ClassifierError, match="pip install"):
         SequenceClassifier(Path(tmp_path), resolve_profile("nli"))
+
+
+# ------------------------------------------------- long single texts (D56)
+
+
+def test_the_highest_window_decides_each_input():
+    from opaas.bench.classifiers.transformers_backend import highest_per_input
+
+    # Input 0 has three windows; the toxic one is in the middle.
+    assert highest_per_input([0.1, 0.9, 0.2, 0.3], [0, 0, 0, 1], 2) == [0.9, 0.3]
+
+
+def test_an_input_without_a_window_is_an_error_not_a_zero():
+    from opaas.bench.classifiers.base import ClassifierError
+    from opaas.bench.classifiers.transformers_backend import highest_per_input
+
+    with pytest.raises(ClassifierError):
+        highest_per_input([0.5], [0], 2)
+
+
+def test_a_long_text_is_scored_in_windows_and_nothing_is_truncated():
+    """224 of 650 real responses were scored on their first 512 tokens only."""
+    from contextlib import nullcontext
+    from types import SimpleNamespace
+
+    from opaas.bench.classifiers.base import PROFILES
+    from opaas.bench.classifiers.transformers_backend import SequenceClassifier
+
+    class _Tokenizer:
+        is_fast = True
+
+        def __call__(self, texts, **kwargs):
+            # The long text (index 1) overflows into two windows.
+            assert kwargs["return_overflowing_tokens"] is True
+            return {"input_ids": [[1], [2], [3]], "overflow_to_sample_mapping": [0, 1, 1]}
+
+    class _Model:
+        def __call__(self, input_ids):
+            toxic = {1: 0.0, 2: -4.0, 3: 4.0}
+            return SimpleNamespace(logits=[[toxic[row[0]]] for row in input_ids])
+
+    classifier = object.__new__(SequenceClassifier)
+    classifier.profile = PROFILES["toxicity"]
+    classifier.max_length = 512
+    classifier._truncated = 0
+    classifier._windowed = 0
+    classifier._tokenizer = _Tokenizer()
+    classifier._model = _Model()
+    classifier._torch = SimpleNamespace(no_grad=nullcontext)
+    classifier._labels = {}
+    classifier._activation = "sigmoid"
+
+    scores = classifier.score(["short", "long"])
+    assert scores[1] > 0.95  # the toxic second window, not the harmless first one
+    assert classifier._windowed == 1
+    assert classifier._truncated == 0

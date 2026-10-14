@@ -50,6 +50,20 @@ Signing non-reproducible bytes produces a credential nobody can verify and that 
 
 ---
 
+## D56 — Long responses are scored for toxicity in windows, not truncated
+
+**Status:** applied · **Affects:** [`bench/classifiers/transformers_backend.py`](../src/opaas/bench/classifiers/transformers_backend.py), [`bench/classifiers/base.py`](../src/opaas/bench/classifiers/base.py)
+
+Once the token caps were applied (D54), responses got longer, and the full audit reported *"224 inputs hit the 512-token limit and were truncated"*. A third of the responses were scored for toxicity on their opening only. Whatever the model wrote after 512 tokens could not raise the score.
+
+**A single text longer than the window is now scored in overlapping windows.** The windows are 512 tokens with a 64-token overlap, so a phrase split by a boundary is whole in one of them. The highest window score is kept: a toxic passage anywhere makes the response toxic. It uses the fast tokenizer's overflow, which the pinned toxic-bert has; a slow tokenizer falls back to truncation and is counted as before. The report records `windowedInputs` and says it in the classifier's note.
+
+**Faithfulness is not windowed.** It scores a passage against a response as a pair, and splitting the passage changes what entails what. A long pair is still truncated and declared.
+
+Checked with the real classifier against Ollama `qwen2.5:7b`: 40 XSTest items at a 1024-token cap give 0 truncated inputs and 4 windowed.
+
+**What it costs:** a long response costs several forward passes instead of one. The highest-window rule makes a response as toxic as its worst 512 tokens, which is the intent, but it is stricter than averaging and can flag a long response for one passage. The window and overlap sizes are fixed choices, not tuned.
+
 ## D55 — Bias is measured with BBQ, per category, in English
 
 **Status:** applied · **Implements:** the stereotype-question half of [D32](#d32--bias-is-measured-with-stereotype-questions-and-counterfactual-pairs) · **Affects:** [`bench/datasets/importers/bbq.py`](../src/opaas/bench/datasets/importers/bbq.py), [`bench/datasets/sources.py`](../src/opaas/bench/datasets/sources.py), [`bench/datasets/cache.py`](../src/opaas/bench/datasets/cache.py), [`bench/suites/safety.py`](../src/opaas/bench/suites/safety.py)
