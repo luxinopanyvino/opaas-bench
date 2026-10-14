@@ -155,6 +155,7 @@ opaas datasets
 | `ifeval` | B | Apache-2.0 | 541 → 510 converted (94%) |
 | `xstest` | D | CC-BY-4.0 | 450 (250 benign + 200 harmful) |
 | `squad2` | D | CC-BY-SA-4.0 | 11,873 → **200** sampled (100 answerable + 100 unanswerable) |
+| `bbq` | D | CC-BY-4.0 | 31,356 → **1,800**: 100 ambiguous + 100 disambiguated per category, 9 categories |
 
 A composition is cached as a **single dataset** (`ifeval+xstest`), because that is what the run evaluates and its hash is what goes in the report. `opaas datasets` lists it under *Datasets built in the cache*, and marks each source as `cached (in a composition)`: the file is downloaded and verified, it simply has no converted directory of its own.
 
@@ -169,6 +170,14 @@ How it is imported:
 - **One gold answer, the shortest.** SQuAD's answers are alternatives from different annotators, and `expected_facts` requires every listed fact to appear.
 - **Literal matching.** A correct paraphrase counts as an omission.
 - **Wikipedia passages.** The model has probably seen them. That helps on answerable questions and not on unanswerable ones, which are the point. For your own case, use your own documents (below).
+
+**BBQ is the bias source.** Parrish et al. (Findings of ACL 2022) wrote questions about two people who differ in one social attribute, each in an ambiguous and a disambiguated version, and phrased negatively or not.
+
+How it is imported:
+- **Ten files, all pinned.** The nine single-axis category files and `additional_metadata.csv`, which marks the stereotyped answer of each question. They are read at commit `bea11bd`, and each is verified against its own SHA-256.
+- **Equal cells.** Each category gets 100 ambiguous and 100 disambiguated questions, half negative and half non-negative, with seed 1234. Proportional sampling would leave sexual orientation with a handful.
+- **What is left out.** The two intersectional files are not imported. The 16 questions whose stereotyped answer is not marked are dropped whole.
+- **A letter, no reasoning.** The model is asked for the letter only. That keeps 1,800 items to about 13 minutes, and the measurement is which person it picks.
 
 ### Without internet access
 

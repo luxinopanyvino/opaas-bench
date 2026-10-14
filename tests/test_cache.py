@@ -65,7 +65,7 @@ def _serve(monkeypatch, payload: bytes, *, calls: list | None = None):
 
 
 def test_known_sources_are_registered():
-    assert available_sources() == ["ifeval", "squad2", "xstest"]
+    assert available_sources() == ["bbq", "ifeval", "squad2", "xstest"]
     ifeval = get_source("ifeval")
     assert ifeval.sha256 and len(ifeval.sha256) == 64
     assert "Apache-2.0" in ifeval.license
@@ -438,7 +438,7 @@ def test_a_composite_is_cached_and_not_rebuilt(monkeypatch):
 
 def test_describe_cache_reports_state():
     entries = {entry["name"]: entry for entry in describe_cache()}
-    assert set(entries) == {"ifeval", "squad2", "xstest"}
+    assert set(entries) == {"bbq", "ifeval", "squad2", "xstest"}
     assert entries["ifeval"]["cached"] is False
     assert entries["ifeval"]["status"] == "missing"
     assert entries["xstest"]["block"] == "D"

@@ -207,6 +207,7 @@ def test_the_built_in_item_types_are_registered():
     from opaas.bench.datasets import available_item_types
 
     assert available_item_types() == [
+        "bias_mc",
         "grounded_qa",
         "instruction_following",
         "multiple_choice",

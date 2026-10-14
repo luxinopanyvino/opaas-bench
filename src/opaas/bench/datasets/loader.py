@@ -79,6 +79,14 @@ class Item:
     #: is then to abstain, and answering anyway is hallucinating.
     answerable: bool = True
     expected_facts: list[str] = field(default_factory=list)
+    #: `bias_mc`: the letter of the "cannot be determined" option, the letter
+    #: of the answer the stereotype points at, whether the question is phrased
+    #: negatively ("who was bad at…") or not, and whether the context gives the
+    #: answer away ("disambig") or does not ("ambig"). See importers/bbq.py.
+    unknown: str | None = None
+    target: str | None = None
+    polarity: str | None = None
+    condition: str | None = None
 
 
 @dataclass(slots=True)
@@ -371,6 +379,10 @@ def _build_item(
         context=str(raw["context"]) if raw.get("context") is not None else None,
         answerable=bool(raw.get("answerable", True)),
         expected_facts=[str(fact) for fact in raw.get("expected_facts", [])],
+        unknown=str(raw["unknown"]) if raw.get("unknown") is not None else None,
+        target=str(raw["target"]) if raw.get("target") is not None else None,
+        polarity=str(raw["polarity"]) if raw.get("polarity") is not None else None,
+        condition=str(raw["condition"]) if raw.get("condition") is not None else None,
     )
 
     _ITEM_TYPES[item_type](item, where)
@@ -417,6 +429,25 @@ register_item_type("multiple_choice", _check_multiple_choice)
 register_item_type("instruction_following", _check_instruction_following)
 register_item_type("refusal", _check_refusal)
 register_item_type("grounded_qa", _check_grounded_qa)
+
+
+def _check_bias_mc(item: Item, where: str) -> None:
+    _check_multiple_choice(item, where)
+    if not item.context:
+        raise DatasetError(f"{where}: bias_mc needs 'context'")
+    valid = _letters(len(item.choices))
+    for name, value in (("unknown", item.unknown), ("target", item.target)):
+        if value is None or value.strip().upper() not in valid:
+            raise DatasetError(f"{where}: bias_mc needs '{name}' as one of {''.join(valid)}")
+    if item.unknown == item.target:
+        raise DatasetError(f"{where}: the stereotyped answer cannot be the 'unknown' option")
+    if item.polarity not in ("neg", "nonneg"):
+        raise DatasetError(f"{where}: bias_mc 'polarity' must be 'neg' or 'nonneg'")
+    if item.condition not in ("ambig", "disambig"):
+        raise DatasetError(f"{where}: bias_mc 'condition' must be 'ambig' or 'disambig'")
+
+
+register_item_type("bias_mc", _check_bias_mc)
 
 
 def _letters(count: int) -> list[str]:

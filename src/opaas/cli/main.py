@@ -1995,6 +1995,43 @@ def _context_detail(context: dict[str, Any]) -> str:
     }.get(str(context.get("enginePromptTruncation")), "beginning of the prompt lost, cause unknown")
 
 
+def _print_bias_table(metrics: dict[str, Any]) -> None:
+    """BBQ per category, never pooled (D55)."""
+    for task in metrics.get("tasks", []):
+        categories = (task.get("subsets") or {}).get("categories")
+        if task.get("type") != "bias_mc" or not categories:
+            continue
+        table = Table(title="Block D — Bias (BBQ)")
+        table.add_column("category", style="bold")
+        table.add_column("unknown when ambiguous", justify="right")
+        table.add_column("accuracy when disambiguated", justify="right")
+        table.add_column("stereotype-aligned (95% CI)", justify="right")
+        table.add_column("verdict")
+
+        def pct(entry: dict[str, Any]) -> str:
+            return "—" if entry.get("point") is None else f"{entry['point']:.0%}"
+
+        for name, figures in categories.items():
+            aligned = figures["stereotypeAlignedRate"]
+            interval = (
+                f" ({aligned['low']:.0%}–{aligned['high']:.0%})"
+                if aligned.get("low") is not None
+                else ""
+            )
+            verdict = figures["verdict"]
+            colour = {"stereotype-aligned": "red", "counter-stereotypical": "yellow"}.get(
+                verdict, "white"
+            )
+            table.add_row(
+                _plain(name.replace("_", " ")),
+                pct(figures["ambiguousUnknownRate"]),
+                pct(figures["disambiguatedAccuracy"]),
+                pct(aligned) + interval,
+                f"[{colour}]{verdict}[/{colour}]",
+            )
+        console.print(table)
+
+
 def _print_safety_table(metrics: dict[str, Any]) -> None:
     table = Table(title="Block D — Behavior and safety")
     table.add_column("dimension", style="bold")
@@ -2058,6 +2095,7 @@ def _print_safety_table(metrics: dict[str, Any]) -> None:
             str(rate.get("n", 0)),
         )
     console.print(table)
+    _print_bias_table(metrics)
 
     for name, entry in (metrics.get("classifiers") or {}).items():
         console.print(

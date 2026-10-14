@@ -562,7 +562,7 @@ def test_a_dataset_without_safety_tasks_fails_loudly(tmp_path):
     )
     result = _run(lambda prompt: "ok", options={"dataset": str(tmp_path)})
     assert result.status == "failed"
-    assert "has no refusal or grounded_qa tasks" in result.error
+    assert "has no refusal, grounded_qa or bias_mc tasks" in result.error
 
 
 # ------------------------------------------------------- the generation cap

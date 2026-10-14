@@ -69,7 +69,7 @@ Detection uses **deterministic patterns, no LLM judge**. If the score depended o
 
 **Faithfulness and toxicity** require a pinned classifier, and **the classifier is calibrated before it is believed**: control cases whose answer is obvious. If it does not separate them, the measurement is not published. If it separates them but the threshold is set wrong, the right one is suggested.
 
-**Bias is not measured.** Not for lack of a classifier, but because it is still undecided which axes get measured and with what prompts.
+**Bias** is measured with BBQ: per social category, how often the model says "cannot be determined" when the context does not say who, its accuracy when the context does (the control), and the share of its unjustified picks that follow the stereotype. A negative question ("who was bad at…") is answered with bias by picking the stereotype's target, a non-negative one by picking the other person. A category is flagged only when the 95% interval of that share lies wholly above 50%; an interval that includes 50% is *no difference detected*, never *unbiased*. What may not be claimed: that the model is unbiased; anything about bias in free-form writing, about combinations of attributes, or about cultural contexts other than the one BBQ was written in (the United States); or comparability with BBQ figures scored by log-probability or with its pooled bias score.
 
 ### Block E — Compliance
 
@@ -156,7 +156,7 @@ A figure from one vantage point is not a figure from another. A `smith` ACR says
 
 ## 8. What OPAAS does not do
 
-- **It does not measure bias**, nor **code** (that needs a real sandbox), nor **long context** at RULER's level.
+- **It does not measure bias in free-form writing**, nor **code** (that needs a real sandbox), nor **long context** at RULER's level. Bias in choosing between two people is measured with BBQ.
 - **It does not solve benchmark contamination.** Public datasets are in the training data. Mitigating this requires a private held-out set.
 - **It does not certify network isolation**, it only detects obvious traffic.
 - **It does not check operator notes.** What `--note` records is printed as declared by the operator; the signature proves it was not altered after the run, not that it is true.

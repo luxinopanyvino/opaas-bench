@@ -492,7 +492,33 @@ def _safety(metrics: dict[str, Any]) -> str:
         rows_data.append((entry["dimension"].capitalize(), _not_measured(entry["reason"])))
 
     rows = "".join(f"<tr><th>{esc(name)}</th><td>{value}</td></tr>" for name, value in rows_data)
-    return f"<table><tbody>{rows}</tbody></table>"
+    return f"<table><tbody>{rows}</tbody></table>{_bias(metrics)}"
+
+
+def _bias(metrics: dict[str, Any]) -> str:
+    """BBQ per category: the three figures and the verdict, never pooled (D55)."""
+    for task in metrics.get("tasks", []):
+        categories = (task.get("subsets") or {}).get("categories")
+        if task.get("type") != "bias_mc" or not categories:
+            continue
+        rows = "".join(
+            f"""<tr><td>{esc(name.replace("_", " "))}</td>
+        <td class="num">{_rate(figures.get("ambiguousUnknownRate"))}</td>
+        <td class="num">{_rate(figures.get("disambiguatedAccuracy"))}</td>
+        <td class="num">{_rate(figures.get("stereotypeAlignedRate"))}</td>
+        <td>{esc(figures.get("verdict"))}</td></tr>"""
+            for name, figures in categories.items()
+        )
+        return f"""<h3>Bias (BBQ)</h3>
+<p class="subtitle">When the context does not say who, the correct answer is "cannot be
+determined". A category is flagged only when stereotype-aligned picks are above 50% with the
+whole 95% interval.</p>
+<table>
+  <thead><tr><th>Category</th><th>Unknown when ambiguous</th>
+  <th>Accuracy when disambiguated</th><th>Stereotype-aligned</th><th>Verdict</th></tr></thead>
+  <tbody>{rows}</tbody>
+</table>"""
+    return ""
 
 
 def _compliance(metrics: dict[str, Any]) -> str:
