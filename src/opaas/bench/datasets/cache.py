@@ -17,6 +17,7 @@ import hashlib
 import json
 import os
 import shutil
+from dataclasses import dataclass
 from pathlib import Path
 
 import httpx
@@ -63,9 +64,15 @@ def source_is_downloaded(name: str) -> bool:
     if source is None:
         return False
     path = source_path(source)
-    # The artifacts are small (hundreds of KB) and the hash is what makes the
-    # answer worth anything: a corrupt file is not a downloaded one.
-    return path.is_file() and _sha256(path) == source.sha256
+    # The hash is what makes the answer worth anything: a corrupt file is not
+    # a downloaded one. Every file of the source counts, not only the main one.
+    if not (path.is_file() and _sha256(path) == source.sha256):
+        return False
+    return all(
+        (path.parent / extra.filename).is_file()
+        and _sha256(path.parent / extra.filename) == extra.sha256
+        for extra in source.extra_files
+    )
 
 
 def _manifest_is_current(manifest_path: Path) -> bool:
@@ -95,8 +102,23 @@ def _sha256(path: Path) -> str:
 
 
 def fetch_source(source: Source, *, offline: bool = False, force: bool = False) -> Path:
-    """Downloads the source file if needed and verifies its hash."""
+    """Downloads the source's files if needed, verifies each hash, returns the main one."""
     destination = source_path(source)
+    for extra in source.extra_files:
+        _fetch_file(
+            source.name, extra.url, destination.parent / extra.filename, extra.sha256,
+            offline=offline, force=force,
+        )
+    return _fetch_file(
+        source.name, source.url, destination, source.sha256, offline=offline, force=force
+    )
+
+
+def _fetch_file(
+    name: str, url: str, destination: Path, sha256: str, *, offline: bool, force: bool
+) -> Path:
+    """One file of a source: reuse it if it verifies, otherwise download and verify it."""
+    source = _FileRef(name=name, url=url, sha256=sha256)
 
     if destination.is_file() and not force:
         actual = _sha256(destination)
@@ -145,6 +167,15 @@ def fetch_source(source: Source, *, offline: bool = False, force: bool = False) 
 
     temporary.replace(destination)
     return destination
+
+
+@dataclass(frozen=True, slots=True)
+class _FileRef:
+    """What _fetch_file needs to name, fetch and verify one file."""
+
+    name: str
+    url: str
+    sha256: str
 
 
 def ensure_dataset(

@@ -362,6 +362,17 @@ def _safety(metrics: dict[str, Any]) -> str:
         unanswerable = ((task.get("subsets") or {}).get("unanswerable") or {})
         if (rate := _pct(unanswerable.get("hallucinationRate"))) is not None:
             parts.append(f"answers {rate} of questions its passage cannot answer")
+        categories = (task.get("subsets") or {}).get("categories") or {}
+        if task.get("type") == "bias_mc" and categories:
+            flagged = sorted(
+                name.replace("_", " ")
+                for name, figures in categories.items()
+                if figures.get("verdict") == "stereotype-aligned"
+            )
+            parts.append(
+                f"stereotype-aligned in {len(flagged)} of {len(categories)} bias categories"
+                + (f" ({', '.join(flagged)})" if flagged else "")
+            )
     unmeasured = len(metrics.get("notImplemented") or []) + sum(
         1
         for key in ("faithfulness", "toxicity")

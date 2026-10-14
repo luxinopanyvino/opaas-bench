@@ -16,13 +16,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from opaas.bench.datasets.importers import ifeval, squad2, xstest
+from opaas.bench.datasets.importers import bbq, ifeval, squad2, xstest
 from opaas.bench.datasets.loader import stratified_sample as _stratified_sample
 
 ImporterError = ValueError
 
 #: Available importers: name → module.
-IMPORTERS = {"ifeval": ifeval, "squad2": squad2, "xstest": xstest}
+IMPORTERS = {"bbq": bbq, "ifeval": ifeval, "squad2": squad2, "xstest": xstest}
 
 #: Bumped when the manifest gains fields the report depends on. A cache written
 #: by an older version is re-imported instead of being served with the
@@ -89,11 +89,16 @@ def import_dataset(
     if not items:
         raise ImporterError(f"Not a single item could be converted from {source}")
 
-    # A source too large to evaluate whole declares its own default subset
-    # (SQuAD 2.0: 200 of 11,873). An explicit --limit still wins.
-    if limit is None:
-        limit = getattr(module, "DEFAULT_LIMIT", None)
-    selected = stratified_sample(items, limit, seed)
+    # A source too large to evaluate whole declares its own default subset:
+    # SQuAD 2.0 a size, BBQ a whole design (100 + 100 per category, D55). An
+    # explicit --limit still wins.
+    designed = None
+    if limit is None and hasattr(module, "sample"):
+        selected, designed = module.sample(items, seed)
+    else:
+        if limit is None:
+            limit = getattr(module, "DEFAULT_LIMIT", None)
+        selected = stratified_sample(items, limit, seed)
 
     out_dir.mkdir(parents=True, exist_ok=True)
     # The license and URL come from whoever supplies the file, not the importer:
@@ -107,7 +112,9 @@ def import_dataset(
     # "complete" used to mean "everything that could be imported", which reads
     # as "the whole dataset" to anyone auditing the report. If items were
     # dropped for being uncheckable, the count says so out loud.
-    if limit is not None and limit < len(items):
+    if designed is not None:
+        selection = f"{designed}, seed {seed}, {len(selected)} of {len(items)} items"
+    elif limit is not None and limit < len(items):
         selection = (
             f"stratified sampling by category, seed {seed}, {len(selected)} of {len(items)} items"
         )
@@ -191,7 +198,7 @@ def _join(existing: Any, addition: str) -> str:
 def _notes(name: str, stats: Any, selected: int) -> list[str]:
     notes: list[str] = []
     skipped = getattr(stats, "skipped", 0)
-    if skipped:
+    if skipped and name == "ifeval":
         notes.append(
             f"{skipped} items discarded for carrying constraints that cannot be checked here. "
             "The whole item is discarded: scoring only part of its instructions would give "
@@ -212,6 +219,13 @@ def _notes(name: str, stats: Any, selected: int) -> list[str]:
                 f"{stats.safe} benign prompts and {stats.unsafe} harmful ones: the pair needed "
                 "to measure correct refusal and over-refusal."
             )
+
+    if name == "bbq":
+        notes.append(
+            f"{stats.converted} questions converted across {len(stats.by_category)} "
+            f"categories, {selected} selected. {stats.skipped} dropped for lacking the "
+            "marked stereotyped answer."
+        )
 
     if name == "squad2":
         notes.append(

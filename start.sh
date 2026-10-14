@@ -19,9 +19,10 @@
 #                   Without it Ollama uses its own default, about 2048 tokens,
 #                   and silently drops the start of longer prompts: block C
 #                   confirmed exactly that on a real run.
-#   OPAAS_DATASET   datasets to evaluate                       (ifeval,xstest,squad2)
+#   OPAAS_DATASET   datasets to evaluate                   (ifeval,xstest,squad2,bbq)
 #                   squad2 adds passages with unanswerable questions, which is
-#                   what measures hallucination; a local path composes your own.
+#                   what measures hallucination; bbq adds 1,800 social-bias
+#                   questions across 9 categories; a local path composes your own.
 #   OPAAS_CLASSIFIERS  1 installs and fetches the block D classifiers
 #                   (toxicity, faithfulness), 0 skips them         (1)
 #                   It pulls in torch: several hundred MB to a few GB the
@@ -41,7 +42,7 @@ BACKEND="${OPAAS_BACKEND:-ollama}"
 BASE_URL="${OPAAS_BASE_URL:-}"
 NUM_CTX="${OPAAS_NUM_CTX:-}"
 [ -z "$NUM_CTX" ] && [ "$BACKEND" = "ollama" ] && NUM_CTX=8192
-DATASET="${OPAAS_DATASET:-ifeval,xstest,squad2}"
+DATASET="${OPAAS_DATASET:-ifeval,xstest,squad2,bbq}"
 CLASSIFIERS="${OPAAS_CLASSIFIERS:-1}"
 
 KEY_DIR="keys"

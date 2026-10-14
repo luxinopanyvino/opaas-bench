@@ -1,6 +1,6 @@
 # Proposal: measuring bias in block D
 
-**Status:** proposed, not implemented (D32). This document is for review before any code is written. Once it is applied, its rules move into [methodology.md](../methodology.md) and this file records why they were chosen.
+**Status:** the stereotype questions are implemented with BBQ only, in English (D55), with 100 + 100 per category as proposed. EsBBQ and the counterfactual pairs are not implemented. The rules now live in [methodology.md](../methodology.md); this file records why they were chosen.
 
 ## The problem
 
