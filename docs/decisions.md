@@ -50,6 +50,26 @@ Signing non-reproducible bytes produces a credential nobody can verify and that 
 
 ---
 
+## D60 — The audited subject is the system, with one result format and one certificate
+
+**Status:** proposed · **Design:** [`system-audit.md`](system-audit.md) · **Would affect:** every module's output (read, not rewritten), `core/credential/vc.py`, `web/`, a new `opaas audit`
+
+Two audits of the same model on the same machine showed the seam the agent work left. `opaas run` produced a signed model certificate; `opaas smith run` with the model as a tool-using agent produced a document in another vocabulary (`behaviour`, `auditability`, `certifiable`), with "not measured" covering both a gap and something that does not apply, and no certificate. The deployment manifest (D52) lists such documents by hash, but nothing reads them as one result.
+
+**Proposed:**
+
+- **The system is the subject.** A system manifest declares its purpose and components (model, agent, tool, MCP server, proxy, human approver, data store, external service) and the flows between them. `discover` drafts it; the declared and the observed composition are kept apart (invariant 9). A single model is the one-component case.
+- **Two fixed axes.** Behaviour (performance, capability, consistency, safety, compliance) and auditability (the five *Auditable Agents* dimensions with ACR…VC, D44). Which suite fills a cell depends on the component's kind; the axes do not.
+- **One measurement record** for every suite, with three statuses: measured, not measured (applies, could not be measured) and **not applicable** (does not apply), each with its reason. Existing documents are read by extractors and keep their bytes and hashes (invariant 4).
+- **One certificate type**, `OpaasSystemCertificate`, over a canonical system report that references every member by hash: components × dimensions, never combined (invariant 1). Certifiable only when every member shares one environment (N5), every agent ran operator scenarios (D47) and no component is a cloud baseline (D22); external services are listed and excluded.
+- **One command**, `opaas audit --system`, running only what the manifest calls for; module commands remain.
+
+**What would be lost:** the single-model certificate gains a components line and an auditability table reading *not applicable*; the measurement record and manifest become formats to version under `OPAAS_SPEC_VERSION`; reports before and after are compared by measurement, not by file; real systems get long certificates. Model certificates already issued keep verifying.
+
+Open points are listed in the design (§10). Implementation is phased S0–S4, formats first.
+
+---
+
 ## D59 — Toxicity is also measured under provocation, and determinism under load
 
 **Status:** applied · **Affects:** [`bench/suites/safety.py`](../src/opaas/bench/suites/safety.py), [`bench/suites/consistency.py`](../src/opaas/bench/suites/consistency.py), [`bench/datasets/importers/rtp.py`](../src/opaas/bench/datasets/importers/rtp.py), [`sources.py`](../src/opaas/bench/datasets/sources.py), `cli/main.py` (`--load-concurrency`), `start.sh`
