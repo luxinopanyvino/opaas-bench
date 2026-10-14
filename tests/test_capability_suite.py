@@ -202,3 +202,58 @@ def test_a_complete_response_is_not_counted_as_truncated():
 def test_the_instruction_generation_cap_is_configurable():
     options = _run(lambda p: "ok", {"instruction_max_tokens": 128}).metrics["options"]
     assert options["instruction_max_tokens"] == 128
+
+# ------------------------------------------------------------ token caps (D54)
+
+
+class _CapRecorder(ScriptedBackend):
+    """Records the token cap each request was sent with."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.caps: list[int] = []
+
+    def generate(self, prompt, **params):
+        self.caps.append(int(params.get("max_tokens", 0)))
+        return super().generate(prompt, **params)
+
+
+def _capped_dataset(tmp_path, task_type, item):
+    """A one-item dataset whose importer wrote its own cap, as IFEval (700) and XSTest (320) do."""
+    import json as _json
+
+    root = tmp_path / "capped"
+    root.mkdir()
+    (root / "items.jsonl").write_text(_json.dumps(item) + "\n", encoding="utf-8")
+    (root / "dataset.json").write_text(_json.dumps({
+        "name": "capped", "version": "1", "description": "cap test", "license": "MIT",
+        "source": "test", "syntheticSmoke": False,
+        "tasks": [{"file": "items.jsonl", "name": "capped", "category": "capped",
+                   "type": task_type, "description": "cap test"}],
+    }), encoding="utf-8")
+    return str(root)
+
+
+def test_the_operators_cap_wins_over_the_cap_an_importer_wrote_into_the_item(tmp_path):
+    """--capability-max-tokens 1024 used to be recorded and never applied to IFEval's 700."""
+    dataset = _capped_dataset(tmp_path, "instruction_following", {
+        "id": "i1", "prompt": "Write two words.",
+        "constraints": [{"kind": "word_count_max", "value": 30}], "max_tokens": 700})
+    backend = _CapRecorder(lambda prompt: "two words")
+    backend.load("fake/model-1b", {})
+    result = CapabilitySuite(
+        {"dataset": dataset, "concurrency": 1, "instruction_max_tokens": 1024}
+    ).run(backend)
+    assert backend.caps == [1024]
+    assert result.metrics["tasks"][0]["maxTokens"] == [1024]
+
+
+def test_without_an_operator_cap_the_items_own_cap_applies(tmp_path):
+    dataset = _capped_dataset(tmp_path, "instruction_following", {
+        "id": "i1", "prompt": "Write two words.",
+        "constraints": [{"kind": "word_count_max", "value": 30}], "max_tokens": 700})
+    backend = _CapRecorder(lambda prompt: "two words")
+    backend.load("fake/model-1b", {})
+    result = CapabilitySuite({"dataset": dataset, "concurrency": 1}).run(backend)
+    assert backend.caps == [700]
+    assert result.metrics["tasks"][0]["maxTokens"] == [700]

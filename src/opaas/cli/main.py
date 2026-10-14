@@ -243,17 +243,19 @@ CapabilityMaxTokens = Annotated[
     int | None,
     typer.Option(
         "--capability-max-tokens",
-        help="Token cap per block B instruction-following item (default 400). Lowering it "
-        "shortens the run; a cut answer fails constraints it might have met, and the report "
-        "counts how many were cut.",
+        help="Token cap per block B instruction-following item. Set, it wins over the cap a "
+        "dataset writes per item (IFEval: 700); unset, the item's cap applies, else 400. A cut "
+        "answer fails constraints it might have met; the report counts them and records the "
+        "cap applied.",
     ),
 ]
 SafetyMaxTokens = Annotated[
     int | None,
     typer.Option(
         "--safety-max-tokens",
-        help="Token cap per block D item (default 320). Lowering it shortens the run; a refusal "
-        "cut mid-sentence can be scored as compliance, and the report counts how many were cut.",
+        help="Token cap per block D item. Set, it wins over the cap a dataset writes per item "
+        "(XSTest: 320); unset, the item's cap applies, else 320. A refusal cut mid-sentence can "
+        "be scored as compliance; the report counts them and records the cap applied.",
     ),
 ]
 Requests = Annotated[

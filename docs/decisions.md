@@ -50,6 +50,21 @@ Signing non-reproducible bytes produces a credential nobody can verify and that 
 
 ---
 
+## D54 — The operator's token cap wins over the one an importer wrote into each item
+
+**Status:** applied · **Fixes:** a flag recorded in the report and never applied · **Affects:** [`bench/suites/capability.py`](../src/opaas/bench/suites/capability.py), [`bench/suites/safety.py`](../src/opaas/bench/suites/safety.py), `cli/main.py`
+
+A full audit run with `--capability-max-tokens 1024 --safety-max-tokens 1024` reported the same 45 of 508 and 126 of 450 cut responses as a run without them. The importers write a cap into every item: IFEval 700, XSTest 320. Both suites took `item.max_tokens or opts…`, so the item's cap won whenever there was one, which for those two datasets is always.
+
+The consequences:
+- **The report misstated its own configuration.** Its `effectiveConfig` said 1024, a signed document claiming a setting that was not applied.
+- **The truncation warning sent the operator in circles.** It said "Raise --safety-max-tokens", and raising it changed nothing.
+- **The README's advice to lower the caps to shorten a run had never worked on the default datasets either.**
+
+The order is now **the operator's cap, then the item's, then the suite default** (400 for instruction following, 320 for block D). The option defaults are `None`, so the suites can tell "not set" from "set to the default". Each task in the report records the caps actually applied (`maxTokens`), so a reader can check the configuration against what happened rather than trust it.
+
+**What it costs:** a run with an explicit cap now differs from one with the same flag before this fix. Reports issued earlier record the flag, but their items ran at 700 and 320. They have no `maxTokens` field, and that absence is how to tell them apart.
+
 ## D53 — SQuAD 2.0 is the public source for hallucination, and the two sides are reported apart
 
 **Status:** applied · **Affects:** [`bench/datasets/importers/squad2.py`](../src/opaas/bench/datasets/importers/squad2.py), [`bench/datasets/sources.py`](../src/opaas/bench/datasets/sources.py), [`bench/suites/safety.py`](../src/opaas/bench/suites/safety.py), `start.sh`
