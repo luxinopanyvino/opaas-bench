@@ -22,6 +22,7 @@ from typing import Any
 
 from opaas.core.credential.vc import public_identifier
 from opaas.core.hashing import file_digest, slugify
+from opaas.core.report import describe_scored_dataset
 from opaas.web.badge import badge_state, render_badge
 
 ASSETS = Path(__file__).parent / "assets"
@@ -425,7 +426,7 @@ def _capability(metrics: dict[str, Any]) -> str:
         <td class="num">{esc(t.get("items"))}</td></tr>"""
         for t in metrics.get("tasks", [])
     )
-    return f"""<p class="subtitle">Dataset {esc(dataset.get("name"))}
+    return f"""<p class="subtitle">Dataset {esc(describe_scored_dataset(metrics))}
 {esc(dataset.get("version"))} · <span class="identifier">\
 {esc(dataset.get("datasetHash"))}</span> · style {esc(metrics.get("answerStyle"))}</p>
 <table>
