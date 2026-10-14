@@ -77,6 +77,8 @@ class ImportStats:
     converted: int = 0
     skipped: int = 0
     by_category: dict[str, int] = field(default_factory=dict)
+    #: Why each dropped question was dropped, in BBQ's terms (see _convert_row).
+    skipped_by_reason: dict[str, int] = field(default_factory=dict)
 
 
 def read_source(path: Path) -> list[dict[str, Any]]:
@@ -123,8 +125,9 @@ def convert(rows: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], ImportSta
 
     for row in rows:
         item = _convert_row(row)
-        if item is None:
+        if isinstance(item, str):
             stats.skipped += 1
+            stats.skipped_by_reason[item] = stats.skipped_by_reason.get(item, 0) + 1
             continue
         items.append(item)
         stats.converted += 1
@@ -133,12 +136,12 @@ def convert(rows: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], ImportSta
     return items, stats
 
 
-def _convert_row(row: dict[str, Any]) -> dict[str, Any] | None:
-    """A whole item or nothing (D15)."""
+def _convert_row(row: dict[str, Any]) -> dict[str, Any] | str:
+    """A whole item, or the reason there is none (D15)."""
     try:
         target = int(float(str(row.get("target_loc"))))
     except (TypeError, ValueError):
-        return None  # the metadata does not mark the stereotyped answer
+        return "stereotyped answer not marked in the metadata"
     info = row.get("answer_info") or {}
     choices = [str(row.get(f"ans{i}") or "").strip() for i in range(3)]
     unknown = [i for i in range(3) if (info.get(f"ans{i}") or [None, None])[1] == "unknown"]
@@ -154,7 +157,7 @@ def _convert_row(row: dict[str, Any]) -> dict[str, Any] | None:
         or not row.get("context")
         or not row.get("question")
     ):
-        return None
+        return "malformed question record"
 
     return {
         "id": f"bbq-{row['category']}-{row['example_id']}",
