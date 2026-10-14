@@ -150,7 +150,7 @@ src/opaas/
 
 docs/     design.md, methodology.md, decisions.md, workplan.md, datasets.md, key-custody.md,
           self-evaluation.md, implementation-plan.md, mitigation-plan.md
-tests/    834 tests, one file per module, plus conftest.py with the fake backends
+tests/    837 tests, one file per module, plus conftest.py with the fake backends
 scripts/  sprite_from_png.py — regenerates cli/_sprite_data.py from docs/img/mascot.png
 web/      README describing the published site layout (the generator lives in src/)
 ```
@@ -193,7 +193,7 @@ a round trip.
 
 ### Known test state
 
-`uv run pytest` reports **834 passed**. The suite is green: treat any failure as yours.
+`uv run pytest` reports **837 passed**. The suite is green: treat any failure as yours.
 Most of its wall time is `nvidia-smi` being called by the bench tests; on a machine without
 it the suite is much faster.
 
