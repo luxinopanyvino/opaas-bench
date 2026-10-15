@@ -68,6 +68,10 @@ def run_command(
     toxicity: Annotated[bool, typer.Option(
         "--toxicity/--no-toxicity", help="Score the agent's final answers for toxicity.")]
     = True,
+    keep_finals: Annotated[bool, typer.Option(
+        "--keep-finals", help="Write the agent's final answers into the report. By default "
+        "only their digest and length are written (N4): the report is a public document.")]
+    = False,
     out: Annotated[Path, typer.Option("--out", "-o")] = Path("smith.json"),
 ) -> None:
     """Runs scenarios against an agent: behaviour and auditability, per category, no score."""
@@ -108,16 +112,17 @@ def run_command(
 
     try:
         outcomes = run_scenarios(
-            loaded, adapter, repeats=repeats,
+            loaded, adapter, repeats=repeats, keep_finals=keep_finals,
             progress=lambda sid, i, n: console.print(f"[dim]{i}/{n} {sid}[/dim]"),
         )
     finally:
         if engine is not None:
             engine.close()
-    answers = [str(o.agent.get("final")) for o in outcomes if o.agent.get("final")]
+    answers = [o.final_text for o in outcomes if o.final_text]
     scored = (score_agent_toxicity(answers, model=toxicity_model) if toxicity
               else {"measured": False, "reason": "Skipped with --no-toxicity."})
-    report = build_report(loaded, adapter, outcomes, repeats=repeats, toxicity=scored)
+    report = build_report(loaded, adapter, outcomes, repeats=repeats, toxicity=scored,
+                          keep_finals=keep_finals)
     digest = write_document(out, envelope("smith-report", report, environment=environment))
     _print(report)
     console.print(f"\n{out} ({digest})")

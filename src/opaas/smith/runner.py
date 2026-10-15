@@ -33,6 +33,11 @@ value cannot show that the attribute caused anything, and that scenario is
 undecidable (N1), never rounded to either side.
 
 No aggregate across behaviours, no score for the agent (invariant 1).
+
+**The agent's final answer stays out of the report** (N4, D62). Each run
+records its digest and its length; the text itself is kept in memory for the
+expectations and the toxicity classifier, and written only when the operator
+asks for it (`--keep-finals`), as the sentinel writes a value only when kept.
 """
 
 from __future__ import annotations
@@ -44,7 +49,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from opaas.core.events import EventError, read_log, records, verify_chain
+from opaas.core.events import EventError, evidence, read_log, records, verify_chain
 from opaas.core.integrity import assess_log
 from opaas.core.metrics import (
     action_completeness_rate,
@@ -83,6 +88,9 @@ class RunOutcome:
     #: The actions, with the counterfactual value put back as the slot, so that
     #: two values' runs can be compared. Kept in memory, never in the report.
     trace: str = field(default="", repr=False)
+    #: The agent's final answer, for the toxicity classifier. In memory only: the
+    #: report carries its digest unless the operator keeps it (N4).
+    final_text: str | None = field(default=None, repr=False)
 
 
 def run_scenarios(
@@ -91,6 +99,7 @@ def run_scenarios(
     *,
     repeats: int = 1,
     progress: ProgressCallback | None = None,
+    keep_finals: bool = False,
 ) -> list[RunOutcome]:
     outcomes = []
     plans = [(scenario, scenario_variants(scenario)) for scenario in scenarios]
@@ -103,7 +112,8 @@ def run_scenarios(
                     progress(scenario.id, len(outcomes) + 1, total)
                 environment = MockEnvironment(variant, default_chain=agent.actor_chain())
                 run = agent.run(environment, max_turns=variant.max_steps + TURN_MARGIN)
-                outcome = _outcome(variant, repeat, environment, run, agent)
+                outcome = _outcome(variant, repeat, environment, run, agent,
+                                   keep_final=keep_finals)
                 if value is not None:
                     outcome.variant = index
                 outcome.trace = _trace(environment, value, slot)
@@ -122,7 +132,7 @@ def _trace(environment: MockEnvironment, value: str | None, slot: str | None) ->
 
 
 def _outcome(scenario: Scenario, repeat: int, environment: MockEnvironment, run: AgentRun,
-             agent: AgentAdapter) -> RunOutcome:
+             agent: AgentAdapter, *, keep_final: bool = False) -> RunOutcome:
     truth = environment.record
     record, integrity = _agent_record(run)
     return RunOutcome(
@@ -131,11 +141,14 @@ def _outcome(scenario: Scenario, repeat: int, environment: MockEnvironment, run:
         behaviour=behaviour(scenario, environment, run),
         auditability=auditability(scenario, truth, record, integrity)
         if agent.keeps_record else None,
-        agent={"final": run.final, "turns": run.turns, "malformedReplies": run.malformed_replies,
+        agent={"final": None if run.final is None else {
+                   **evidence(run.final, keep=keep_final), "chars": len(run.final)},
+               "turns": run.turns, "malformedReplies": run.malformed_replies,
                "error": run.error, "notes": run.notes,
                "returnedRecord": record is not None},
         ground_truth=truth,
         agent_record=record,
+        final_text=run.final,
     )
 
 
@@ -363,7 +376,8 @@ def agent_bias(scenarios: list[Scenario], outcomes: list[RunOutcome],
 
 
 def build_report(scenarios: list[Scenario], agent: AgentAdapter, outcomes: list[RunOutcome],
-                 *, repeats: int, toxicity: dict[str, Any] | None = None) -> dict[str, Any]:
+                 *, repeats: int, toxicity: dict[str, Any] | None = None,
+                 keep_finals: bool = False) -> dict[str, Any]:
     sources = sorted({s.source for s in scenarios})
     limitations = [
         "Semantic policies are out of scope (N2): only structural predicates are checked.",
@@ -388,6 +402,8 @@ def build_report(scenarios: list[Scenario], agent: AgentAdapter, outcomes: list[
                           for s in scenarios],
         },
         "certifiable": sources != ["reference"],
+        # Digests by default; the text only when the operator kept it (N4).
+        "finalAnswers": "kept" if keep_finals else "digest",
         "agent": agent.describe(),
         "repeats": repeats,
         "behaviour": summarize_behaviour(outcomes),

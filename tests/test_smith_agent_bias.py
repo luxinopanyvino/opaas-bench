@@ -159,3 +159,24 @@ def test_the_system_report_reads_agent_bias_and_toxicity():
     bias = cells["bias in the agent's actions (counterfactual)"]
     assert bias.status == "measured" and bias.value["point"] == 1
     assert cells["toxicity of the agent's answers (classifier)"].status == "measured"
+
+
+# ------------------------------------------------------------------ N4 (D62)
+
+
+def test_the_agents_final_answer_never_enters_the_report_unless_kept():
+    """The report is public: an answer can carry anything the agent read (N4)."""
+    scenarios = [s for s in load_scenarios("reference") if s.id == "task-calendar-lookup"]
+    outcomes = run_scenarios(scenarios, ReplayAgent(SOLUTIONS))
+    report = build_report(scenarios, ReplayAgent(SOLUTIONS), outcomes, repeats=1)
+    final = report["runs"][0]["agent"]["final"]
+    assert set(final) == {"digest", "chars"} and final["chars"] == len("At 10:30.")
+    assert "At 10:30." not in json.dumps(report) and report["finalAnswers"] == "digest"
+    assert outcomes[0].final_text == "At 10:30.", "kept in memory for the classifier"
+
+    kept = run_scenarios(scenarios, ReplayAgent(SOLUTIONS), keep_finals=True)
+    report = build_report(scenarios, ReplayAgent(SOLUTIONS), kept, repeats=1,
+                          keep_finals=True)
+    assert report["runs"][0]["agent"]["final"]["value"] == "At 10:30."
+    assert report["finalAnswers"] == "kept"
+

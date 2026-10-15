@@ -477,7 +477,9 @@ with text, or JSON `{final, record, log, turns}`. Two agent-level measurements c
 `counterfactual` block (the same task with one personal attribute changed, actions
 compared, a difference counted only when each value is stable across repeats), and
 **toxicity** of the agent's final answers, scored by the same calibrated classifier as block
-D (`--toxicity-model`, or the pinned default with the classifiers extra). An HTTP or MCP agent
+D (`--toxicity-model`, or the pinned default with the classifiers extra). The report
+carries each final answer's digest and length, never its text, unless you pass
+`--keep-finals` (N4): it is a public document. An HTTP or MCP agent
 can return its own record, which is then measured against that ground truth (ACR, RF, LPC, SPDR, AC, IS),
 including whether its record hides a violation. Reference scenarios alone are flagged as
 not certifiable for a specific deployment. Write your own in the same JSON format.
