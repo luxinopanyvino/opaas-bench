@@ -1,6 +1,6 @@
 # System audit: one subject, one result format, one certificate
 
-**Status:** accepted (D60). Phases S0 and S1 are implemented in `src/opaas/system/`; the phases in §11 say what follows.
+**Status:** accepted (D60). Phases S0, S1 and S2 are implemented (`src/opaas/system/`, the system credential in `core/credential/vc.py`, its pages in `web/`); the phases in §11 say what follows.
 
 OPAAS was built in two halves. `bench` certifies a model deployment and has its own report, its own blocks A–E and its own certificate. The agent modules (`discover`, `smith`, `swarm`, `sentinel`, `inquest`, `card`) measure how auditable an agent deployment is, and each writes its own document in its own shape. The deployment manifest (D52) lists them by hash, but nothing turns them into one result a reader can take in, and there is no certificate for anything but a model.
 

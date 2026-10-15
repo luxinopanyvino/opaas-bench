@@ -110,6 +110,8 @@ def build_report(
     """The body of the system report (wrapped with `envelope("system-report", …)`)."""
     rows = _rows(manifest)
     extractions: list[tuple[Member, str, Extraction]] = []
+    #: What certifiability needs from each member beyond its cells.
+    facts: dict[str, dict[str, Any]] = {}
     inventory: dict[str, Any] | None = None
     swarm: list[dict[str, Any]] = []
     for member in members:
@@ -125,11 +127,20 @@ def build_report(
         extraction = extract(document, component=member.component, file=member.path.name,
                              file_hash=digest)
         extractions.append((member, digest, extraction))
+        facts[digest] = {k: document[k] for k in ("status", "referenceType", "certifiable")
+                         if k in document}
         if extraction.kind == "inventory":
             inventory = document.get("inventory")
         if extraction.kind == "swarm-analysis":
             swarm.append(document)
 
+    members_out = [
+        {"component": member.component, "step": member.step, "kind": extraction.kind,
+         "file": member.path.name, "hash": digest, **facts[digest],
+         **({"environment": extraction.environment} if extraction.environment else {})}
+        for member, digest, extraction in extractions
+    ]
+    environments = _environments(extractions, inventory)
     measurements = [m for _, _, e in extractions for m in e.measurements]
     measurements += _missing_cells(rows, measurements, steps)
     records = [_with_threshold(m, rows, thresholds or {}) for m in measurements]
@@ -137,14 +148,10 @@ def build_report(
     return {
         "system": {"id": manifest.id, "purpose": manifest.purpose, "manifestHash": manifest_hash},
         "composition": _composition(manifest, rows, inventory, swarm, extractions),
-        "members": [
-            {"component": member.component, "step": member.step, "kind": extraction.kind,
-             "file": member.path.name, "hash": digest,
-             **({"environment": extraction.environment} if extraction.environment else {})}
-            for member, digest, extraction in extractions
-        ],
+        "members": members_out,
         "steps": [_step(outcome) for outcome in steps],
-        "environments": _environments(extractions),
+        "environments": environments,
+        "certifiability": certifiability(manifest, members_out, steps, environments),
         "measurements": records,
         "coverage": _coverage(rows, records),
         "card": _card(records),
@@ -204,6 +211,65 @@ def _missing_cells(
                                          aspect=dimension, metric=dimension, status=status,
                                          reason=reason, source=source))
     return cells
+
+
+# --------------------------------------------------------- certifiability
+
+
+def certifiability(
+    manifest: SystemManifest,
+    members: list[dict[str, Any]],
+    steps: list[StepOutcome],
+    environments: dict[str, Any],
+) -> dict[str, Any]:
+    """Whether a certificate can be issued for this system, and every reason it cannot (§5).
+
+    A system report that fails a rule is still a true account of what was
+    audited, and can still be signed; the credential then says it is not
+    certifiable and why, as a model credential says it is partial.
+    """
+    reasons: list[str] = []
+    if not environments.get("consistent"):
+        detail = []
+        if len(environments.get("inventories") or []) > 1:
+            detail.append(f"{len(environments['inventories'])} different inventories")
+        if environments.get("enginesMismatched") or len(environments.get("engines") or []) > 1:
+            detail.append("a bench report was measured with other engines and models than "
+                          "the system's inventory shows")
+        if environments.get("unbound"):
+            detail.append(f"bound to none: {', '.join(environments['unbound'])}")
+        reasons.append("The members were not measured in one environment (N5): "
+                       + "; ".join(detail) + ".")
+    by_component: dict[str, list[dict[str, Any]]] = {}
+    for member in members:
+        by_component.setdefault(member["component"], []).append(member)
+    pending = {s.component for s in steps if s.status == "pending"}
+    for component in manifest.components:
+        mine = by_component.get(component.id, [])
+        if component.kind == "model":
+            reports = [m for m in mine if m["kind"] == "model-report"]
+            if not reports:
+                reasons.append(f"Model {component.id} has no bench report.")
+            for report in reports:
+                if report.get("referenceType") == "cloud-baseline":
+                    reasons.append(f"{report['file']} is a cloud baseline (D22).")
+                if report.get("status") == "partial":
+                    reasons.append(f"{report['file']} is partial: a block failed.")
+        elif component.kind == "agent":
+            smith = [m for m in mine if m["kind"] == "smith-report"]
+            if component.id in pending:
+                reasons.append(f"Agent {component.id} could not be measured: its adapter "
+                               "is not implemented yet.")
+            elif not smith:
+                reasons.append(f"Agent {component.id} has no smith report.")
+            elif not any(m.get("certifiable") for m in smith):
+                reasons.append(f"Agent {component.id} ran only OPAAS's reference scenarios, "
+                               "not this deployment's own (D47).")
+    for outcome in steps:
+        if outcome.status == "failed":
+            reasons.append(f"Step {outcome.step} failed for {outcome.component}: "
+                           f"{outcome.reason}")
+    return {"certifiable": not reasons, "reasons": reasons}
 
 
 # ------------------------------------------------------------- thresholds
@@ -399,17 +465,29 @@ def _step(outcome: StepOutcome) -> dict[str, Any]:
     return out
 
 
-def _environments(extractions: list[tuple[Member, str, Extraction]]) -> dict[str, Any]:
-    """Whether the members were measured in one environment (N5)."""
-    inventories = sorted({
-        str(e.environment.get("inventoryHash"))
-        for _, _, e in extractions if e.environment and e.environment.get("inventoryHash")
-    })
+def _environments(
+    extractions: list[tuple[Member, str, Extraction]], inventory: dict[str, Any] | None
+) -> dict[str, Any]:
+    """Whether the members were measured in one environment (N5).
+
+    Two granularities are compared, each with its own kind: full inventories
+    (engines and agent stack) with each other, and a bench report's engine
+    inventory with the `enginesHash` of the system's inventory.
+    """
+    def collect(key: str) -> list[str]:
+        return sorted({str(e.environment[key]) for _, _, e in extractions
+                       if e.environment and e.environment.get(key)})
+
+    inventories, engines = collect("inventoryHash"), collect("enginesHash")
+    expected = (inventory or {}).get("enginesHash")
+    mismatched = [h for h in engines if expected and h != expected]
     unbound = sorted({member.path.name for member, _, e in extractions
                       if e.kind not in ("inventory", "deployment-manifest")
                       and not (e.environment or {}).get("bound")})
-    return {"inventories": inventories, "unbound": unbound,
-            "consistent": len(inventories) <= 1 and not unbound}
+    consistent = (len(inventories) <= 1 and not unbound and not mismatched
+                  and (bool(expected) or len(engines) <= 1))
+    return {"inventories": inventories, "engines": engines, "unbound": unbound,
+            "enginesMismatched": mismatched, "consistent": consistent}
 
 
 def _coverage(rows: dict[str, str], records: list[dict[str, Any]]) -> dict[str, Any]:
@@ -474,6 +552,7 @@ __all__ = [
     "StepOutcome",
     "SystemReportError",
     "build_report",
+    "certifiability",
     "flow_edge",
     "load_thresholds",
 ]

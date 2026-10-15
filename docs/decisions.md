@@ -50,9 +50,23 @@ Signing non-reproducible bytes produces a credential nobody can verify and that 
 
 ---
 
+## D61 — One environment is recognised as one, whatever is loaded and whoever measured it
+
+**Status:** applied · **Revises:** the engine inventory of [D40](#d40--the-report-records-everything-the-host-serves-not-only-what-was-evaluated) · **Affects:** [`discover/inventory.py`](../src/opaas/discover/inventory.py), [`system/report.py`](../src/opaas/system/report.py), [`system/extract.py`](../src/opaas/system/extract.py), `sentinel overhead`, `swarm analyze`
+
+The first system certificate of a real deployment (qwen2.5 on Ollama, phase S2 of D60) said its members were measured in different environments when they were not. Three causes, each fixed where it lives:
+
+- **Ollama's model runner was counted as a second engine.** While a model is loaded, Ollama runs a `llama-server` on an ephemeral port that answers the OpenAI API with the model's blob path as its name. The bench report, taken with the model loaded, inventoried two engines; a `discover scan` taken later, with nothing loaded, found one. The inventory now folds such a runner (a `llama-server` serving only Ollama blobs, next to an Ollama engine) under that engine as `runners`, outside the hash, as mirror ports already were. Same deployment, same hash, loaded or not.
+- **Two granularities were compared as one.** A bench report inventories engines only (D40), and its hash is what a discover inventory calls `enginesHash`; the full inventory hash also covers the agent stack. The system report now compares full inventories with each other and a bench report's engines with the inventory's `enginesHash`. A bench report signed before this change keeps its hash; the extractor recomputes the engines hash from the inventory the report itself records, and says so (`enginesHashBasis`, with the recorded hash beside it).
+- **Two modules could not bind at all.** `sentinel overhead` and `swarm analyze` wrote every document unbound (N5), so no system with a proxy or declared flows could ever be certifiable. Both take `--inventory` now, and `opaas audit run` passes it.
+
+**What is lost:** an inventory hash computed before this change differs from one computed after on a host where Ollama had a model loaded; `opaas watch --inventory` against an old baseline may report that difference once. The card's deployment manifest (D52) still compares a bench report's engine hash with full inventory hashes; it is superseded by the system report and left as it is.
+
+---
+
 ## D60 — The audited subject is the system, with one result format and one certificate
 
-**Status:** accepted; phases S0 (formats, extractors) and S1 (system report, `opaas audit run`) implemented · **Design:** [`system-audit.md`](system-audit.md) · **Would affect:** every module's output (read, not rewritten), `core/credential/vc.py`, `web/`, a new `opaas audit`
+**Status:** accepted; phases S0 (formats, extractors), S1 (system report, `opaas audit run`) and S2 (system certificate) implemented · **Design:** [`system-audit.md`](system-audit.md) · **Would affect:** every module's output (read, not rewritten), `core/credential/vc.py`, `web/`, a new `opaas audit`
 
 Two audits of the same model on the same machine showed the seam the agent work left. `opaas run` produced a signed model certificate; `opaas smith run` with the model as a tool-using agent produced a document in another vocabulary (`behaviour`, `auditability`, `certifiable`), with "not measured" covering both a gap and something that does not apply, and no certificate. The deployment manifest (D52) lists such documents by hash, but nothing reads them as one result.
 

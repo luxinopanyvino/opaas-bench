@@ -29,6 +29,10 @@ def badge_state(credential: dict[str, Any], now: datetime | None = None) -> tupl
 
     if _expired(expiration, now):
         return "expired", _RED
+    if "OpaasSystemCertificate" in (credential.get("type") or []):
+        if credential.get("credentialSubject", {}).get("certifiable"):
+            return "system certifiable", _GREEN
+        return "system not certifiable", _AMBER
     if eval_run.get("completeEvaluation"):
         return "A-E evaluated", _GREEN
 

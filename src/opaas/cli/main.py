@@ -65,6 +65,7 @@ from opaas.core.credential import (
     CredentialError,
     TrustAnchorError,
     build_credential,
+    build_system_credential,
     fingerprint,
     generate_root_keypair,
     load_public_key,
@@ -929,7 +930,10 @@ def publish(
 
     console.print(f"[green]Site generated with {len(entries)} certificate(s).[/green]")
     for entry in entries:
-        state = "complete" if entry.complete else "PARTIAL"
+        if entry.is_system:
+            state = "certifiable" if entry.complete else "NOT certifiable"
+        else:
+            state = "complete" if entry.complete else "PARTIAL"
         console.print(f"  * {entry.model} ({state}) → {out / 'cert' / entry.slug}/index.html")
     console.print(f"\n  {len(written)} files in [bold]{out}[/bold]")
     console.print(
@@ -1251,7 +1255,7 @@ def sign(
     report_url: ReportUrl = None,
     log: LogFile = None,
 ) -> None:
-    """Issues the signed W3C credential from a report."""
+    """Issues the signed W3C credential from a report, or from a system report (D60)."""
     if not input_path.exists():
         err_console.print(f"[red]The report does not exist:[/red] {input_path}")
         raise typer.Exit(code=2)
@@ -1274,8 +1278,9 @@ def sign(
         err_console.print(f"[red]{_plain(exc)}[/red]")
         raise typer.Exit(code=2) from None
 
+    is_system = isinstance(report, dict) and report.get("kind") == "system-report"
     try:
-        credential = build_credential(
+        credential = (build_system_credential if is_system else build_credential)(
             report,
             # The hash of the report's BYTES is signed: verifying is sha256sum.
             file_digest(input_path),
@@ -1300,15 +1305,25 @@ def sign(
             err_console.print(f"[red]Could not record in the log:[/red] {exc}")
             raise typer.Exit(code=2) from None
 
-    eval_run = signed["credentialSubject"]["evalRun"]
+    subject = signed["credentialSubject"]
     console.print("[green]Credential signed.[/green]")
     console.print(f"  id       : {signed['id']}")
     console.print(f"  public   : {public_identifier(signed)}")
-    console.print(f"  report   : {eval_run['reportHash']}")
+    console.print(f"  report   : {file_digest(input_path)}")
     console.print(f"  validity : {signed['issuanceDate']} → {signed['expirationDate']}")
     console.print(f"  file     : {out}")
     if entry is not None:
         console.print(f"  log      : entry {entry.index} in {log} ({entry.entryHash})")
+    if is_system:
+        console.print(f"  system   : {_plain(subject['system']['id'])}, "
+                      f"{len(subject['components'])} component(s)")
+        if not subject["certifiable"]:
+            console.print("\n[yellow]Attention:[/yellow] the system is NOT certifiable, and the "
+                          "credential says so:")
+            for reason in subject["notCertifiableBecause"]:
+                console.print(f"  - {_plain(reason)}")
+        return
+    eval_run = subject["evalRun"]
     if not eval_run["completeEvaluation"]:
         console.print(
             f"\n[yellow]Attention:[/yellow] this credential certifies a PARTIAL evaluation "
@@ -1565,7 +1580,12 @@ def certificate_command(
     console.print(f"  credential : {document.get('id')}")
     console.print(f"  key        : {origin}")
     console.print(f"  valid until: {document.get('expirationDate')}")
-    if not entry.complete:
+    if not entry.complete and entry.is_system:
+        console.print(
+            "\n[yellow]Attention:[/yellow] the system is NOT certifiable. The certificate "
+            "lists every reason."
+        )
+    elif not entry.complete:
         console.print(
             "\n[yellow]Attention:[/yellow] PARTIAL evaluation. The certificate lists the "
             "blocks that were not evaluated."

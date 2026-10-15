@@ -126,3 +126,10 @@ code { font-family: ui-monospace, Consolas, monospace; font-size: .85em; }
 /* Whose word a value is: the engine's or the operator's (D37). */
 .src { color: var(--muted); font-size: .82rem; }
 .conflict { color: var(--fail); }
+
+/* System certificates (D60): the coverage table, one mark per cell, never a score. */
+.coverage td.mark { text-align: center; }
+.coverage td.measured { color: var(--ok, #12683f); }
+.coverage td.not-measured { color: var(--warn, #8a5a00); }
+.coverage td.not-applicable { color: var(--muted, #8a8f98); }
+.legend { font-size: .85em; opacity: .8; }

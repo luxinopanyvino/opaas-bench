@@ -199,16 +199,22 @@ def inventory_command(
 def overhead_command(
     requests: Annotated[int, typer.Option("--requests", "-n", min=10)] = 500,
     policies: Policies = None,
+    inventory: Annotated[Path | None, typer.Option(
+        "--inventory", help="`discover scan` document to bind the result to (N5): the "
+        "overhead is this host's.")] = None,
     out: Annotated[Path, typer.Option("--out", "-o")] = Path("sentinel-overhead.json"),
 ) -> None:
     """Benchmarks the proxy's own added latency (p50/p95/p99)."""
     try:
         loaded = load_policies(read_json(policies)) if policies else []
-    except (PolicyError, OSError, ValueError) as exc:
+        environment = ({"inventory": read_document(inventory, kind="inventory")["inventory"]}
+                       if inventory else None)
+    except (PolicyError, EvidenceError, OSError, ValueError) as exc:
         err_console.print(f"[red]{_plain(exc)}[/red]")
         raise typer.Exit(code=2) from None
     result = benchmark_overhead(requests=requests, policies=loaded)
-    digest = write_document(out, envelope("sentinel-overhead", result, environment=None))
+    digest = write_document(out, envelope("sentinel-overhead", result,
+                                          environment=environment))
     o = result["overhead"]
     console.print(f"overhead p50 {o['p50']} ms · p95 {o['p95']} ms · p99 {o['p99']} ms "
                   f"({requests} requests, {len(loaded)} policies)")

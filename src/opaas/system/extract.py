@@ -204,13 +204,31 @@ def extract(
 def _environment(kind: str, document: dict[str, Any]) -> dict[str, Any] | None:
     if kind == "model-report":
         deployment = (document.get("deploymentFingerprint") or {}).get("hash")
-        inventory = (document.get("environmentInventory") or {}).get("hash")
-        binding = {k: v for k, v in (("deploymentHash", deployment), ("inventoryHash", inventory))
+        # A bench report inventories the engines only (D40): its hash is what a
+        # discover inventory calls `enginesHash`, never the full environment hash.
+        inventory = document.get("environmentInventory") or {}
+        engines, recorded = _engines_hash(inventory), inventory.get("hash")
+        binding = {k: v for k, v in (("deploymentHash", deployment), ("enginesHash", engines))
                    if v}
+        if engines and recorded and engines != recorded:
+            # Derived from the report's own inventory, and said so: the report
+            # keeps the hash it was signed with.
+            binding["enginesHashAsRecorded"] = recorded
+            binding["enginesHashBasis"] = ("recomputed from the report's inventory with "
+                                           "Ollama's model runner folded into Ollama (D61)")
         return {"bound": bool(binding), **binding} if binding else {
             "bound": False, "reason": "The report carries no deployment fingerprint."}
     binding = document.get("environmentFingerprint")
     return dict(binding) if isinstance(binding, dict) else None
+
+
+def _engines_hash(inventory: dict[str, Any]) -> str | None:
+    """The engine inventory's hash as discover computes it today."""
+    from opaas.discover.inventory import fold_runners, inventory_hash
+
+    if not inventory.get("engines"):
+        return inventory.get("hash")
+    return inventory_hash({**inventory, "engines": fold_runners(inventory["engines"])})
 
 
 # ------------------------------------------------------------------ bench report

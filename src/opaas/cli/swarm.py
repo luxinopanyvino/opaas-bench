@@ -10,7 +10,7 @@ import typer
 
 from opaas.cli.common import _plain, console, err_console, read_json
 from opaas.core.credential import load_public_key
-from opaas.core.evidence import envelope, write_document
+from opaas.core.evidence import EvidenceError, envelope, read_document, write_document
 from opaas.inquest import FORMATS, import_records
 from opaas.inquest.importers import ImportError_
 from opaas.swarm import TopologyError, analyse, attribute, load_topology
@@ -29,17 +29,21 @@ def analyze_command(
                                            help="Declared flow: {edges: [{from, to}]}.")],
     fmt: Fmt = "sentinel",
     key: Annotated[Path | None, typer.Option("--key", "-k")] = None,
+    inventory: Annotated[Path | None, typer.Option(
+        "--inventory", help="`discover scan` document to bind the result to (N5).")] = None,
     out: Annotated[Path, typer.Option("--out", "-o")] = Path("swarm.json"),
 ) -> None:
     """Edges declared vs observed, per-edge figures, delegation attribution, faults."""
     try:
         declared = load_topology(read_json(topology))
         imported = import_records(source, fmt, public_key=load_public_key(key) if key else None)
-    except (TopologyError, ImportError_, OSError, ValueError) as exc:
+        environment = ({"inventory": read_document(inventory, kind="inventory")["inventory"]}
+                       if inventory else None)
+    except (TopologyError, ImportError_, EvidenceError, OSError, ValueError) as exc:
         err_console.print(f"[red]{_plain(exc)}[/red]")
         raise typer.Exit(code=2) from None
     result = {**analyse(imported.records, declared), "integrity": imported.integrity}
-    digest = write_document(out, envelope("swarm-analysis", result, environment=None))
+    digest = write_document(out, envelope("swarm-analysis", result, environment=environment))
     topo = result["topology"]
     for edge in topo["undeclared"]:
         console.print(f"  [red]undeclared[/red] {edge['from']} → {edge['to']} "
