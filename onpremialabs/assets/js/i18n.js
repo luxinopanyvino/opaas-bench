@@ -7,8 +7,7 @@ window.OPL_I18N = {
   es: {
     "skip": "Saltar al contenido",
     "menu": "Menú",
-    "panel.aria": "Panel del laboratorio",
-    "panel.title": "Panel del laboratorio",
+    "panel.aria": "Principal",
     "nav.home": "Inicio",
     "nav.lab": "Laboratorio",
     "nav.values": "Valores",

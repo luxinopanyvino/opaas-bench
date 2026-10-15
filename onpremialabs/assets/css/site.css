@@ -139,12 +139,10 @@ code, pre { font-family: var(--font-mono); }
 /* ------------------------------------------------------------------ panel */
 
 .panel {
-  border-radius: var(--radius-lg); padding: 28px 30px; margin-top: 16px;
-  display: grid; grid-template-columns: minmax(220px, 1fr) auto; gap: 18px 32px; align-items: center;
+  border-radius: var(--radius-lg); padding: 20px 24px; margin-top: 16px;
   box-shadow: 0 12px 36px rgba(0, 0, 0, 0.25);
 }
-.panel__title { font-size: 1.15rem; margin: 0; }
-.panel__links { display: flex; flex-wrap: wrap; gap: 10px; justify-content: flex-end; }
+.panel__links { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; }
 
 .pill {
   display: inline-flex; align-items: center; justify-content: center;
@@ -460,8 +458,6 @@ code, pre { font-family: var(--font-mono); }
   .blocks { grid-template-columns: repeat(3, 1fr); }
   .grid--4 { grid-template-columns: repeat(2, 1fr); }
   .method { grid-template-columns: repeat(2, 1fr); }
-  .panel { grid-template-columns: 1fr; }
-  .panel__links { justify-content: flex-start; }
 }
 
 @media (max-width: 900px) {
