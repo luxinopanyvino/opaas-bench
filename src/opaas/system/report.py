@@ -29,6 +29,7 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 from opaas.core.hashing import file_digest
 from opaas.system.extract import Extraction, extract
@@ -260,9 +261,12 @@ def certifiability(
                     reasons.append(f"{report['file']} is partial: a block failed.")
         elif component.kind == "agent":
             smith = [m for m in mine if m["kind"] == "smith-report"]
-            if component.id in pending:
-                reasons.append(f"Agent {component.id} could not be measured: its adapter "
-                               "is not implemented yet.")
+            if component.id in pending and component.fields.get("adapter") == "observed":
+                reasons.append(f"Agent {component.id} is known only from its records: no "
+                               "adapter reaches it, so its behaviour was not measured.")
+            elif component.id in pending:
+                reasons.append(f"Agent {component.id} could not be measured: smith has no "
+                               f"{component.fields.get('adapter')} adapter yet.")
             elif not smith:
                 reasons.append(f"Agent {component.id} has no smith report.")
             elif not any(m.get("certifiable") for m in smith):
@@ -367,7 +371,12 @@ def _composition(
         member.component for member, _, e in extractions
         if member.component != SYSTEM_ROW and any(m.status == "measured" for m in e.measurements)
     }
-    components = [_observed_component(c, inventory, exercised) for c in manifest.components]
+    acted = {str(end).split(":", 1)[1] for document in swarm
+             for edge in document.get("edges") or []
+             for end in (edge.get("from"), edge.get("to"))
+             if str(end).startswith("agent:")}
+    components = [_observed_component(c, inventory, exercised, acted)
+                  for c in manifest.components]
     findings = [f"{c['id']} is declared and was not found: {c['basis']}"
                 for c in components if c["observed"] is False]
     findings += _undeclared(manifest, inventory)
@@ -383,7 +392,8 @@ def _composition(
 
 
 def _observed_component(
-    component: Any, inventory: dict[str, Any] | None, exercised: set[str]
+    component: Any, inventory: dict[str, Any] | None, exercised: set[str],
+    acted: set[str] = frozenset(),
 ) -> dict[str, Any]:
     entry = {"id": component.id, "kind": component.kind, "declared": True}
     # What identifies it, so a later `watch` knows what to re-check without the manifest.
@@ -392,8 +402,15 @@ def _observed_component(
             entry[name] = component.fields[name]
     if component.id in exercised:
         return {**entry, "observed": True, "basis": "exercised by this audit"}
+    if component.kind == "agent" and (component.fields.get("name") or component.id) in acted:
+        return {**entry, "observed": True, "basis": "acted in the analysed records"}
     if inventory is None:
         return {**entry, "observed": None, "basis": "no inventory was taken"}
+    if component.kind == "agent":
+        agent = _identified(component, inventory)
+        if agent is not None:
+            return {**entry, "observed": True,
+                    "basis": f"identified as {agent.get('kind')} ({agent.get('basis')})"}
     if component.kind == "model":
         name = component.fields.get("model")
         for engine in inventory.get("engines") or []:
@@ -413,15 +430,32 @@ def _observed_component(
         return {**entry, "observed": target in names,
                 "basis": "listed in the named configuration" if target in names
                 else "not in any named configuration"}
+    article = "an" if component.kind[0] in "aeiou" else "a"
     return {**entry, "observed": None,
-            "basis": f"discover cannot observe a {component.kind} on its own"}
+            "basis": f"discover cannot observe {article} {component.kind} on its own"}
+
+
+def _identified(component: Any, inventory: dict[str, Any]) -> dict[str, Any] | None:
+    """The agent `discover` identified at this component's endpoint, or by its name (D63)."""
+    endpoint = urlparse(str(component.fields.get("endpoint") or "")).netloc
+    names = {str(component.fields.get("name") or ""), component.id}
+    for agent in (inventory.get("agentStack") or {}).get("agentEndpoints") or []:
+        if (endpoint and agent.get("endpoint") == endpoint) or agent.get("name") in names:
+            return agent
+    return None
 
 
 def _undeclared(manifest: SystemManifest, inventory: dict[str, Any] | None) -> list[str]:
     if inventory is None:
         return []
     declared = {c.fields.get("model") for c in manifest.components if c.kind == "model"}
-    findings = []
+    agents = [c for c in manifest.components if c.kind == "agent"]
+    findings = [
+        f"Observed and not declared: {agent.get('kind')} agent {agent.get('name')} at "
+        f"{agent.get('endpoint')} ({agent.get('basis')})."
+        for agent in (inventory.get("agentStack") or {}).get("agentEndpoints") or []
+        if not any(_identified(c, {"agentStack": {"agentEndpoints": [agent]}}) for c in agents)
+    ]
     for engine in inventory.get("engines") or []:
         for model in engine.get("models") or []:
             if model.get("name") not in declared:
@@ -446,7 +480,9 @@ def _node(manifest: SystemManifest, component_id: str) -> str:
         return f"model:{component.fields.get('model')}"
     role = {"agent": "agent", "tool": "tool", "mcp-server": "tool",
             "human-approver": "user"}.get(component.kind, component.kind)
-    return f"{role}:{component.id}"
+    # Records name an actor by its own id, which a drafted component keeps as `name`.
+    ident = component.fields.get("name") if component.kind in ("agent", "tool") else None
+    return f"{role}:{ident or component.id}"
 
 
 def _observed_flow(

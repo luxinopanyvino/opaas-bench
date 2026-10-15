@@ -333,7 +333,14 @@ def discover_agent_stack(
 
 def agent_stack_hash(stack: dict[str, Any]) -> str:
     """Over what identifies the stack. Ports of agent runtimes are left out: they move."""
+    agents = sorted(
+        (str(a.get("kind")), str(a.get("name")), str(a.get("endpoint")))
+        for a in stack.get("agentEndpoints", [])
+    )
     return sha256_json({
+        # Only when there are any: an inventory with no identified agent keeps
+        # the hash it had before agents were identified (D63).
+        **({"agents": agents} if agents else {}),
         "mcp": sorted(
             (s["name"], s["entryHash"])
             for c in stack.get("mcpConfigs", []) for s in c.get("servers", [])
