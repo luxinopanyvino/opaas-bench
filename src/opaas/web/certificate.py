@@ -33,7 +33,15 @@ import segno
 from opaas.core.credential.vc import public_identifier
 from opaas.core.hashing import short_hash
 from opaas.core.report import describe_scored_dataset
-from opaas.web.site import Entry, SiteError, esc, quantization_html
+from opaas.web.site import (
+    Entry,
+    SiteError,
+    cell_summaries,
+    coverage_table_html,
+    esc,
+    quantization_html,
+    threshold_verdicts,
+)
 
 #: The design blocks, in the order a reader expects them. Duplicated from
 #: `suites.BLOCKS` on purpose: importing `suites` would drag the evaluation
@@ -65,6 +73,8 @@ def render_printable(
     entry: Entry, *, verify_url: str | None = None, now: datetime | None = None
 ) -> str:
     """The certificate as a standalone HTML document ready to print."""
+    if entry.is_system:
+        return _render_system_printable(entry, verify_url=verify_url)
     report, credential = entry.report, entry.credential
     subject = credential.get("credentialSubject", {})
     configuration = subject.get("configuration", {})
@@ -157,6 +167,133 @@ def render_printable(
   </footer>
 </main>
 {_render_limitations(report)}
+</body>
+</html>
+"""
+
+
+def _render_system_printable(entry: Entry, *, verify_url: str | None) -> str:
+    """A system certificate (D60): components × dimensions, never a combined mark."""
+    report, credential = entry.report, entry.credential
+    subject = credential.get("credentialSubject", {})
+    proof = credential.get("proof") or {}
+    issued = str(credential.get("issuanceDate", ""))[:10]
+    expires = str(credential.get("expirationDate", ""))[:10]
+
+    qr_html, verify_text = "", "Verify offline with:"
+    if verify_url is not None:
+        qr_html = f"""<figure class="qr">{_qr_svg(check_verify_url(verify_url))}
+      <figcaption>Scan to verify the signature</figcaption></figure>"""
+        verify_text = f"Verify at <span class='mono'>{esc(verify_url)}</span>, or offline with:"
+
+    reasons = subject.get("notCertifiableBecause") or []
+    status_html = (
+        "<p class='certifiable'><strong>Certifiable.</strong> Every member was measured in one "
+        "environment, every agent ran this deployment's own scenarios, and no step failed.</p>"
+        if entry.complete
+        else "<div class='partial'><p><strong>Not certifiable.</strong> This is a true account "
+        "of what was audited; it cannot certify the system because:</p><ul>"
+        + "".join(f"<li>{esc(r)}</li>" for r in reasons) + "</ul></div>"
+    )
+    components = ", ".join(
+        f"{esc(c.get('id'))} <span class='note'>({esc(c.get('kind'))})</span>"
+        for c in subject.get("components") or []
+    )
+    verdicts = threshold_verdicts(report.get("measurements") or [])
+    verdicts_html = ""
+    if verdicts:
+        items = "".join(
+            f"<li>{esc(r['component'])} · {esc(r['aspect'])}: "
+            f"<strong>{esc(r['verdict']['verdict'])}</strong> "
+            f"<span class='note'>(operator threshold, by {esc(r['threshold']['scope'])})</span>"
+            "</li>"
+            for r in verdicts
+        )
+        verdicts_html = f"<section><h3>Operator thresholds</h3><ul>{items}</ul></section>"
+    members = "".join(
+        f"<dt>{esc(m.get('component'))} · {esc(m.get('kind'))}</dt>"
+        f"<dd class='mono'>{esc(m.get('hash'))}</dd>"
+        for m in subject.get("members") or []
+    )
+    results = "".join(
+        f"<tr><td>{esc(c)}</td><td>{esc(d)}</td><td>{esc(t)}</td></tr>"
+        for c, d, t in cell_summaries(report.get("measurements") or [])
+    )
+    limitations = "".join(
+        f"<li><strong>{esc(item.get('component'))}</strong>: {esc(item.get('text'))}</li>"
+        for item in report.get("limitations") or []
+    ) or "<li>The members recorded no limitations.</li>"
+    findings = "".join(
+        f"<li>{esc(f)}</li>" for f in (report.get("composition") or {}).get("findings") or []
+    )
+    findings_html = (f"<h2 class='declared'>Composition: declared against observed</h2>"
+                     f"<ul>{findings}</ul>" if findings else "")
+
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OPAAS System Certificate</title>
+<style>{_CSS}</style>
+</head>
+<body>
+<main class="sheet">
+  <header>
+    <p class="issuer">onpremIALabs · OPAAS — On-Prem AI Audit Suite</p>
+    <h1>Certificate of System Audit</h1>
+    <p class="identifier mono">{esc(public_identifier(credential))}</p>
+  </header>
+
+  <p class="statement">This certifies that the system described below was audited with OPAAS
+  methodology {esc(report.get("specVersion", "unknown"))} on {esc(issued)}, component by
+  component and dimension by dimension. OPAAS issues no overall score or grade.</p>
+
+  <section class="subject">
+    <h2>{esc(entry.model)}</h2>
+    <p class="facts"><span>{esc(entry.system.get("purpose", ""))}</span></p>
+    <p class="facts"><span>Components: {components}</span></p>
+  </section>
+
+  {status_html}
+
+  {coverage_table_html(subject.get("coverage") or {})}
+
+  {verdicts_html}
+
+  <section class="validity">
+    <p><strong>Valid from {esc(issued)} until {esc(expires)}.</strong> After that date, or as
+    soon as any component changes, the system requires re-certification.</p>
+  </section>
+
+  <footer>
+    {qr_html}
+    <div class="trace">
+      <p>{verify_text}</p>
+      <p class="mono command">opaas verify --credential credential.json --report
+      system-report.json</p>
+      <dl>
+        <dt>System report SHA-256</dt><dd class="mono">{esc(entry.report_hash)}</dd>
+        <dt>Manifest SHA-256</dt><dd class="mono">{esc(entry.system.get("manifestHash"))}</dd>
+        <dt>Credential</dt><dd class="mono">{esc(credential.get("id"))}</dd>
+        <dt>Issuer key</dt><dd class="mono">{esc(proof.get("verificationMethod"))}</dd>
+      </dl>
+      <p class="note">This page is a rendering. The certificate is the signed credential:
+      if anything here differs from it, the credential is right and this page is not.</p>
+    </div>
+  </footer>
+</main>
+<section class="sheet limitations">
+  <h2>Results, per component and dimension</h2>
+  <p class="note">A few measured figures per cell, each read from a member document listed
+  below by its hash. Nothing is combined across cells.</p>
+  <table class="results"><tbody>{results}</tbody></table>
+  <h2 class="declared">Members</h2>
+  <dl>{members}</dl>
+  {findings_html}
+  <h2 class="declared">What this certificate does not claim</h2>
+  <ol>{limitations}</ol>
+</section>
 </body>
 </html>
 """
@@ -480,6 +617,16 @@ footer { display: flex; gap: 6mm; align-items: flex-start; margin-top: 4mm; }
 .limitations h2 { margin-top: 0; font-size: 14pt; font-weight: normal; }
 .limitations li { margin-bottom: 1.5mm; }
 .limitations h2.declared { margin-top: 8mm; border-top: 1px solid #c9c4b6; padding-top: 4mm; }
+.coverage { width: 100%; border-collapse: collapse; margin: 4mm 0 1mm; font-size: 9pt; }
+.coverage th, .coverage td { border-bottom: 1px solid #e3dfd4; padding: 1mm 1.5mm; }
+.coverage thead th { font-weight: normal; color: #5c5a53; font-size: 8pt; }
+.coverage tbody th { text-align: left; font-weight: normal; }
+.mark { text-align: center; } .mark.measured { color: #1f4e3d; }
+.mark.not-measured { color: #a3471b; } .mark.not-applicable { color: #9a978e; }
+.legend { color: #5c5a53; font-size: 8pt; margin: 0 0 3mm; }
+.certifiable { border-left: 4px solid #1f4e3d; background: #eef5f1; padding: 2mm 4mm; }
+.results { width: 100%; border-collapse: collapse; font-size: 8.5pt; }
+.results td { border-bottom: 1px solid #e3dfd4; padding: 1mm 1.5mm; vertical-align: top; }
 @media print {
   body { background: #fff; }
   .sheet { margin: 0; max-width: none; box-shadow: none; }

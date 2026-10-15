@@ -194,7 +194,7 @@ def scan(
     inventory: dict[str, Any] = {
         "available": True,
         "scope": "this host, plus endpoints named with --endpoint",
-        "engines": _merge_mirrors(engines),
+        "engines": fold_runners(_merge_mirrors(engines)),
         "unidentified": unidentified,
         "gpus": [str(gpu.get("name")) for gpu in gpus],
         "gpuDrivers": sorted({str(g["driverVersion"]) for g in gpus if g.get("driverVersion")}),
@@ -239,6 +239,37 @@ def _merge_mirrors(engines: list[dict[str, Any]]) -> list[dict[str, Any]]:
             }
         merged.append(primary)
     return sorted(merged, key=lambda e: (str(e["kind"]), int(e["port"])))
+
+
+def fold_runners(engines: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Ollama's own model runner is part of Ollama, not a second engine.
+
+    While a model is loaded, Ollama runs a `llama-server` on an ephemeral port
+    that answers the OpenAI API with the model's blob path as its name. Counted
+    as an engine, the inventory changed with whether a model was in memory: a
+    bench report, taken with the model loaded, never matched a discover scan
+    taken without it, and the system audit read one deployment as two
+    environments. The runner is kept under its Ollama engine as `runners`,
+    outside the hash, like a mirror port.
+    """
+    ollama = [e for e in engines if e.get("kind") == "ollama"]
+    if not ollama:
+        return engines
+    kept, runners = [], []
+    for engine in engines:
+        names = [str(m.get("name", "")) for m in engine.get("models") or []]
+        blob = bool(names) and all(
+            "blobs" in n.replace("\\", "/").split("/") and "sha256-" in n for n in names
+        )
+        if engine.get("kind") != "ollama" and "llama-server" in str(engine.get("process")) and blob:
+            runners.append({"port": engine.get("port"), "bind": engine.get("bind"),
+                            "process": engine.get("process")})
+        else:
+            kept.append(engine)
+    if runners:
+        primary = ollama[0]
+        kept = [{**e, "runners": runners} if e is primary else e for e in kept]
+    return kept
 
 
 def inventory_hash(inventory: dict[str, Any]) -> str:
@@ -374,6 +405,7 @@ __all__ = [
     "Listener",
     "compare_inventories",
     "discover_environment",
+    "fold_runners",
     "inventory_hash",
     "listening_ports",
     "scan",

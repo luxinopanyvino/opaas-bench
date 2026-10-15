@@ -196,7 +196,7 @@ def run_audit(
         if component.kind == "proxy":
             overhead = out / f"overhead-{component.id}.json"
             attempt("sentinel", component.id, "sentinel-overhead",
-                    ["sentinel", "overhead", "--out", str(overhead)], overhead)
+                    ["sentinel", "overhead", *bind, "--out", str(overhead)], overhead)
 
     # 5. inquest, and 6. swarm
     policies = _resolve(manifest.policies, base)
@@ -220,9 +220,9 @@ def run_audit(
             analysis = out / f"swarm-{index}.json"
             swarm_args = [str(record["path"]), "--format", str(record["source"]),
                           *(["--key", str(record["key"])] if record.get("key") else [])]
-            attempt("swarm", SYSTEM_ROW, "swarm-analysis", ["swarm", "analyze", *swarm_args,
-                                          "--topology", str(topology), "--out", str(analysis)],
-                    analysis)
+            attempt("swarm", SYSTEM_ROW, "swarm-analysis",
+                    ["swarm", "analyze", *swarm_args, "--topology", str(topology), *bind,
+                     "--out", str(analysis)], analysis)
     if not records:
         for step in ("inquest", "swarm"):
             run.steps.append(StepOutcome(step, SYSTEM_ROW, "skipped",

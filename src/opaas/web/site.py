@@ -41,12 +41,31 @@ class Entry:
     report_bytes: bytes = b""
 
     @property
+    def is_system(self) -> bool:
+        """A system certificate (D60): the subject is a system, not one model."""
+        return "OpaasSystemCertificate" in (self.credential.get("type") or [])
+
+    @property
     def slug(self) -> str:
-        return slugify(str(self.credential.get("id", "")).replace("urn:opaas:cert:", ""))
+        identifier = str(self.credential.get("id", ""))
+        for prefix in ("urn:opaas:cert:", "urn:opaas:system:"):
+            identifier = identifier.replace(prefix, "")
+        return slugify(identifier)
 
     @property
     def model(self) -> str:
+        """What the certificate is about: the model, or the system."""
+        if self.is_system:
+            return str(self.system.get("id", "unknown system"))
         return str(self.report.get("model", {}).get("name", "unknown model"))
+
+    @property
+    def system(self) -> dict[str, Any]:
+        return self.credential.get("credentialSubject", {}).get("system", {})
+
+    @property
+    def report_hash(self) -> str | None:
+        return self.eval_run.get("reportHash") or self.system.get("reportHash")
 
     @property
     def quantization(self) -> str | None:
@@ -58,6 +77,9 @@ class Entry:
 
     @property
     def complete(self) -> bool:
+        """All five blocks for a model; certifiable for a system."""
+        if self.is_system:
+            return bool(self.credential.get("credentialSubject", {}).get("certifiable"))
         return bool(self.eval_run.get("completeEvaluation"))
 
 
@@ -74,7 +96,9 @@ def load_entry(report_path: Path, credential_path: Path) -> Entry:
     except (json.JSONDecodeError, UnicodeDecodeError) as exc:
         raise SiteError(f"Invalid JSON: {exc}") from None
 
-    declared = credential.get("credentialSubject", {}).get("evalRun", {}).get("reportHash")
+    subject = credential.get("credentialSubject", {})
+    declared = (subject.get("evalRun") or {}).get("reportHash") or (
+        subject.get("system") or {}).get("reportHash")
     actual = file_digest(report_path)
     if declared != actual:
         raise SiteError(
@@ -138,7 +162,8 @@ def _write_certificate(
         written.append(cert_dir / name)
 
     page = cert_dir / "index.html"
-    page.write_text(_render_certificate(entry, did_document, now), encoding="utf-8")
+    render = _render_system_certificate if entry.is_system else _render_certificate
+    page.write_text(render(entry, did_document, now), encoding="utf-8")
     written.append(page)
     return written
 
@@ -180,13 +205,20 @@ def _layout(title: str, body: str, depth: int = 0) -> str:
 """
 
 
+def _subject_kind(entry: Entry) -> str:
+    if entry.is_system:
+        components = entry.credential.get("credentialSubject", {}).get("components") or []
+        return f"system · {len(components)} components"
+    return str(entry.credential.get("credentialSubject", {}).get("configuration", {})
+               .get("backend", "—"))
+
+
 def _render_index(entries: list[Entry], now: datetime | None) -> str:
     rows = "\n".join(
         f"""    <tr>
       <td><a href="cert/{esc(entry.slug)}/index.html">{esc(entry.model)}</a></td>
       <td>{esc(entry.quantization or "—")}</td>
-      <td>{esc(entry.credential.get("credentialSubject", {}).get("configuration", {})
-              .get("backend", "—"))}</td>
+      <td>{esc(_subject_kind(entry))}</td>
       <td><span class="state {"complete" if entry.complete else "partial"}">\
 {esc(badge_state(entry.credential, now)[0])}</span></td>
       <td class="num">{esc(str(entry.credential.get("expirationDate", ""))[:10])}</td>
@@ -195,9 +227,9 @@ def _render_index(entries: list[Entry], now: datetime | None) -> str:
     )
     partial = sum(1 for entry in entries if not entry.complete)
     warning = (
-        f"""<p class="warning">{partial} of {len(entries)} certificates correspond to
-    <strong>partial</strong> evaluations: they do not cover the five blocks of the standard.
-    Each entry says exactly what was measured and what was not.</p>"""
+        f"""<p class="warning">{partial} of {len(entries)} certificates are
+    <strong>partial</strong> model evaluations or systems that are <strong>not
+    certifiable</strong>. Each entry says exactly what was measured and what was not.</p>"""
         if partial
         else ""
     )
@@ -205,11 +237,11 @@ def _render_index(entries: list[Entry], now: datetime | None) -> str:
     return _layout(
         "OPAAS certificate registry",
         f"""<h1>Certificate registry</h1>
-<p class="subtitle">Models evaluated with OPAAS. Each entry includes the full
+<p class="subtitle">Models and systems audited with OPAAS. Each entry includes the full
 report, its hash and the signed credential.</p>
 {warning}
 <table>
-  <thead><tr><th>Model</th><th>Quantization</th><th>Backend</th><th>Coverage</th>
+  <thead><tr><th>Model or system</th><th>Quantization</th><th>Backend</th><th>Coverage</th>
   <th>Expires</th></tr></thead>
   <tbody>
 {rows}
@@ -303,6 +335,196 @@ def _render_certificate(
 <ul>
   <li><a href="report.json">report.json</a> — the full report. Its SHA-256 is the certified
       hash: <code>sha256sum report.json</code></li>
+  <li><a href="credential.json">credential.json</a> — the signed credential</li>
+  <li><a href="badge.svg">badge.svg</a> — embeddable badge</li>
+</ul>
+
+<script id="credential-data" type="application/json">{credential_json}</script>
+<script id="did-data" type="application/json">{did_json}</script>
+<script id="report-data" type="text/plain">{report_b64}</script>
+<script src="../../assets/verify.js"></script>""",
+        depth=2,
+    )
+
+
+# ------------------------------------------------------------- systems (D60)
+
+#: Dimensions in the order a reader expects them, with the column heading.
+DIMENSION_COLUMNS = (
+    ("performance", "Perf."), ("capability", "Capab."), ("consistency", "Consist."),
+    ("safety", "Safety"), ("compliance", "Compl."), ("actionRecoverability", "Q1"),
+    ("lifecycleCoverage", "Q2"), ("policyCheckability", "Q3"),
+    ("responsibilityAttribution", "Q4"), ("evidenceIntegrity", "Q5"), ("degradation", "Q6"),
+)
+_MARKS = {"measured": ("●", "measured"), "not-measured": ("○", "not measured"),
+          "not-applicable": ("·", "not applicable")}
+
+
+def coverage_table_html(coverage: dict[str, dict[str, str]]) -> str:
+    """Components × dimensions, one mark per cell: whether measured, never how well."""
+    head = "".join(f"<th>{esc(label)}</th>" for _, label in DIMENSION_COLUMNS)
+    rows = []
+    for component, cells in coverage.items():
+        marks = []
+        for dimension, _ in DIMENSION_COLUMNS:
+            mark, title = _MARKS.get(cells.get(dimension, ""), ("", ""))
+            marks.append(f'<td class="mark {esc(cells.get(dimension, ""))}" '
+                         f'title="{esc(title)}">{mark}</td>')
+        rows.append(f"<tr><th>{esc(component)}</th>{''.join(marks)}</tr>")
+    return (f"<table class='coverage'><thead><tr><th>Component</th>{head}</tr></thead>"
+            f"<tbody>{''.join(rows)}</tbody></table>"
+            "<p class='legend'>● measured · ○ not measured · · not applicable. Q1–Q6: the "
+            "Auditability Card's questions. A mark says whether a cell was measured, never "
+            "how well: there is no score.</p>")
+
+
+def format_value(value: dict[str, Any]) -> str:
+    kind = value.get("type")
+    if kind == "rate":
+        return f"{value['point']:.0%} [{value['low']:.0%}–{value['high']:.0%}, n={value['n']}]"
+    if kind == "number":
+        return f"{value['value']} {value['unit']}"
+    if kind == "distribution":
+        centre = value.get("p50", value.get("point"))
+        return f"p50 {centre} {value['unit']}"
+    return str(value.get("verdict", ""))
+
+
+def cell_summaries(
+    measurements: list[dict[str, Any]], limit: int = 3
+) -> list[tuple[str, str, str]]:
+    """(component, dimension, text): a few measured figures per cell, then how many more."""
+    grouped: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    for record in measurements:
+        if record.get("status") == "measured":
+            grouped.setdefault((record["component"], record["dimension"]), []).append(record)
+    order = {d: i for i, (d, _) in enumerate(DIMENSION_COLUMNS)}
+    rows = []
+    for (component, dimension), records in sorted(
+        grouped.items(), key=lambda item: (item[0][0], order.get(item[0][1], 99))
+    ):
+        shown = [f"{r['aspect']}: {format_value(r['value'])}" for r in records[:limit]]
+        if len(records) > limit:
+            shown.append(f"and {len(records) - limit} more")
+        rows.append((component, dimension, " · ".join(shown)))
+    return rows
+
+
+def threshold_verdicts(measurements: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [r for r in measurements if "verdict" in r]
+
+
+def _render_system_certificate(
+    entry: Entry, did_document: dict[str, Any], now: datetime | None
+) -> str:
+    report, credential = entry.report, entry.credential
+    subject = credential.get("credentialSubject", {})
+    label, _ = badge_state(credential, now)
+    credential_json = json.dumps(credential, ensure_ascii=False).replace("<", "\\u003c")
+    did_json = json.dumps(did_document, ensure_ascii=False).replace("<", "\\u003c")
+    report_b64 = base64.b64encode(entry.report_bytes).decode("ascii")
+
+    reasons = subject.get("notCertifiableBecause") or []
+    certifiable_html = (
+        "<p><strong>Certifiable</strong>: every member was measured in one environment, "
+        "every agent ran this deployment's own scenarios, and no step failed.</p>"
+        if entry.complete
+        else "<div class='warning'><p><strong>Not certifiable.</strong> The audit is a true "
+        "account of what was measured, and this is why it cannot certify the system:</p><ul>"
+        + "".join(f"<li>{esc(r)}</li>" for r in reasons) + "</ul></div>"
+    )
+    composition = report.get("composition") or {}
+    observed = {True: "observed", False: "NOT found", None: "not observable"}
+    components = "".join(
+        f"<tr><td>{esc(c.get('id'))}</td><td>{esc(c.get('kind'))}</td>"
+        f"<td>{esc(observed.get(c.get('observed')))} — {esc(c.get('basis', ''))}</td></tr>"
+        for c in composition.get("components") or []
+    )
+    findings = "".join(f"<li>{esc(f)}</li>" for f in composition.get("findings") or [])
+    results = "".join(
+        f"<tr><td>{esc(c)}</td><td>{esc(d)}</td><td>{esc(t)}</td></tr>"
+        for c, d, t in cell_summaries(report.get("measurements") or [])
+    )
+    verdicts = "".join(
+        f"<tr><td>{esc(r['component'])}</td><td>{esc(r['aspect'])}</td>"
+        f"<td>{esc(r['threshold'].get('min', r['threshold'].get('max', '')))} "
+        f"({'min' if 'min' in r['threshold'] else 'max'}, by {esc(r['threshold']['scope'])})"
+        f"</td><td>{esc(r['verdict']['verdict'])}</td></tr>"
+        for r in threshold_verdicts(report.get("measurements") or [])
+    )
+    limitations = "".join(
+        f"<li><strong>{esc(item.get('component'))}</strong>: {esc(item.get('text'))}</li>"
+        for item in report.get("limitations") or []
+    )
+    verdicts_html = (
+        "<h2>Operator thresholds</h2><table><thead><tr><th>Component</th><th>Measurement</th>"
+        f"<th>Threshold</th><th>Verdict</th></tr></thead><tbody>{verdicts}</tbody></table>"
+        if verdicts else ""
+    )
+    limitations_html = (f"<ul class='limitations'>{limitations}</ul>" if limitations
+                        else "<p>The members recorded no limitations.</p>")
+    findings_html = (f"<h3>Composition findings</h3><ul class='limitations'>{findings}</ul>"
+                     if findings else "")
+    members = "".join(
+        f"<tr><td>{esc(m.get('component'))}</td><td>{esc(m.get('kind'))}</td>"
+        f"<td class='identifier'>{esc(m.get('hash'))}</td></tr>"
+        for m in report.get("members") or []
+    )
+    return _layout(
+        f"OPAAS system certificate — {entry.model}",
+        f"""<h1>{esc(entry.model)}</h1>
+<p class="subtitle">{esc(entry.system.get("purpose", ""))}</p>
+<p><span class="state {"complete" if entry.complete else "partial"}">{esc(label)}</span></p>
+<p class="identifier">{esc(public_identifier(credential))}</p>
+
+<h2>Verification</h2>
+<div class="panel">
+  <p>Checks the Ed25519 signature and that the system report on this page is exactly the
+     certified one. It all runs in your browser.</p>
+  <button id="verify" type="button">Verify signature</button>
+  <div id="verification" hidden></div>
+</div>
+
+<h2>Certifiability</h2>
+{certifiable_html}
+
+<h2>Components</h2>
+<table><thead><tr><th>Component</th><th>Kind</th><th>Declared, and observed?</th></tr></thead>
+<tbody>{components}</tbody></table>
+{findings_html}
+
+<h2>Coverage</h2>
+{coverage_table_html(subject.get("coverage") or {})}
+
+<h2>Results</h2>
+<p class="subtitle">A few measured figures per component and dimension, each read from a
+member document whose hash is listed below. Nothing is combined across cells.</p>
+<table><thead><tr><th>Component</th><th>Dimension</th><th>Measured</th></tr></thead>
+<tbody>{results}</tbody></table>
+
+{verdicts_html}
+
+<h2>Declared limitations</h2>
+{limitations_html}
+
+<h2>Traceability</h2>
+<table><tbody>
+  <tr><th>Identifier</th><td class="identifier">{esc(credential.get("id"))}</td></tr>
+  <tr><th>Issuer</th><td>{esc(credential.get("issuer"))}</td></tr>
+  <tr><th>Issued</th><td>{esc(credential.get("issuanceDate"))}</td></tr>
+  <tr><th>Expires</th><td>{esc(credential.get("expirationDate"))}</td></tr>
+  <tr><th>System report hash</th><td class="identifier">{esc(entry.report_hash)}</td></tr>
+  <tr><th>Manifest hash</th><td class="identifier">{esc(entry.system.get("manifestHash"))}</td>
+  </tr>
+</tbody></table>
+<h3>Members</h3>
+<table><thead><tr><th>Component</th><th>Document</th><th>SHA-256</th></tr></thead>
+<tbody>{members}</tbody></table>
+
+<h2>Downloads</h2>
+<ul>
+  <li><a href="report.json">report.json</a> — the system report. Its SHA-256 is the
+      certified hash: <code>sha256sum report.json</code></li>
   <li><a href="credential.json">credential.json</a> — the signed credential</li>
   <li><a href="badge.svg">badge.svg</a> — embeddable badge</li>
 </ul>

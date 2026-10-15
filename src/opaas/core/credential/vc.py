@@ -37,6 +37,8 @@ CREDENTIAL_CONTEXT = [
     "https://onpremialabs.com/credentials/v1",
 ]
 CREDENTIAL_TYPE = ["VerifiableCredential", "OpaasModelCertificate"]
+#: One certificate for a whole system: every component, every dimension (D60).
+SYSTEM_CREDENTIAL_TYPE = ["VerifiableCredential", "OpaasSystemCertificate"]
 #: Everything else OPAAS signs: an inventory, a smith report, an inquest
 #: audit, an Auditability Card, a deployment manifest. Same proof, same
 #: verification, a different subject: the hash of one evidence document (D49).
@@ -182,6 +184,77 @@ def build_evidence_credential(
     }
 
 
+def build_system_credential(
+    report: dict[str, Any],
+    report_hash: str,
+    *,
+    issuer: str,
+    key_id: str,
+    issued_at: datetime | None = None,
+    validity_days: int = DEFAULT_VALIDITY_DAYS,
+    report_url: str | None = None,
+) -> dict[str, Any]:
+    """The unsigned certificate over a system report (D60, phase S2).
+
+    The subject is the system report's file hash, as for every OPAAS
+    credential (invariant 4), plus what a reader must see without opening it:
+    the components, the coverage table and whether the system is certifiable,
+    with every reason when it is not. Like `completeEvaluation` on a model
+    credential, a system that is not certifiable can still be signed: the
+    credential then says so, and `verify` warns. A cloud baseline cannot be a
+    component of a certified system at all (invariant 10).
+    """
+    if report.get("kind") != "system-report":
+        raise CredentialError(
+            "This is not a system report. Write one with `opaas audit run system.json`."
+        )
+    for member in report.get("members") or []:
+        if member.get("referenceType") == "cloud-baseline":
+            raise CredentialError(
+                f"{member.get('file')} is a CLOUD REFERENCE: a system that contains one cannot "
+                "be certified as an on-prem deployment (D22). Remove it from the members, or "
+                "list the service as an external component."
+            )
+    system = report.get("system") or {}
+    if not system.get("id"):
+        raise CredentialError("The system report does not name its system.")
+    certifiability = report.get("certifiability") or {}
+    issued = issued_at or datetime.now(timezone.utc)
+    return {
+        "@context": CREDENTIAL_CONTEXT,
+        "id": f"urn:opaas:system:{slugify(str(system['id']))}:{short_hash(report_hash)}",
+        "type": SYSTEM_CREDENTIAL_TYPE,
+        "issuer": issuer,
+        "issuanceDate": _iso(issued),
+        "expirationDate": _iso(issued + timedelta(days=validity_days)),
+        "credentialSubject": {
+            "system": {
+                "id": system["id"],
+                "purpose": system.get("purpose"),
+                "manifestHash": system.get("manifestHash"),
+                "reportHash": report_hash,
+                "reportUrl": report_url,
+                "opaasVersion": report.get("opaasVersion"),
+                "specVersion": report.get("specVersion"),
+            },
+            "components": [
+                {k: c[k] for k in ("id", "kind", "observed") if k in c}
+                for c in (report.get("composition") or {}).get("components") or []
+            ],
+            "members": [
+                {k: m[k] for k in ("component", "kind", "hash") if k in m}
+                for m in report.get("members") or []
+            ],
+            # Per row and dimension, whether anything was measured: never how well.
+            "coverage": report.get("coverage") or {},
+            "certifiable": bool(certifiability.get("certifiable")),
+            "notCertifiableBecause": list(certifiability.get("reasons") or []),
+            "environmentFingerprint": report.get("environmentFingerprint"),
+        },
+        "proof": None,
+    }
+
+
 def credential_id(report: dict[str, Any]) -> str:
     """`urn:opaas:cert:<model>:<short-config-hash>:<run-id>`, as in the design."""
     model = slugify(str(report.get("model", {}).get("name", "unknown")))
@@ -198,8 +271,10 @@ def public_identifier(credential: dict[str, Any]) -> str:
     under a `did:key` said onpremIALabs had issued it: the name D39 removed
     from the issuer field had survived in the identifier.
     """
-    suffix = str(credential.get("id", "")).removeprefix("urn:opaas:cert:")
-    return f"{_issuer_domain(credential) or 'opaas'}:cert:{suffix}"
+    identifier = str(credential.get("id", ""))
+    kind = "system" if identifier.startswith("urn:opaas:system:") else "cert"
+    suffix = identifier.removeprefix(f"urn:opaas:{kind}:")
+    return f"{_issuer_domain(credential) or 'opaas'}:{kind}:{suffix}"
 
 
 def _issuer_domain(credential: dict[str, Any]) -> str | None:
@@ -287,9 +362,11 @@ def verify_credential(
 
     types = credential.get("type") or []
     is_evidence = "OpaasEvidence" in types
+    is_system = "OpaasSystemCertificate" in types
     result.add(
         "structure",
-        "VerifiableCredential" in types and ("OpaasModelCertificate" in types or is_evidence),
+        "VerifiableCredential" in types
+        and ("OpaasModelCertificate" in types or is_evidence or is_system),
         f"type = {types}",
     )
 
@@ -314,6 +391,15 @@ def verify_credential(
     if report_path is not None:
         result.add("report", *_check_report(credential, report_path))
     if is_evidence:
+        return result
+    if is_system:
+        subject = credential.get("credentialSubject", {})
+        if not subject.get("certifiable"):
+            reasons = subject.get("notCertifiableBecause") or ["no reason recorded"]
+            result.warnings.append(
+                "The credential is authentic but the system is NOT certifiable: "
+                + " ".join(str(r) for r in reasons)
+            )
         return result
 
     eval_run = credential.get("credentialSubject", {}).get("evalRun", {})
@@ -366,9 +452,11 @@ def _check_validity(credential: dict[str, Any], now: datetime) -> tuple[bool, st
 
 def _check_report(credential: dict[str, Any], report_path: Path) -> tuple[bool, str]:
     subject = credential.get("credentialSubject", {})
-    declared = (subject.get("evalRun") or {}).get("reportHash") or (
-        subject.get("evidence") or {}
-    ).get("documentHash")
+    declared = (
+        (subject.get("evalRun") or {}).get("reportHash")
+        or (subject.get("system") or {}).get("reportHash")
+        or (subject.get("evidence") or {}).get("documentHash")
+    )
     if not declared:
         return False, "The credential does not declare a reportHash"
     if not report_path.exists():

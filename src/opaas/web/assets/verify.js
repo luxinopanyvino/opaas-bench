@@ -141,7 +141,9 @@ async function verifyCredential(credential, didDocument, reportBytes) {
   );
 
   if (reportBytes) {
-    const declared = credential.credentialSubject?.evalRun?.reportHash;
+    const declared =
+      credential.credentialSubject?.evalRun?.reportHash ??
+      credential.credentialSubject?.system?.reportHash;
     const actual = "sha256:" + hex(await sha256(reportBytes));
     add(
       "report",

@@ -537,7 +537,15 @@ inquest and swarm per record source) and writes `system-report.json`: every memb
 hash, declared vs observed composition, a components × dimensions coverage table, Q1–Q6,
 block E for the system's purpose, and your thresholds judged comply / violate /
 undecidable. Cite what you already have with `--member llm=report.json` instead of
-running it again. The system certificate comes in the next phase.
+running it again.
+
+The system report is signed, verified, printed and published with the same commands as a
+model report: `opaas sign --input out/system-report.json`, `opaas verify`, `opaas
+certificate` and `opaas publish`. The result is an `OpaasSystemCertificate`: the
+components, the coverage table and whether the system is certifiable. It is certifiable
+when every member was measured in one environment, every agent ran your own scenarios,
+no component is a cloud baseline, no bench report is partial and no step failed;
+otherwise the credential lists every reason, and `verify` warns.
 
 ## What is measured
 
