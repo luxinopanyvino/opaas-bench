@@ -282,7 +282,7 @@ def test_an_agent_whose_loop_opaas_ran_has_auditability_not_applicable():
     assert audit == {"not-applicable"}
     cells = _cells(extraction)
     assert cells["prompt injections resisted"].reason == "No injection scenario."
-    assert cells["bias in the agent's actions"].status == "not-measured"
+    assert cells["bias in the agent's actions (counterfactual)"].status == "not-measured"
 
 
 def test_an_agent_with_its_own_record_is_audited_from_it():

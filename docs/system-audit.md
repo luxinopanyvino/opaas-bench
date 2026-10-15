@@ -1,6 +1,6 @@
 # System audit: one subject, one result format, one certificate
 
-**Status:** accepted (D60). Phases S0 to S3 are implemented (`src/opaas/system/`, the system credential in `core/credential/vc.py`, its pages in `web/`); the phases in §11 say what follows.
+**Status:** accepted (D60). Phases S0 to S4 are implemented (`src/opaas/system/`, the system credential in `core/credential/vc.py`, its pages in `web/`); the phases in §11 say what follows.
 
 OPAAS was built in two halves. `bench` certifies a model deployment and has its own report, its own blocks A–E and its own certificate. The agent modules (`discover`, `smith`, `swarm`, `sentinel`, `inquest`, `card`) measure how auditable an agent deployment is, and each writes its own document in its own shape. The deployment manifest (D52) lists them by hash, but nothing turns them into one result a reader can take in, and there is no certificate for anything but a model.
 
@@ -108,7 +108,7 @@ Nothing `bench` measures goes away. Blocks A–E are the behaviour axis of every
 
 Each figure becomes one or more measurement records (§4) with the same value, interval and limitations it has in the bench report, and the bench report itself is a member of the system report, unchanged. A one-model system therefore shows exactly what today's certificate shows, under a components line.
 
-Bias and toxicity can also apply to an **agent** row, measured on what the agent does rather than what the model says: the same task with one personal attribute changed (does the agent act differently?), and the toxicity of the agent's final answers in operator scenarios. Those are new `smith` measurements, not moves of block D; until they exist, the agent row's bias and toxicity cells read *not measured*, with that reason.
+Bias and toxicity can also apply to an **agent** row, measured on what the agent does rather than what the model says: the same task with one personal attribute changed (does the agent act differently?), and the toxicity of the agent's final answers in operator scenarios. Those are `smith` measurements, not moves of block D (implemented in S4). **Bias** comes from scenarios with a `counterfactual` block (an attribute, a slot, two or more values): the scenario runs once per value, and the agent's actions, the tools it calls and their arguments with the value put back as the slot, are compared across values. A scenario is *divergent* only when each value's repeats agree with each other and the values disagree; when the agent already varies between repeats of one value, or ran once, the scenario is *undecidable* (N1). **Toxicity** is the agent's final answers scored by the calibrated block D classifier, the text never copied into the report. Without counterfactual scenarios or a classifier, those cells read *not measured*, with the reason.
 
 ---
 

@@ -113,14 +113,15 @@ def test_smith_runs_reference_scenarios_in_bare_model_mode(tmp_path):
                             "fake-answering", "--model", "m", "-n", "2", "-o", str(out)]))
     report = json.loads(out.read_text(encoding="utf-8"))
     assert report["kind"] == "smith-report" and report["certifiable"] is False
-    assert len(report["runs"]) == 40
+    # 20 scenarios plus the counterfactual one, which runs once per value: 22 x 2.
+    assert len(report["runs"]) == 44
     assert report["environmentFingerprint"]["bound"] is True
     assert report["behaviour"]["taskCompleted"]["point"] < 1
 
 
 def test_smith_lists_and_validates_scenarios(tmp_path):
     result = _ok(runner.invoke(app, ["smith", "scenarios"]))
-    assert "20 scenario(s) valid" in _flat(result.output)
+    assert "21 scenario(s) valid" in _flat(result.output)
     broken = tmp_path / "broken.json"
     broken.write_text('{"id": "x", "category": "nope"}', encoding="utf-8")
     assert runner.invoke(app, ["smith", "scenarios", "-s", str(broken)]).exit_code == 2

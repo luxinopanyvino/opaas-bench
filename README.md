@@ -461,7 +461,7 @@ violation.
 **2. Behaviour against ground truth** (`smith`):
 
 ```bash
-opaas smith scenarios                                  # 20 reference scenarios, hashed
+opaas smith scenarios                                  # 21 reference scenarios, hashed
 opaas smith run --agent http --endpoint http://localhost:9000/run -n 3 -o smith.json
 opaas smith run --agent mcp --endpoint http://localhost:9000/mcp -n 3 -o smith.json
 opaas smith run --agent bare-model --backend ollama --model qwen2.5:7b-instruct -o smith.json
@@ -473,8 +473,12 @@ step budget, destructive action without confirmation. An agent exposed as an **M
 server** is driven over MCP (Streamable HTTP): OPAAS initializes a session and calls its
 `run_task` tool with `task`, `scenario`, `maxSteps` and `tools.url`, the URL of OPAAS's own
 MCP server exposing the scenario's mock tools; the agent calls them there and answers
-with text, or JSON `{final, record, log, turns}`. An HTTP or MCP agent can return its own
-record, which is then measured against that ground truth (ACR, RF, LPC, SPDR, AC, IS),
+with text, or JSON `{final, record, log, turns}`. Two agent-level measurements come with it: **bias**, from scenarios with a
+`counterfactual` block (the same task with one personal attribute changed, actions
+compared, a difference counted only when each value is stable across repeats), and
+**toxicity** of the agent's final answers, scored by the same calibrated classifier as block
+D (`--toxicity-model`, or the pinned default with the classifiers extra). An HTTP or MCP agent
+can return its own record, which is then measured against that ground truth (ACR, RF, LPC, SPDR, AC, IS),
 including whether its record hides a violation. Reference scenarios alone are flagged as
 not certifiable for a specific deployment. Write your own in the same JSON format.
 
@@ -770,7 +774,7 @@ src/opaas/
 │                auditability metrics, log integrity, evidence documents
 ├── bench/       model certification: runner, blocks A–E, datasets, classifiers, compare
 ├── discover/    engine inventory, agent stack, auditability gap scan
-├── smith/       scenarios, mock-tool oracle, agent adapters, 20 reference scenarios
+├── smith/       scenarios, mock-tool oracle, agent adapters, 21 reference scenarios
 ├── swarm/       declared vs observed topology, attribution, fault plans
 ├── sentinel/    watch (drift), inventory watch, observe/gate proxy, approval queue
 ├── inquest/     importers (sentinel, OTel, JSONL), three-valued audit, degradation

@@ -116,8 +116,10 @@ def _no_classifier_extra(monkeypatch):
     machine. Tests that exercise the default opt in by patching this back.
     """
     import opaas.bench.suites.safety as safety_module
+    import opaas.smith.toxicity as smith_toxicity
 
     monkeypatch.setattr(safety_module, "classifiers_available", lambda: False)
+    monkeypatch.setattr(smith_toxicity, "classifiers_available", lambda: False)
 
 
 @pytest.fixture(autouse=True)

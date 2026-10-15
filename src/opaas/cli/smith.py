@@ -17,6 +17,7 @@ from opaas.core.report import describe_environment
 from opaas.smith import BareModelAgent, HttpAgent, McpAgent, ScenarioError, available_agents
 from opaas.smith.runner import build_report, run_scenarios
 from opaas.smith.scenario import load_scenarios
+from opaas.smith.toxicity import score_agent_toxicity
 
 app = typer.Typer(help="Fixed scenarios, mock tools, deterministic oracles.",
                   no_args_is_help=True)
@@ -60,6 +61,13 @@ def run_command(
                                                 help="Engine key.")] = None,
     inventory: Annotated[Path | None, typer.Option(
         "--inventory", help="`discover scan` document to bind the result to (N5).")] = None,
+    toxicity_model: Annotated[Path | None, typer.Option(
+        "--toxicity-model", help="Toxicity classifier weights for the agent's answers; "
+        "without it the pinned default is used if the classifiers extra is installed.")]
+    = None,
+    toxicity: Annotated[bool, typer.Option(
+        "--toxicity/--no-toxicity", help="Score the agent's final answers for toxicity.")]
+    = True,
     out: Annotated[Path, typer.Option("--out", "-o")] = Path("smith.json"),
 ) -> None:
     """Runs scenarios against an agent: behaviour and auditability, per category, no score."""
@@ -106,7 +114,10 @@ def run_command(
     finally:
         if engine is not None:
             engine.close()
-    report = build_report(loaded, adapter, outcomes, repeats=repeats)
+    answers = [str(o.agent.get("final")) for o in outcomes if o.agent.get("final")]
+    scored = (score_agent_toxicity(answers, model=toxicity_model) if toxicity
+              else {"measured": False, "reason": "Skipped with --no-toxicity."})
+    report = build_report(loaded, adapter, outcomes, repeats=repeats, toxicity=scored)
     digest = write_document(out, envelope("smith-report", report, environment=environment))
     _print(report)
     console.print(f"\n{out} ({digest})")
@@ -137,5 +148,18 @@ def _print(report: dict[str, Any]) -> None:
     if audit.get("misleadingVerdicts"):
         console.print(f"  [red]misleading record[/red] for {audit['misleadingVerdicts']}")
     console.print(f"\n  instability {_fmt(report['instability'])}")
+    console.print("\n[bold]Agent-level bias and toxicity[/bold]")
+    bias = report.get("agentBias") or {}
+    if bias.get("measured"):
+        console.print(f"  {'counterfactual divergence':<32} {_fmt(bias['divergentRate'])}")
+        for row in bias["scenarios"]:
+            reason = f" — {_plain(row['reason'])}" if row.get("reason") else ""
+            console.print(f"    {_plain(row['scenario'])} ({row['attribute']}): "
+                          f"{row['verdict']}{reason}")
+    else:
+        console.print(f"  {'counterfactual divergence':<32} {_fmt(bias)}")
+    toxicity = report.get("agentToxicity") or {}
+    shown = toxicity["aboveThresholdRate"] if toxicity.get("measured") else toxicity
+    console.print(f"  {'toxic answers':<32} {_fmt(shown)}")
     for line in report["limitations"]:
         console.print(f"[yellow]limitation:[/yellow] {_plain(line)}")
