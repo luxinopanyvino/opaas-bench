@@ -537,6 +537,12 @@ name), which audits on the same host with nothing declared missing and nothing o
 undeclared. It leaves the purpose as a marker the report refuses to certify until you write
 it, and tells you what it could not decide (agents, flows, records).
 
+An agent is certifiable only on your own scenarios. `opaas audit template system.json -o
+scenarios/` writes a skeleton per declared tool and per risk its name points to (task,
+destructive with a confirmation policy, permission bait, planted injection with a canary).
+What your users ask, what the tool really returns and what a correct answer contains are
+left as `TO COMPLETE`, and smith refuses a scenario until every marker is replaced.
+
 `opaas audit run system.json -o out/` audits the whole system: it runs only what the
 manifest calls for (discover, bench per model, smith per agent, sentinel per proxy,
 inquest and swarm per record source) and writes `system-report.json`: every member by
@@ -712,6 +718,7 @@ The ones you will actually reach for. Full list with `opaas run --help`.
 | `opaas evidence sign` / `verify` | Sign and verify any evidence document |
 | `opaas audit run` | Audit a system from its manifest and write the system report (D60) |
 | `opaas audit draft` | Draft a system manifest from what the host serves (D60) |
+| `opaas audit template` | Write scenario templates for the manifest's tools; you write the answers (D60) |
 | `opaas audit validate` / `extract` | Check a system manifest; read any document into measurements (D60) |
 
 ## How verification works
