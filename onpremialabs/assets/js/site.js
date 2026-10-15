@@ -78,25 +78,30 @@
   window.addEventListener("scroll", onScroll, { passive: true });
   onScroll();
 
-  // The Menu button opens a dropdown under the sticky bar, from any scroll
-  // position and at any width. It closes on a link, Escape or a click outside.
-  // Without JavaScript the button stays hidden and the panel is the menu.
+  // The Menu button opens a floating bar of links under the sticky top bar. It
+  // stays open while the visitor jumps between sections and scrolls, and closes
+  // only with the Menu button again or Escape. Without JavaScript the button
+  // stays hidden and the panel is the menu.
   menuBtn.hidden = false;
   const menuOpen = () => menuBtn.getAttribute("aria-expanded") === "true";
+
+  // A section reached from a link must land below the bar and the open menu,
+  // not under them, so the scroll offset follows their combined height.
+  function fitScrollOffset() {
+    root.style.scrollPaddingTop = `${topbar.offsetHeight + (menuOpen() ? menuDrop.offsetHeight : 0) + 8}px`;
+  }
 
   function setMenu(open, { focus = false } = {}) {
     menuBtn.setAttribute("aria-expanded", String(open));
     menuDrop.hidden = !open;
+    fitScrollOffset();
     if (open && focus) $("a", menuDrop).focus();
   }
   menuBtn.addEventListener("click", () => setMenu(!menuOpen(), { focus: true }));
-  menuDrop.addEventListener("click", (e) => { if (e.target.closest("a")) setMenu(false); });
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape" && menuOpen()) { setMenu(false); menuBtn.focus(); }
   });
-  document.addEventListener("click", (e) => {
-    if (menuOpen() && !menuDrop.contains(e.target) && !menuBtn.contains(e.target)) setMenu(false);
-  });
+  window.addEventListener("resize", fitScrollOffset);
 
   if ("IntersectionObserver" in window) {
     const pills = $$("a.pill", $("#panel-nav")).concat($$("a.pill", menuDrop));
