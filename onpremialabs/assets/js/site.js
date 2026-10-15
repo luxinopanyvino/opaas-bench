@@ -1,7 +1,7 @@
 /* onpremIA Labs — site behaviour.
    Plain JavaScript, no framework. The page is complete without it (English,
-   every section visible, the panel always shown); this file adds the language
-   switch, the menu, and the motion. Anything animated stops for visitors who
+   every section visible, the panel as its menu); this file adds the language
+   switch, the Menu dropdown, and the motion. Anything animated stops for visitors who
    ask for reduced motion, and for parts of the page that are off screen. */
 
 (() => {
@@ -28,6 +28,13 @@
       entries.forEach((e) => (e.isIntersecting ? start() : stop()));
     }, { threshold: 0.15 }).observe(el);
   }
+
+  /* ------------------------------------------------------------ menu contents */
+
+  // The dropdown carries a copy of the panel's links, made before the language
+  // code reads the page so the copies are translated with everything else.
+  const menuNav = $("#menu-drop nav");
+  $$("#panel-nav .panel__links > a").forEach((a) => menuNav.append(a.cloneNode(true)));
 
   /* ------------------------------------------------------------ language */
 
@@ -65,34 +72,34 @@
 
   const topbar = $(".topbar");
   const menuBtn = $("#menu-btn");
-  const panel = $("#panel-nav");
-  const compact = window.matchMedia("(max-width: 900px)");
+  const menuDrop = $("#menu-drop");
 
   const onScroll = () => topbar.classList.toggle("is-scrolled", window.scrollY > 8);
   window.addEventListener("scroll", onScroll, { passive: true });
   onScroll();
 
-  function setMenu(open) {
+  // The Menu button opens a dropdown under the sticky bar, from any scroll
+  // position and at any width. It closes on a link, Escape or a click outside.
+  // Without JavaScript the button stays hidden and the panel is the menu.
+  menuBtn.hidden = false;
+  const menuOpen = () => menuBtn.getAttribute("aria-expanded") === "true";
+
+  function setMenu(open, { focus = false } = {}) {
     menuBtn.setAttribute("aria-expanded", String(open));
-    panel.classList.toggle("is-open", open);
+    menuDrop.hidden = !open;
+    if (open && focus) $("a", menuDrop).focus();
   }
-  // On a phone the panel is the menu and opens in place; on a wide screen it is
-  // always shown, so the button brings it back into view instead.
-  menuBtn.addEventListener("click", () => {
-    if (compact.matches) {
-      const open = menuBtn.getAttribute("aria-expanded") !== "true";
-      setMenu(open);
-      if (open) panel.scrollIntoView({ block: "start" });
-    } else {
-      panel.scrollIntoView({ block: "start" });
-      $("a", panel).focus({ preventScroll: true });
-    }
+  menuBtn.addEventListener("click", () => setMenu(!menuOpen(), { focus: true }));
+  menuDrop.addEventListener("click", (e) => { if (e.target.closest("a")) setMenu(false); });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && menuOpen()) { setMenu(false); menuBtn.focus(); }
   });
-  panel.addEventListener("click", (e) => { if (e.target.closest("a") && compact.matches) setMenu(false); });
-  document.addEventListener("keydown", (e) => { if (e.key === "Escape") setMenu(false); });
+  document.addEventListener("click", (e) => {
+    if (menuOpen() && !menuDrop.contains(e.target) && !menuBtn.contains(e.target)) setMenu(false);
+  });
 
   if ("IntersectionObserver" in window) {
-    const pills = $$("a.pill", panel);
+    const pills = $$("a.pill", $("#panel-nav")).concat($$("a.pill", menuDrop));
     const spy = new IntersectionObserver((entries) => {
       entries.forEach((entry) => {
         if (!entry.isIntersecting) return;

@@ -22,13 +22,18 @@
   <!-- ============================================================ top bar -->
   <header class="topbar" id="top">
     <div class="wrap topbar__inner">
-      <button class="menu-btn" id="menu-btn" type="button" aria-expanded="false" aria-controls="panel-nav">
+      <button class="menu-btn" id="menu-btn" type="button" aria-expanded="false" aria-controls="menu-drop" hidden>
         <span aria-hidden="true">☰</span> <span data-i18n="menu">Menu</span>
       </button>
       <a class="logo" href="#top" aria-label="onpremIA Labs">onprem<span>IA LABS</span></a>
       <button class="lang-btn" id="lang-toggle" type="button" aria-label="Cambiar idioma / Change language">
         <span data-lang="es">ES</span><span class="lang-btn__sep" aria-hidden="true">/</span><span data-lang="en">EN</span>
       </button>
+    </div>
+    <!-- The Menu dropdown: site.js fills it with the panel's links, so it reaches
+         every section from wherever the visitor has scrolled. -->
+    <div class="menu-drop" id="menu-drop" hidden>
+      <nav class="wrap" aria-label="Menu" data-i18n-aria="menu"></nav>
     </div>
   </header>
 
@@ -38,7 +43,6 @@
       <nav class="panel" id="panel-nav" aria-label="Lab panel" data-i18n-aria="panel.aria">
         <div class="panel__head">
           <h2 class="panel__title" data-i18n="panel.title">Lab panel</h2>
-          <p class="panel__sub" data-i18n="panel.sub">On-premise agentic and intelligent solutions: products, values and community.</p>
         </div>
         <div class="panel__links">
           <a class="pill" href="#inicio" data-i18n="nav.home">Home</a>

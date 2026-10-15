@@ -9,7 +9,6 @@ window.OPL_I18N = {
     "menu": "Menú",
     "panel.aria": "Panel del laboratorio",
     "panel.title": "Panel del laboratorio",
-    "panel.sub": "Soluciones agénticas e inteligentes on-premise: productos, valores y comunidad.",
     "nav.home": "Inicio",
     "nav.lab": "Laboratorio",
     "nav.values": "Valores",
