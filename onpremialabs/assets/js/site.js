@@ -1,5 +1,5 @@
 /* onpremIA Labs — site behaviour.
-   Plain JavaScript, no framework. The page is complete without it (Spanish,
+   Plain JavaScript, no framework. The page is complete without it (English,
    every section visible, the panel always shown); this file adds the language
    switch, the menu, and the motion. Anything animated stops for visitors who
    ask for reduced motion, and for parts of the page that are off screen. */
@@ -10,7 +10,7 @@
   const root = document.documentElement;
   root.classList.add("js");
 
-  const I18N = window.OPL_I18N || { en: {}, dynamic: { es: {}, en: {} } };
+  const I18N = window.OPL_I18N || { es: {}, dynamic: { es: {}, en: {} } };
   const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   const $ = (sel, ctx = document) => ctx.querySelector(sel);
   const $$ = (sel, ctx = document) => Array.from(ctx.querySelectorAll(sel));
@@ -31,21 +31,21 @@
 
   /* ------------------------------------------------------------ language */
 
-  let lang = "es";
+  let lang = "en";
   const listeners = [];
 
-  // The Spanish text is read from the page once, so it is written in one place only.
-  $$("[data-i18n]").forEach((el) => { el.dataset.es = el.textContent; });
-  $$("[data-i18n-aria]").forEach((el) => { el.dataset.esAria = el.getAttribute("aria-label") || ""; });
+  // The English text is read from the page once, so it is written in one place only.
+  $$("[data-i18n]").forEach((el) => { el.dataset.en = el.textContent; });
+  $$("[data-i18n-aria]").forEach((el) => { el.dataset.enAria = el.getAttribute("aria-label") || ""; });
 
   function applyLanguage(next) {
-    lang = next === "en" ? "en" : "es";
-    const en = lang === "en" ? I18N.en : null;
+    lang = next === "es" ? "es" : "en";
+    const es = lang === "es" ? I18N.es : null;
     $$("[data-i18n]").forEach((el) => {
-      el.textContent = (en && en[el.dataset.i18n]) || el.dataset.es;
+      el.textContent = (es && es[el.dataset.i18n]) || el.dataset.en;
     });
     $$("[data-i18n-aria]").forEach((el) => {
-      el.setAttribute("aria-label", (en && en[el.dataset.i18nAria]) || el.dataset.esAria);
+      el.setAttribute("aria-label", (es && es[el.dataset.i18nAria]) || el.dataset.enAria);
     });
     root.lang = lang;
     $$("#lang-toggle [data-lang]").forEach((s) => s.classList.toggle("is-on", s.dataset.lang === lang));
@@ -53,9 +53,9 @@
     listeners.forEach((fn) => fn(lang));
   }
 
-  const dyn = () => I18N.dynamic[lang] || I18N.dynamic.es;
+  const dyn = () => I18N.dynamic[lang] || I18N.dynamic.en;
   const onLanguage = (fn) => listeners.push(fn);
-  $("#lang-toggle").addEventListener("click", () => applyLanguage(lang === "es" ? "en" : "es"));
+  $("#lang-toggle").addEventListener("click", () => applyLanguage(lang === "en" ? "es" : "en"));
 
   /* ------------------------------------------------------------ top bar and menu */
 
@@ -377,6 +377,6 @@
   /* ------------------------------------------------------------ start */
 
   $("#year").textContent = String(new Date().getFullYear());
-  const saved = store.get("opl-lang");
-  applyLanguage(saved || ((navigator.language || "es").toLowerCase().startsWith("en") ? "en" : "es"));
+  // English unless the visitor chose Spanish with the switch before.
+  applyLanguage(store.get("opl-lang") === "es" ? "es" : "en");
 })();

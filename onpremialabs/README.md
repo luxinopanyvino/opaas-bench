@@ -12,10 +12,10 @@ wheel only contains `src/opaas`.
 
 ```
 onpremialabs/
-├── index.html          the whole page, in Spanish; complete without JavaScript
+├── index.html          the whole page, in English; complete without JavaScript
 └── assets/
     ├── css/site.css    design tokens (those of www.onpremialabs.com), layout, motion
-    ├── js/i18n.js      English translations of every data-i18n key, and the
+    ├── js/i18n.js      Spanish translations of every data-i18n key, and the
     │                   strings the scripts generate, in both languages
     ├── js/site.js      language switch, menu panel, hero mesh, lit values,
     │                   product filter, OPAAS terminal, Evolve and NexoDual
@@ -34,9 +34,10 @@ step if the live site changes.
 
 ## Principles
 
-- **Spanish is the source text.** `index.html` holds it; `site.js` reads it from
-  the page and swaps in `i18n.js` for English. A new text needs a `data-i18n`
-  key (or `data-i18n-aria`) and its English entry.
+- **English is the source text and the default.** `index.html` holds it;
+  `site.js` reads it from the page and swaps in `i18n.js` when a visitor picks
+  Spanish (the choice is remembered). A new text needs a `data-i18n` key (or
+  `data-i18n-aria`) and its Spanish entry.
 - **No claim the products cannot back.** Evolve and NexoDual are marked
   *in development*; the OPAAS terminal is labelled an illustrative demo, and
   the evaluation blocks list only what OPAAS measures.
