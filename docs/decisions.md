@@ -50,6 +50,24 @@ Signing non-reproducible bytes produces a credential nobody can verify and that 
 
 ---
 
+## D63 — OPAAS identifies a system's agents and the models they use
+
+**Status:** applied · **Revises:** the agent runtimes of [D45](#d45--discover-reads-the-agent-stack-the-operator-names-and-the-gap-scan-finds-preconditions-not-violations) · **Affects:** [`discover/identify.py`](../src/opaas/discover/identify.py), [`system/draft.py`](../src/opaas/system/draft.py), [`system/report.py`](../src/opaas/system/report.py), [`system/manifest.py`](../src/opaas/system/manifest.py), `discover scan`, `audit draft`
+
+Asked to audit the real system on a machine, the system audit (D60) had to be told what the system was: which agents, reached how, using which models. The operator's answer was that OPAAS should find out, whatever the agents are built on. D45 had decided against probing agent runtimes because none had a well-known read-only endpoint. Some now publish one, and a running system leaves records that say who called what.
+
+**Agents that identify themselves.** `discover` sends GETs, with a short timeout, to every listener that is not an engine (ports under 1024 except 80 skipped, at most 64): an A2A agent card at `/.well-known/agent-card.json` or `agent.json`, Open WebUI's `/api/config`, and an OpenAPI document whose title names an agent framework (LangGraph, LangServe, Flowise, Dify, n8n, Letta, AutoGen, CrewAI, OpenHands, AnythingLLM) or the word "agent". Each agent found says how (`basis`): a published card is not the same evidence as a title. A listener that answers none of these is still only an agent runtime by process name, as in D45. `--agent-endpoint` names a remote one. An identified agent enters the agent stack's hash; an inventory with none keeps its old hash.
+
+**MCP configurations in their usual places.** `--well-known` reads the configurations of the clients people use (Claude Desktop, Claude Code, Cursor, VS Code, Windsurf, Continue) from their known files, exactly as a named file is read: names, transports, launchers, package ids, never a value. Known files only: OPAAS still does not crawl the disk. `audit draft` and `audit run`'s discover step use it.
+
+**The models each agent uses, from its records.** `audit draft --records` imports a sentinel log, OTel spans or JSONL and drafts every agent that acted in them (adapter `observed`), the models and tools it called and the flows, through the sentinel when the records are its. With records, only the models actually called are declared; the others an engine serves are noted and stay composition findings.
+
+**Agents smith cannot drive yet.** An identified or observed agent gets a pending adapter (`a2a`, `open-webui`, a framework name, `observed`): it is in the system, its behaviour cells read *not measured* with the reason, its records are audited on the row of the component that keeps them, and the system is not certifiable until its behaviour is measured. The report counts an agent as observed when it was identified at its endpoint or acted in the analysed records.
+
+**What is lost:** discover now sends a handful of GETs to listeners it does not know, where D45 sent none; they are read-only and documented, and a service that answers them with an agent card or a framework's title is reporting what it is. A framework that publishes none of these signals is not identified. The purpose is never drafted: each system states its own.
+
+---
+
 ## D62 — A smith report carries the digest of the agent's answer, not the answer
 
 **Status:** applied · **Fixes:** N4 in the smith report of [D47](#d47--smith-json-scenarios-mock-tools-as-ground-truth-no-auditability-for-a-bare-model) · **Affects:** [`smith/runner.py`](../src/opaas/smith/runner.py), `cli/smith.py`

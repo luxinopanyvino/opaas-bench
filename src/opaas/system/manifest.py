@@ -44,10 +44,16 @@ _OPTIONAL_FIELDS = frozenset({
     "command", "name", "sentinel", "provider", "description",
 })
 
-#: Agent adapters the manifest accepts before they are implemented, so that a
-#: system's description does not change the day the adapter lands. Empty since
-#: the MCP adapter arrived (S4); the mechanism stays for the next one.
-PENDING_ADAPTERS: frozenset[str] = frozenset()
+#: Agent adapters the manifest accepts before smith can drive them, so that a
+#: system's description does not change the day the adapter lands (§10.5).
+#: Since D63 they are the agents `discover` identifies (A2A, Open WebUI, agent
+#: frameworks by their OpenAPI title) and `observed`, an agent known only from
+#: the records it left. Their behaviour is not measured until an adapter exists;
+#: their auditability is, from their records.
+PENDING_ADAPTERS: frozenset[str] = frozenset({
+    "a2a", "open-webui", "agent-api", "observed", "langgraph", "langserve", "flowise",
+    "dify", "n8n", "letta", "autogen", "crewai", "openhands", "anythingllm",
+})
 
 _TOP_LEVEL = frozenset({
     "format", "id", "purpose", "components", "flows", "scenarios", "policies", "records",

@@ -25,7 +25,7 @@ Every invariant in `CLAUDE.md` holds. In particular:
 
 ## 2. The subject: the system
 
-A **system manifest** describes what is being audited. `discover` drafts it from what it finds on the host; the operator completes and confirms it. It is a declaration, and it is audited against what is observed.
+A **system manifest** describes what is being audited. `discover` drafts it from what it finds on the host (engines and their models, agents that identify themselves, MCP configurations in their usual places) and from the records of the running system (the agents that acted and the models and tools they used, D63); the operator completes and confirms it. It is a declaration, and it is audited against what is observed.
 
 ```json
 {

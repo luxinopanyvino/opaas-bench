@@ -176,10 +176,26 @@ def draft_command(
     purpose: Annotated[str | None, typer.Option(
         "--purpose", help="The intended use. Left as a marker when omitted: the system is not "
         "certifiable until a person writes it.")] = None,
+    agent_endpoint: Annotated[list[str], typer.Option(
+        "--agent-endpoint", help="A remote agent to identify, by URL. Repeatable.")] = None,
+    well_known: Annotated[bool, typer.Option(
+        "--well-known/--no-well-known", help="Read the MCP configurations of known clients "
+        "where they keep them (names only).")] = True,
+    records: Annotated[Path | None, typer.Option(
+        "--records", help="Records of the running system (the sentinel's log, OTel spans or "
+        "JSONL): the agents that acted, the models and tools they called, the flows.")] = None,
+    records_format: Annotated[str, typer.Option(
+        "--records-format", help="sentinel, otel or jsonl.")] = "sentinel",
+    records_key: Annotated[Path | None, typer.Option(
+        "--records-key", help="Public key that sealed the records.")] = None,
     force: Annotated[bool, typer.Option("--force", help="Overwrite an existing file.")] = False,
 ) -> None:
-    """Drafts a system manifest from what the host serves: every model, MCP server and tool."""
+    """Drafts a system manifest: the models, agents, tools and flows the host and records show."""
+    import os
+
+    from opaas.core.credential import load_public_key
     from opaas.discover import discover
+    from opaas.inquest import import_records
     from opaas.system.draft import draft_manifest
 
     if out.exists() and not force:
@@ -189,11 +205,24 @@ def draft_command(
     try:
         observed = (read_json(inventory)["inventory"] if inventory
                     else discover(endpoints=endpoint or [], configs=config or [],
-                                  manifests=manifest or [], containers=False))
+                                  manifests=manifest or [], containers=False,
+                                  well_known=well_known, agent_endpoints=agent_endpoint or []))
+        imported = (import_records(records, records_format,
+                                   public_key=load_public_key(records_key)
+                                   if records_key else None) if records else None)
     except (OSError, ValueError, KeyError) as exc:
         err_console.print(f"[red]{_plain(exc)}[/red]")
         raise typer.Exit(code=2) from None
-    document, notes = draft_manifest(observed, system_id=system_id, purpose=purpose)
+    source = None
+    if records is not None:
+        relative = os.path.relpath(records.resolve(), out.resolve().parent).replace("\\", "/")
+        source = {"source": records_format, "path": relative}
+        if records_key is not None:
+            source["key"] = os.path.relpath(records_key.resolve(),
+                                            out.resolve().parent).replace("\\", "/")
+    document, notes = draft_manifest(observed, system_id=system_id, purpose=purpose,
+                                     records=imported.records if imported else None,
+                                     records_source=source)
     for note in notes:
         console.print(f"  [yellow]note:[/yellow] {_plain(note)}")
     try:
@@ -205,8 +234,8 @@ def draft_command(
     out.write_text(json.dumps(document, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     for component in document["components"]:
         console.print(f"  {component['kind']:<11} {_plain(component['id'])}")
-    console.print(f"\n{out}: complete the purpose, then add agents, flows and records before "
-                  "`opaas audit run`.")
+    console.print(f"\n{out}: complete the purpose, check what was drafted, then run "
+                  "`opaas audit template` and `opaas audit run`.")
 
 
 @app.command("template")

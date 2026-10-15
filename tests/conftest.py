@@ -142,6 +142,11 @@ def _no_discovery(monkeypatch):
     from opaas.discover import agents
 
     monkeypatch.setattr(agents, "_run", lambda command: None)
+    # Nor probe its listeners for agents (D63): identification tests call
+    # `identify.scan_agents` with an injected transport.
+    from opaas.discover import identify
+
+    monkeypatch.setattr(identify, "probe_agents", lambda *args, **kwargs: [])
 
 
 @pytest.fixture(autouse=True)

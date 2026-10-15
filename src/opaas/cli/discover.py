@@ -28,6 +28,11 @@ Skills = Annotated[list[Path], typer.Option(
 Containers = Annotated[bool, typer.Option(
     "--containers/--no-containers", help="List running containers via docker or podman.")]
 Out = Annotated[Path, typer.Option("--out", "-o", help="Evidence document to write.")]
+WellKnown = Annotated[bool, typer.Option(
+    "--well-known", help="Also read the MCP configurations of known clients (Claude Desktop, "
+    "Claude Code, Cursor, VS Code, Windsurf, Continue) where they keep them. Names only.")]
+AgentEndpoint = Annotated[list[str], typer.Option(
+    "--agent-endpoint", help="A remote agent to identify, by URL. Repeatable.")]
 
 
 @app.command("scan")
@@ -37,9 +42,11 @@ def scan_command(
     manifest: Manifest = None,
     skills: Skills = None,
     containers: Containers = True,
+    well_known: WellKnown = False,
+    agent_endpoint: AgentEndpoint = None,
     out: Out = Path("inventory.json"),
 ) -> None:
-    """Inventory of engines, models, MCP servers, tools, skills and containers.
+    """Inventory of engines, models, agents, MCP servers, tools, skills and containers.
 
     Read-only: GETs to well-known engine endpoints, process names (never command
     lines) and the files named here. Sign the result with `opaas evidence sign`.
@@ -50,7 +57,8 @@ def scan_command(
             raise typer.Exit(code=2)
     document = discover(endpoints=endpoint or [], configs=config or [],
                         manifests=manifest or [], skill_dirs=skills or [],
-                        containers=containers)
+                        containers=containers, well_known=well_known,
+                        agent_endpoints=agent_endpoint or [])
     digest = write_document(out, envelope("inventory", {"inventory": document},
                                           environment={"inventory": document}))
     console.print(f"[bold]Environment[/bold] {document['hash']}")
@@ -64,7 +72,14 @@ def scan_command(
     tools = sum(len(m.get("tools", [])) for m in stack["toolManifests"])
     skills_found = sum(len(r.get("skills", [])) for r in stack["skills"])
     console.print(f"  MCP servers {servers} · tools {tools} · skills {skills_found} · "
-                  f"agent runtimes {len(stack['agentRuntimes'])}")
+                  f"agent runtimes {len(stack['agentRuntimes'])} · "
+                  f"agents identified {len(stack.get('agentEndpoints', []))}")
+    for agent in stack.get("agentEndpoints", []):
+        console.print(f"  agent  {agent['kind']:<12} {_plain(agent['name'])} at "
+                      f"{agent['endpoint']} [dim]({_plain(agent['basis'])})[/dim]")
+    if stack.get("wellKnownConfigs"):
+        console.print(f"  [dim]well-known MCP configurations read: "
+                      f"{', '.join(stack['wellKnownConfigs'])}[/dim]")
     for note in stack["notObserved"]:
         console.print(f"  [dim]not observed: {_plain(note)}[/dim]")
     console.print(f"\n{out} ({digest})")

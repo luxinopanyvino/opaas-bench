@@ -6,6 +6,9 @@ Three parts, each deterministic and read-only:
   digests, GPUs and driver (D40);
 - `agents`: MCP servers, tool and skill manifests, containers and agent
   runtimes, from the files the operator names (D45);
+- `identify`: agents that identify themselves (A2A cards, Open WebUI, agent
+  frameworks by their OpenAPI title) and MCP configurations in their usual
+  places (D63);
 - `gaps`: the auditability gap scan over both (OP1-lite).
 
 `discover()` assembles the first two into one evidence document whose `hash`
@@ -21,8 +24,9 @@ from pathlib import Path
 from typing import Any
 
 from opaas.core.hashing import sha256_json
+from opaas.discover import identify as _identify
 from opaas.discover import inventory as _inventory
-from opaas.discover.agents import Runner, discover_agent_stack
+from opaas.discover.agents import Runner, agent_stack_hash, discover_agent_stack
 from opaas.discover.inventory import compare_inventories
 
 
@@ -36,19 +40,40 @@ def discover(
     runner: Runner | None = None,
     engines: dict[str, Any] | None = None,
     listeners: dict | None = None,
+    well_known: bool = False,
+    agent_endpoints: Iterable[str] = (),
 ) -> dict[str, Any]:
     """The engine inventory and the agent stack, under one environment hash.
 
     `engines` and `listeners` can be injected; tests never probe the host.
+    `well_known` adds the MCP configurations found in their usual places, and
+    the agents that identify themselves are probed on every listener that is
+    not an engine (D63).
     """
     if listeners is None:
         listeners, _ = _inventory.listening_ports()
     inventory = engines if engines is not None else _inventory.discover_environment(
         endpoints=endpoints)
+    configs = list(configs)
+    known = _identify.well_known_mcp_configs() if well_known else []
+    configs += [path for path in known if path not in configs]
     stack = discover_agent_stack(
         configs=configs, manifests=manifests, skill_dirs=skill_dirs,
         listeners=listeners, containers=containers, runner=runner,
     )
+    engine_ports = {port for engine in inventory.get("engines") or []
+                    for port in [engine.get("port"),
+                                 *(m.get("port") for m in engine.get("alsoAnswersOn") or []),
+                                 *(r.get("port") for r in engine.get("runners") or [])]
+                    if port}
+    stack["agentEndpoints"] = _identify.probe_agents(
+        listeners or {}, endpoints=agent_endpoints, skip_ports=engine_ports)
+    stack["agentProbes"] = _identify.AGENT_PROBES_VERSION
+    if well_known:
+        stack["wellKnownConfigs"] = [path.name for path in known]
+        stack["notObserved"] = [n for n in stack["notObserved"]
+                                if not n.startswith("MCP servers:")]
+    stack["hash"] = agent_stack_hash(stack)
     document = {**inventory, "enginesHash": inventory.get("hash"), "agentStack": stack}
     document["hash"] = environment_hash(document)
     return document

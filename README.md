@@ -448,6 +448,7 @@ environment hash it was measured in, and every document can be signed with
 
 ```bash
 opaas discover scan --config ~/.config/claude/mcp.json --manifest tools.json --skills ./skills -o inventory.json
+opaas discover scan --well-known --agent-endpoint http://agents.internal:9000 -o inventory.json
 opaas discover gaps -i inventory.json --log agent-events.jsonl -o gaps.json
 ```
 
@@ -543,9 +544,14 @@ measurement format, where every cell is *measured*, *not measured* or *not appli
 each with its reason; the document itself is never rewritten.
 
 You do not have to type the manifest: `opaas audit draft -o system.json` writes one from
-what the host serves (every model, and the MCP servers and tools in the configurations you
-name), which audits on the same host with nothing declared missing and nothing observed
-undeclared. It leaves the purpose as a marker the report refuses to certify until you write
+what the host shows (D63): every model each engine serves, the agents that identify
+themselves (an A2A agent card, Open WebUI, an agent framework by its OpenAPI title), and the
+MCP servers in the configurations of known clients (Claude Desktop, Claude Code, Cursor, VS
+Code…). Pass the sentinel's log with `--records events.jsonl` and it also drafts every agent
+that acted in it, the models and tools it called and the flows, declaring only the models
+actually used. An agent smith cannot drive yet is kept with a pending adapter: listed,
+its behaviour declared not measured, never dropped. The draft audits on the same host with
+nothing declared missing and nothing observed undeclared. It leaves the purpose as a marker the report refuses to certify until you write
 it, and tells you what it could not decide (agents, flows, records).
 
 An agent is certifiable only on your own scenarios. `opaas audit template system.json -o

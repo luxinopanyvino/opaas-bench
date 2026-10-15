@@ -132,7 +132,7 @@ def run_audit(
     # 1. discover
     inventory = out / "inventory.json"
     if attempt("discover", SYSTEM_ROW, "inventory",
-               ["discover", "scan", "--out", str(inventory)], inventory):
+               ["discover", "scan", "--well-known", "--out", str(inventory)], inventory):
         run.inventory = inventory
     if run.inventory is not None:
         gaps = out / "gaps.json"
@@ -165,10 +165,14 @@ def run_audit(
             continue
         adapter = component.fields["adapter"]
         if adapter in PENDING_ADAPTERS:
-            run.steps.append(StepOutcome(
-                "smith", component.id, "pending",
-                f"the {adapter} agent adapter is not implemented yet; this agent will be "
-                "measured once it is, with this same manifest"))
+            reason = (
+                "this agent is known only from the records it left: declare the adapter and "
+                "endpoint that reach it to run scenarios; the records themselves are audited "
+                "on the row of the component that keeps them" if adapter == "observed" else
+                f"smith has no {adapter} adapter yet; this agent will be measured once it "
+                "has, with this same manifest; its records, if any, are audited on the row of "
+                "the component that keeps them")
+            run.steps.append(StepOutcome("smith", component.id, "pending", reason))
             continue
         target = _agent_args(manifest, component)
         if target is None:
