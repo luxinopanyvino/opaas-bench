@@ -138,6 +138,10 @@ code, pre { font-family: var(--font-mono); }
 
 /* ------------------------------------------------------------------ panel */
 
+/* The panel is the menu only without JavaScript; with it, the same links live
+   in the Menu dropdown and the page opens straight on the hero. */
+.js .panel { display: none; }
+
 .panel {
   border-radius: var(--radius-lg); padding: 20px 24px; margin-top: 16px;
   box-shadow: 0 12px 36px rgba(0, 0, 0, 0.25);
@@ -178,12 +182,6 @@ code, pre { font-family: var(--font-mono); }
 @keyframes caret { 50% { border-color: transparent; } }
 .hero__cta { display: flex; flex-wrap: wrap; justify-content: center; gap: 14px; margin-top: 2em; }
 .showcase .hero__cta { justify-content: flex-start; }
-
-.eyebrow {
-  display: inline-flex; align-items: center; gap: 10px; margin-bottom: 1.4em;
-  padding: 7px 14px; border-radius: 999px; border: 1px solid var(--border-glow); background: rgba(2, 6, 23, 0.6);
-  color: var(--text-muted); font-size: 0.78rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.1em;
-}
 
 .live-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent-green); flex: none; display: inline-block; animation: pulse 2.2s infinite; }
 @keyframes pulse {
@@ -466,8 +464,6 @@ code, pre { font-family: var(--font-mono); }
   .grid--3, .status { grid-template-columns: 1fr; }
   .facts { grid-template-columns: repeat(2, 1fr); }
   .values, .blocks { grid-template-columns: repeat(2, 1fr); }
-  /* On a phone the Menu dropdown replaces the panel, which would only push the hero down. */
-  .js .panel { display: none; }
 }
 
 @media (max-width: 600px) {

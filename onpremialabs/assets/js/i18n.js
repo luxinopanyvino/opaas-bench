@@ -14,7 +14,6 @@ window.OPL_I18N = {
     "nav.products": "Productos",
     "nav.community": "Comunidad",
     "nav.contact": "Contacto",
-    "hero.eyebrow": "Laboratorio de IA · On-Premise · Open Source",
     "hero.title": "onpremIA Labs: laboratorio de soluciones agénticas e inteligentes para IA en local.",
     "hero.lead": "Diseñamos, evaluamos y desplegamos inteligencia artificial que se ejecuta en tu propia infraestructura, y liberamos como código abierto las herramientas para auditarla, operarla y aprender con ella.",
     "hero.rotPrefix": "Construimos IA",

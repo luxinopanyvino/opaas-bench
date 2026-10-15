@@ -1,6 +1,6 @@
 /* onpremIA Labs — site behaviour.
    Plain JavaScript, no framework. The page is complete without it (English,
-   every section visible, the panel as its menu); this file adds the language
+   every section visible, the link panel as its menu); this file adds the language
    switch, the Menu dropdown, and the motion. Anything animated stops for visitors who
    ask for reduced motion, and for parts of the page that are off screen. */
 
