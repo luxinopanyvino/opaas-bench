@@ -37,6 +37,7 @@
   // The English text is read from the page once, so it is written in one place only.
   $$("[data-i18n]").forEach((el) => { el.dataset.en = el.textContent; });
   $$("[data-i18n-aria]").forEach((el) => { el.dataset.enAria = el.getAttribute("aria-label") || ""; });
+  $$("[data-i18n-placeholder]").forEach((el) => { el.dataset.enPh = el.getAttribute("placeholder") || ""; });
 
   function applyLanguage(next) {
     lang = next === "es" ? "es" : "en";
@@ -46,6 +47,9 @@
     });
     $$("[data-i18n-aria]").forEach((el) => {
       el.setAttribute("aria-label", (es && es[el.dataset.i18nAria]) || el.dataset.enAria);
+    });
+    $$("[data-i18n-placeholder]").forEach((el) => {
+      el.setAttribute("placeholder", (es && es[el.dataset.i18nPlaceholder]) || el.dataset.enPh);
     });
     root.lang = lang;
     $$("#lang-toggle [data-lang]").forEach((s) => s.classList.toggle("is-on", s.dataset.lang === lang));
@@ -373,6 +377,141 @@
     if (img.complete && img.naturalWidth === 0) fallback();
     else img.addEventListener("error", fallback);
   });
+
+  /* ------------------------------------------------------------ contact form */
+
+  // The site is static, so messages are relayed to the lab's mailbox by
+  // FormSubmit (formsubmit.co), which needs no account: the first message ever
+  // sent triggers a one-time activation email to this address. To use another
+  // relay or your own endpoint, change CONTACT_ENDPOINT; it must accept a JSON
+  // POST and answer with JSON. See onpremialabs/README.md.
+  const CONTACT_EMAIL = "info@onpremialabs.com";
+  const CONTACT_ENDPOINT = `https://formsubmit.co/ajax/${CONTACT_EMAIL}`;
+
+  const dialog = $("#contact-dialog");
+  const form = $("#contact-form");
+  const thanks = $("#contact-thanks");
+  const status = $("#contact-status");
+  const submit = $("#contact-submit");
+  const canDialog = typeof dialog.showModal === "function";
+  let opener = null;
+
+  function resetContact() {
+    form.hidden = false;
+    thanks.hidden = true;
+    status.hidden = true;
+    form.reset();
+    $$("[aria-invalid]", form).forEach((el) => el.removeAttribute("aria-invalid"));
+    $$(".field__error", form).forEach((el) => { el.textContent = ""; });
+  }
+
+  function openContact(topic) {
+    if (!canDialog) { window.location.href = `mailto:${CONTACT_EMAIL}`; return; }
+    if (!thanks.hidden) resetContact();
+    if (topic) form.elements.topic.value = topic;
+    dialog.showModal();
+    document.body.style.overflow = "hidden";
+    form.elements.name.focus();
+  }
+  function closeContact() { dialog.close(); }
+
+  dialog.addEventListener("close", () => {
+    document.body.style.overflow = "";
+    if (!thanks.hidden) resetContact(); // the next visitor of this page starts afresh
+    if (opener) opener.focus();
+  });
+  // A click on the backdrop (outside the card) closes it, as Escape does.
+  dialog.addEventListener("click", (e) => { if (e.target === dialog) closeContact(); });
+  $$("[data-close-contact]").forEach((b) => b.addEventListener("click", closeContact));
+  $$("[data-open-contact]").forEach((a) => a.addEventListener("click", (e) => {
+    e.preventDefault();
+    opener = a;
+    openContact(a.dataset.topic);
+  }));
+
+  function validate() {
+    const msg = dyn().form;
+    const checks = {
+      name: (v) => (v.trim().length >= 2 ? "" : msg.name),
+      email: (v) => (/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(v.trim()) ? "" : msg.email),
+      topic: (v) => (v ? "" : msg.topic),
+      message: (v) => (v.trim().length >= 10 ? "" : msg.message),
+    };
+    let first = null;
+    for (const [field, check] of Object.entries(checks)) {
+      const el = form.elements[field];
+      const error = check(el.value);
+      if (error) el.setAttribute("aria-invalid", "true");
+      else el.removeAttribute("aria-invalid");
+      $(`[data-error-for="${field}"]`, form).textContent = error;
+      if (error && !first) first = el;
+    }
+    const consent = form.elements.consent;
+    if (consent.checked) consent.removeAttribute("aria-invalid");
+    else consent.setAttribute("aria-invalid", "true");
+    $('[data-error-for="consent"]', form).textContent = consent.checked ? "" : msg.consent;
+    if (!consent.checked && !first) first = consent;
+    if (first) first.focus();
+    return !first;
+  }
+
+  // Errors clear as soon as the visitor fixes the field.
+  form.addEventListener("input", (e) => {
+    if (e.target.getAttribute("aria-invalid") === "true") {
+      e.target.removeAttribute("aria-invalid");
+      const box = $(`[data-error-for="${e.target.name}"]`, form);
+      if (box) box.textContent = "";
+    }
+  });
+
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    status.hidden = true;
+    if (!validate()) return;
+    if (form.elements._honey.value) { showThanks(); return; } // a bot: pretend, send nothing
+
+    const data = Object.fromEntries(new FormData(form));
+    const payload = {
+      name: data.name.trim(),
+      email: data.email.trim(),
+      organization: (data.organization || "").trim() || "—",
+      topic: data.topic,
+      message: data.message.trim(),
+      language: lang,
+      _subject: `[onpremialabs.com] ${data.topic} — ${data.name.trim()}`,
+      _replyto: data.email.trim(),
+      _template: "table",
+      _captcha: "false",
+    };
+
+    submit.disabled = true;
+    submit.classList.add("is-sending");
+    try {
+      const res = await fetch(CONTACT_ENDPOINT, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok || String(body.success) !== "true") throw new Error(body.message || res.status);
+      showThanks();
+    } catch (err) {
+      // Never lose the message: offer the visitor's own mail client with it filled in.
+      const mailto = `mailto:${CONTACT_EMAIL}?subject=${encodeURIComponent(payload._subject)}` +
+        `&body=${encodeURIComponent(payload.message)}`;
+      status.innerHTML = `${esc(dyn().form.failed)} <a href="${mailto}">${CONTACT_EMAIL}</a>.`;
+      status.hidden = false;
+    } finally {
+      submit.disabled = false;
+      submit.classList.remove("is-sending");
+    }
+  });
+
+  function showThanks() {
+    form.hidden = true;
+    thanks.hidden = false;
+    thanks.focus();
+  }
 
   /* ------------------------------------------------------------ start */
 

@@ -191,13 +191,43 @@ window.OPL_I18N = {
     "contact.title": "¿Construimos juntos IA on-premise?",
     "contact.lead": "Evalúa tu infraestructura con OPAAS, participa en el desarrollo de Evolve o lleva NexoDual a tu centro o empresa. Escríbenos y conversemos.",
     "contact.cta": "Contactar con onpremIA Labs",
-    "contact.kit": "Descargar Media Kit",
+    "form.close": "Cerrar",
+    "form.title": "Contactar con onpremIA Labs",
+    "form.lead": "Cuéntanos qué necesitas y te responderemos lo antes posible.",
+    "form.name": "Nombre completo",
+    "form.namePh": "Ana Pérez",
+    "form.email": "Correo electrónico",
+    "form.emailPh": "ana@empresa.com",
+    "form.org": "Empresa o institución",
+    "form.optional": "(opcional)",
+    "form.topic": "Tema",
+    "form.topicPick": "Elige un tema",
+    "form.t.opaas": "OPAAS: auditar mi infraestructura de IA",
+    "form.t.evolve": "Evolve: acceso anticipado o piloto",
+    "form.t.nexo": "NexoDual: programas de formación dual",
+    "form.t.partner": "Colaboración o patrocinio",
+    "form.t.other": "Otro asunto",
+    "form.message": "Mensaje",
+    "form.messagePh": "¿En qué podemos ayudarte?",
+    "form.consent": "Acepto que onpremIA Labs use estos datos solo para responder a mi mensaje.",
+    "form.send": "Enviar mensaje",
+    "form.thanksTitle": "¡Gracias por escribirnos!",
+    "form.thanksText": "Tu mensaje ha llegado a onpremIA Labs. Te responderemos al correo que nos indicaste lo antes posible.",
+    "form.thanksClose": "Cerrar",
     "footer.tag": "Laboratorio de desarrollo de soluciones agénticas e inteligentes.",
     "footer.rights": "Todos los derechos reservados"
   },
 
   dynamic: {
     es: {
+      form: {
+        name: "Escribe tu nombre.",
+        email: "Escribe un correo electrónico válido.",
+        topic: "Elige un tema.",
+        message: "Escribe un mensaje de al menos 10 caracteres.",
+        consent: "Necesitamos tu consentimiento para responderte.",
+        failed: "No pudimos enviar el mensaje. Inténtalo de nuevo o escríbenos directamente a"
+      },
       rotator: ["gobernable", "soberana", "segura", "identificable", "explicable"],
       actors: {
         hub: ["Un solo nexo", "Convenios, planes formativos, seguimiento de prácticas y evaluación, compartidos por las tres partes sin papeleo disperso."],
@@ -207,6 +237,14 @@ window.OPL_I18N = {
       }
     },
     en: {
+      form: {
+        name: "Please enter your name.",
+        email: "Please enter a valid email address.",
+        topic: "Please choose a topic.",
+        message: "Please write a message of at least 10 characters.",
+        consent: "We need your consent to reply to you.",
+        failed: "We could not send your message. Please try again, or write to us directly at"
+      },
       rotator: ["governable", "sovereign", "secure", "identifiable", "explainable"],
       actors: {
         hub: ["A single link", "Agreements, training plans, placement tracking and assessment, shared by all three parties without scattered paperwork."],

@@ -18,7 +18,7 @@ onpremialabs/
     ├── js/i18n.js      Spanish translations of every data-i18n key, and the
     │                   strings the scripts generate, in both languages
     ├── js/site.js      language switch, menu panel, hero mesh, lit values,
-    │                   product filter, OPAAS terminal, Evolve and NexoDual
+    │                   product filter, OPAAS terminal, Evolve, NexoDual, contact form
     └── img/            favicon and the OPAAS meerkat (copy of docs/img/mascot.svg)
 ```
 
@@ -53,10 +53,35 @@ Two kinds, both deliberate:
   with no third-party request, download the Outfit `woff2` files (SIL Open
   Font License) into `assets/fonts/`, declare them with `@font-face` at the top
   of `site.css`, and remove the three Google Fonts `<link>`s from `index.html`.
-- **Partner logos and the Media Kit** are referenced from
-  `https://www.onpremialabs.com/`, where they already live. Served from that
-  domain they are same-origin; if a logo cannot load, the card shows the
-  partner's name instead.
+- **Partner logos** are referenced from `https://www.onpremialabs.com/`, where
+  they already live. Served from that domain they are same-origin; if a logo
+  cannot load, the card shows the partner's name instead.
+- **The contact form's relay**, below.
+
+## Contact form
+
+"Contact onpremIA Labs" (and the "Become a collaborator or sponsor" card,
+with the topic preset) opens a form in a dialog: name, email, company
+(optional), topic, message and consent. A static site cannot send email, so
+`site.js` posts the message as JSON to **FormSubmit**
+(`https://formsubmit.co/ajax/info@onpremialabs.com`), which relays it to
+**info@onpremialabs.com** with the subject `[onpremialabs.com] <topic> — <name>`
+and the visitor's address as reply-to. On success the dialog shows a thank-you
+message.
+
+- **Activation, once.** FormSubmit needs no account, but the first message ever
+  sent makes it email info@onpremialabs.com an activation link. Click it, and
+  every message after that is delivered. Send one test message yourself after
+  deploying.
+- **If sending fails**, the form says so and offers a `mailto:` link with the
+  subject and message already filled in; nothing the visitor wrote is lost.
+- **Spam.** A hidden honeypot field: a submission that fills it is shown the
+  thank-you message and sent nowhere.
+- **Privacy.** The visitor's details pass through FormSubmit on the way to the
+  mailbox. To keep them on your own infrastructure, point `CONTACT_ENDPOINT` in
+  `site.js` at your own endpoint; it must accept a JSON `POST` and answer
+  `{"success": "true"}`.
+- **Without JavaScript**, the button is a plain `mailto:info@onpremialabs.com`.
 
 ## Running it locally
 

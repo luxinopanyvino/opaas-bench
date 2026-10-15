@@ -420,7 +420,7 @@
             <span class="partner__logo"><img src="https://www.onpremialabs.com/Logo_geekom.png" alt="GEEKOM" loading="lazy"></span>
             <p data-i18n="partner.geekom">Leader in high-performance Mini PCs. Collaborates on validating and benchmarking compact hardware and low-power edge AI.</p>
           </a>
-          <a class="partner partner--join reveal" href="#contacto">
+          <a class="partner partner--join reveal" href="mailto:info@onpremialabs.com" data-open-contact data-topic="Partnership">
             <span class="partner__plus" aria-hidden="true">+</span>
             <p><b data-i18n="partner.join">Become a collaborator or sponsor</b><br><span data-i18n="partner.joinSub">Drive local AI forward and the open validation of its results.</span></p>
           </a>
@@ -432,12 +432,91 @@
         <h2 class="gradient-text" data-i18n="contact.title">Shall we build on-premise AI together?</h2>
         <p data-i18n="contact.lead">Evaluate your infrastructure with OPAAS, take part in the development of Evolve, or bring NexoDual to your school or company. Write to us and let's talk.</p>
         <div class="hero__cta">
-          <a class="btn btn--green" href="https://www.linkedin.com/in/luisalbertosm/" target="_blank" rel="noopener" data-i18n="contact.cta">Contact onpremIA Labs</a>
-          <a class="btn btn--glass" href="https://www.onpremialabs.com/data/Sponsorship_Program_onpremIALabs.pdf" target="_blank" rel="noopener" data-i18n="contact.kit">Download Media Kit</a>
+          <!-- Without JavaScript this is a plain mailto link; site.js opens the form instead. -->
+          <a class="btn btn--green" href="mailto:info@onpremialabs.com" data-open-contact data-i18n="contact.cta">Contact onpremIA Labs</a>
         </div>
       </section>
     </div>
   </main>
+
+  <!-- ============================================================ contact form -->
+  <dialog class="contact" id="contact-dialog" aria-labelledby="contact-heading">
+    <button class="contact__close" type="button" data-close-contact aria-label="Close" data-i18n-aria="form.close">✕</button>
+
+    <form class="contact__form" id="contact-form" novalidate>
+      <header class="contact__head">
+        <span class="badge badge--green"><span class="live-dot"></span><span>info@onpremialabs.com</span></span>
+        <h2 class="gradient-text" id="contact-heading" data-i18n="form.title">Contact onpremIA Labs</h2>
+        <p data-i18n="form.lead">Tell us what you need and we will get back to you as soon as possible.</p>
+      </header>
+
+      <div class="field-row">
+        <div class="field">
+          <label for="cf-name" data-i18n="form.name">Full name</label>
+          <input id="cf-name" name="name" type="text" autocomplete="name" required maxlength="120" placeholder="Jane Doe" data-i18n-placeholder="form.namePh">
+          <small class="field__error" data-error-for="name"></small>
+        </div>
+        <div class="field">
+          <label for="cf-email" data-i18n="form.email">Email</label>
+          <input id="cf-email" name="email" type="email" autocomplete="email" required maxlength="160" placeholder="jane@company.com" data-i18n-placeholder="form.emailPh">
+          <small class="field__error" data-error-for="email"></small>
+        </div>
+      </div>
+
+      <div class="field-row">
+        <div class="field">
+          <label for="cf-org"><span data-i18n="form.org">Company or institution</span> <em data-i18n="form.optional">(optional)</em></label>
+          <input id="cf-org" name="organization" type="text" autocomplete="organization" maxlength="160">
+        </div>
+        <div class="field">
+          <label for="cf-topic" data-i18n="form.topic">Topic</label>
+          <select id="cf-topic" name="topic" required>
+            <option value="" data-i18n="form.topicPick">Choose a topic</option>
+            <option value="OPAAS" data-i18n="form.t.opaas">OPAAS: audit my AI infrastructure</option>
+            <option value="Evolve" data-i18n="form.t.evolve">Evolve: early access or pilot</option>
+            <option value="NexoDual" data-i18n="form.t.nexo">NexoDual: dual training programmes</option>
+            <option value="Partnership" data-i18n="form.t.partner">Collaboration or sponsorship</option>
+            <option value="Other" data-i18n="form.t.other">Something else</option>
+          </select>
+          <small class="field__error" data-error-for="topic"></small>
+        </div>
+      </div>
+
+      <div class="field">
+        <label for="cf-message" data-i18n="form.message">Message</label>
+        <textarea id="cf-message" name="message" rows="5" required minlength="10" maxlength="4000" placeholder="How can we help?" data-i18n-placeholder="form.messagePh"></textarea>
+        <small class="field__error" data-error-for="message"></small>
+      </div>
+
+      <!-- Honeypot: invisible to people, filled in by spam bots. -->
+      <div class="hp" aria-hidden="true">
+        <label for="cf-website">Website</label>
+        <input id="cf-website" name="_honey" type="text" tabindex="-1" autocomplete="off">
+      </div>
+
+      <label class="consent">
+        <input type="checkbox" name="consent" required>
+        <span data-i18n="form.consent">I agree that onpremIA Labs uses these details only to answer my message.</span>
+      </label>
+      <small class="field__error" data-error-for="consent"></small>
+
+      <p class="contact__status" id="contact-status" role="alert" hidden></p>
+
+      <div class="contact__actions">
+        <button class="btn btn--green" type="submit" id="contact-submit">
+          <span class="spinner" aria-hidden="true"></span>
+          <span data-i18n="form.send">Send message</span>
+        </button>
+      </div>
+    </form>
+
+    <div class="contact__thanks" id="contact-thanks" hidden tabindex="-1">
+      <span class="contact__check" aria-hidden="true">✓</span>
+      <h2 class="gradient-text" data-i18n="form.thanksTitle">Thank you for writing to us!</h2>
+      <p data-i18n="form.thanksText">Your message has reached onpremIA Labs. We will reply to the email address you gave us as soon as possible.</p>
+      <button class="btn btn--glass" type="button" data-close-contact data-i18n="form.thanksClose">Close</button>
+    </div>
+  </dialog>
 
   <!-- ============================================================ footer -->
   <footer class="footer">
