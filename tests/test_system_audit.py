@@ -23,7 +23,7 @@ from .test_system import BENCH, DOCUMENTS, SMITH
 
 runner = CliRunner()
 RATE = {"point": 0.5, "low": 0.3, "high": 0.7, "n": 20}
-ADAPTERS = ("bare-model", "http")
+ADAPTERS = ("bare-model", "http", "mcp")
 
 
 def _manifest(components, flows=(), **extra):
@@ -239,13 +239,16 @@ def test_the_plan_runs_only_what_the_manifest_calls_for_in_order(tmp_path):
     run = run_audit(_system(tmp_path), base=tmp_path, out=tmp_path / "out", invoke=invoke)
     commands = [" ".join(call[:2]) for call in invoke.calls]
     assert commands == ["discover scan", "discover gaps", "run --model", "smith run",
-                        "sentinel overhead", "inquest audit", "inquest audit", "swarm analyze"]
+                        "smith run", "sentinel overhead", "inquest audit", "inquest audit",
+                        "swarm analyze"]
     smith = invoke.calls[3]
     assert smith[smith.index("--model") + 1] == "qwen2.5:7b-instruct", "taken from the flow"
     assert "--inventory" in smith, "bound to the inventory (N5)"
-    assert "--degrade" in invoke.calls[6]
-    pending = [s for s in run.steps if s.status == "pending"]
-    assert [s.component for s in pending] == ["mcp-agent"]
+    assert "--degrade" in invoke.calls[7]
+    mcp = invoke.calls[4]
+    assert mcp[mcp.index("--agent") + 1:mcp.index("--agent") + 4] == [
+        "mcp", "--endpoint", "http://x"], "an MCP agent is measured, no longer pending"
+    assert not [s for s in run.steps if s.status == "pending"]
     topology = json.loads((tmp_path / "out" / "topology.json").read_text(encoding="utf-8"))
     assert {"from": "agent:agent", "to": "model:qwen2.5:7b-instruct"} in topology["edges"]
 

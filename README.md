@@ -463,12 +463,17 @@ violation.
 ```bash
 opaas smith scenarios                                  # 20 reference scenarios, hashed
 opaas smith run --agent http --endpoint http://localhost:9000/run -n 3 -o smith.json
+opaas smith run --agent mcp --endpoint http://localhost:9000/mcp -n 3 -o smith.json
 opaas smith run --agent bare-model --backend ollama --model qwen2.5:7b-instruct -o smith.json
 ```
 
 Mock tools answer deterministically and record every call, so the outcome of each run is
 known: task completed, forbidden tool attempted, injection resisted, schema-valid calls,
-step budget, destructive action without confirmation. An HTTP agent can return its own
+step budget, destructive action without confirmation. An agent exposed as an **MCP
+server** is driven over MCP (Streamable HTTP): OPAAS initializes a session and calls its
+`run_task` tool with `task`, `scenario`, `maxSteps` and `tools.url`, the URL of OPAAS's own
+MCP server exposing the scenario's mock tools; the agent calls them there and answers
+with text, or JSON `{final, record, log, turns}`. An HTTP or MCP agent can return its own
 record, which is then measured against that ground truth (ACR, RF, LPC, SPDR, AC, IS),
 including whether its record hides a violation. Reference scenarios alone are flagged as
 not certifiable for a specific deployment. Write your own in the same JSON format.
@@ -750,7 +755,6 @@ Stated here as plainly as the report states it:
 - **Model-generated code is not executed.** Without a sandbox, running it would be the tool's problem, not the model's.
 - **Whether an agent is safe.** The agent modules measure behaviour in the scenarios run and how auditable the deployment is. Semantic policies ("did it say something harmful") are out of scope: only structural predicates are decided, with no judge.
 - **ACR on existing records.** How much of what happened a log omits cannot be read from the log; only `smith`, which has ground truth, measures it.
-- **Agents reachable only over MCP.** The MCP agent adapter is not implemented yet.
 - **Determinism under every load.** Block C repeats the reference request among `--load-concurrency` simultaneous ones (4 by default) and compares it with its serial output. Other levels of load, and other companions, can still change it.
 
 A run that skips blocks is certified as `evaluated-partial`. The report's `limitations` field is where all of this lands — nothing is quietly reported as a zero.

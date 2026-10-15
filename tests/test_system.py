@@ -126,12 +126,19 @@ def test_ids_are_unique_and_flows_name_components():
         load_manifest(_manifest(flows=[{"from": "agent", "to": "nowhere"}]))
 
 
-def test_an_mcp_agent_is_accepted_before_its_adapter_exists():
-    """The manifest must not change the day the MCP adapter lands (§10.5)."""
+def test_an_adapter_is_accepted_before_it_exists_and_mcp_now_does(monkeypatch):
+    """The manifest must not change the day an adapter lands (§10.5): MCP landed in S4."""
+    import opaas.system.manifest as manifest_module
+
     components = [{"id": "agent", "kind": "agent", "adapter": "mcp", "endpoint": "http://x"}]
     manifest = load_manifest(_manifest(components=components, flows=[]),
-                             known_adapters=("bare-model", "http"))
-    assert manifest.pending() == [{"component": "agent", "adapter": "mcp"}]
+                             known_adapters=("bare-model", "http", "mcp"))
+    assert manifest.pending() == []
+    monkeypatch.setattr(manifest_module, "PENDING_ADAPTERS", frozenset({"a2a"}))
+    future = [{"id": "agent", "kind": "agent", "adapter": "a2a"}]
+    manifest = load_manifest(_manifest(components=future, flows=[]),
+                             known_adapters=("bare-model", "http", "mcp"))
+    assert manifest.pending() == [{"component": "agent", "adapter": "a2a"}]
     with pytest.raises(SystemManifestError, match="adapter must be one of"):
         load_manifest(_manifest(components=[{"id": "agent", "kind": "agent",
                                              "adapter": "langchain"}], flows=[]),
@@ -317,7 +324,7 @@ def test_audit_validate_and_extract_through_the_cli(tmp_path):
     ])), encoding="utf-8")
     validated = runner.invoke(app, ["audit", "validate", str(system)])
     assert validated.exit_code == 0, validated.output
-    assert "not implemented yet" in validated.output
+    assert "not implemented yet" not in validated.output, "MCP agents are measured now"
 
     document, out = tmp_path / "smith.json", tmp_path / "cells.json"
     document.write_text(json.dumps(SMITH), encoding="utf-8")

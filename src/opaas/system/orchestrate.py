@@ -232,8 +232,8 @@ def run_audit(
 
 def _agent_args(manifest: SystemManifest, component: Any) -> list[str] | None:
     adapter = component.fields["adapter"]
-    if adapter == "http":
-        return ["--agent", "http", "--endpoint", str(component.fields["endpoint"])]
+    if adapter in ("http", "mcp"):
+        return ["--agent", adapter, "--endpoint", str(component.fields["endpoint"])]
     backend, model = component.fields.get("backend"), component.fields.get("model")
     base_url = component.fields.get("base_url")
     if not (backend and model):
