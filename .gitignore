@@ -25,3 +25,6 @@ site/
 Thumbs.db
 .idea/
 .vscode/
+
+# The website's contact form settings live only on the server.
+onpremialabs/contact.config.php
