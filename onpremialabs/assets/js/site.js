@@ -392,13 +392,12 @@
 
   /* ------------------------------------------------------------ contact form */
 
-  // The site is static, so messages are relayed to the lab's mailbox by
-  // FormSubmit (formsubmit.co), which needs no account: the first message ever
-  // sent triggers a one-time activation email to this address. To use another
-  // relay or your own endpoint, change CONTACT_ENDPOINT; it must accept a JSON
-  // POST and answer with JSON. See onpremialabs/README.md.
+  // Messages go to contact.php, next to this page on the lab's own hosting,
+  // which emails them to CONTACT_EMAIL: the visitor's details never pass
+  // through a third party. It takes a JSON POST and answers {"success": true}
+  // or {"success": false, "error": "..."}. See onpremialabs/README.md.
   const CONTACT_EMAIL = "info@onpremialabs.com";
-  const CONTACT_ENDPOINT = `https://formsubmit.co/ajax/${CONTACT_EMAIL}`;
+  const CONTACT_ENDPOINT = "contact.php";
 
   const dialog = $("#contact-dialog");
   const form = $("#contact-form");
@@ -486,14 +485,11 @@
     const payload = {
       name: data.name.trim(),
       email: data.email.trim(),
-      organization: (data.organization || "").trim() || "—",
+      organization: (data.organization || "").trim(),
       topic: data.topic,
       message: data.message.trim(),
       language: lang,
-      _subject: `[onpremialabs.com] ${data.topic} — ${data.name.trim()}`,
-      _replyto: data.email.trim(),
-      _template: "table",
-      _captcha: "false",
+      _honey: data._honey || "",
     };
 
     submit.disabled = true;
@@ -505,13 +501,16 @@
         body: JSON.stringify(payload),
       });
       const body = await res.json().catch(() => ({}));
-      if (!res.ok || String(body.success) !== "true") throw new Error(body.message || res.status);
+      if (!res.ok || body.success !== true) throw Object.assign(new Error(body.error || res.status), { status: res.status });
       showThanks();
     } catch (err) {
+      console.warn("Contact form not sent:", err.status || "", err.message); // the server's reason, for whoever debugs it
       // Never lose the message: offer the visitor's own mail client with it filled in.
-      const mailto = `mailto:${CONTACT_EMAIL}?subject=${encodeURIComponent(payload._subject)}` +
+      const subject = `[onpremialabs.com] ${payload.topic} — ${payload.name}`;
+      const mailto = `mailto:${CONTACT_EMAIL}?subject=${encodeURIComponent(subject)}` +
         `&body=${encodeURIComponent(payload.message)}`;
-      status.innerHTML = `${esc(dyn().form.failed)} <a href="${mailto}">${CONTACT_EMAIL}</a>.`;
+      const text = err.status === 429 ? dyn().form.tooMany : dyn().form.failed;
+      status.innerHTML = `${esc(text)} <a href="${mailto}">${CONTACT_EMAIL}</a>.`;
       status.hidden = false;
     } finally {
       submit.disabled = false;

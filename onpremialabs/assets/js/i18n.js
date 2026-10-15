@@ -223,7 +223,8 @@ window.OPL_I18N = {
         topic: "Elige un tema.",
         message: "Escribe un mensaje de al menos 10 caracteres.",
         consent: "Necesitamos tu consentimiento para responderte.",
-        failed: "No pudimos enviar el mensaje. Inténtalo de nuevo o escríbenos directamente a"
+        failed: "No pudimos enviar el mensaje. Inténtalo de nuevo o escríbenos directamente a",
+        tooMany: "Has enviado varios mensajes seguidos. Espera unos minutos o escríbenos directamente a"
       },
       rotator: ["gobernable", "soberana", "segura", "identificable", "explicable"],
       actors: {
@@ -240,7 +241,8 @@ window.OPL_I18N = {
         topic: "Please choose a topic.",
         message: "Please write a message of at least 10 characters.",
         consent: "We need your consent to reply to you.",
-        failed: "We could not send your message. Please try again, or write to us directly at"
+        failed: "We could not send your message. Please try again, or write to us directly at",
+        tooMany: "You have sent several messages in a row. Please wait a few minutes, or write to us directly at"
       },
       rotator: ["governable", "sovereign", "secure", "identifiable", "explainable"],
       actors: {
