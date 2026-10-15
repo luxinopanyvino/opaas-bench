@@ -504,6 +504,7 @@
       if (!res.ok || body.success !== true) throw Object.assign(new Error(body.error || res.status), { status: res.status });
       showThanks();
     } catch (err) {
+      console.warn("Contact form not sent:", err.status || "", err.message); // the server's reason, for whoever debugs it
       // Never lose the message: offer the visitor's own mail client with it filled in.
       const subject = `[onpremialabs.com] ${payload.topic} — ${payload.name}`;
       const mailto = `mailto:${CONTACT_EMAIL}?subject=${encodeURIComponent(subject)}` +

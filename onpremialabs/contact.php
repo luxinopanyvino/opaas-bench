@@ -4,7 +4,9 @@
  *
  * Receives the website's contact form as JSON and emails it to the lab's
  * mailbox with PHP's mail(), which Hostinger delivers through its own MTA.
- * Settings live in contact.config.php (see contact.config.example.php).
+ * Settings live in contact.config.php (see contact.config.example.php); without
+ * that file the defaults below apply, so the form keeps working if it is lost
+ * when public_html is replaced.
  *
  * Request:  POST application/json
  *           {name, email, organization?, topic, message, language?, _honey?}
@@ -42,19 +44,31 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') {
 
 // ------------------------------------------------------------------ config
 
-$configPath = __DIR__ . '/contact.config.php';
-if (!is_readable($configPath)) {
-    fail(500, 'contact.config.php is missing on the server.');
-}
-/** @var array<string, mixed> $config */
-$config = require $configPath;
+const DEFAULTS = [
+    'to_email' => 'info@onpremialabs.com',
+    'envelope_from' => 'info@onpremialabs.com',
+    'subject' => '[onpremIA Labs] Contact',
+    'rate_limit_max' => 5,
+    'rate_limit_window_sec' => 600,
+    'allowed_origins' => ['https://www.onpremialabs.com', 'https://onpremialabs.com'],
+];
 
-$toEmail = trim((string) ($config['to_email'] ?? ''));
+$configPath = __DIR__ . '/contact.config.php';
+$config = DEFAULTS;
+if (is_readable($configPath)) {
+    $loaded = require $configPath;
+    if (!is_array($loaded)) {
+        fail(500, 'contact.config.php must return an array. Check the file.');
+    }
+    $config = array_merge(DEFAULTS, $loaded);
+}
+
+$toEmail = trim((string) $config['to_email']);
 $envelopeFrom = trim((string) ($config['envelope_from'] ?? $config['from_email'] ?? ''));
-$subjectPrefix = trim((string) ($config['subject'] ?? '[onpremIA Labs] Contact'));
-$rateLimitMax = max(1, (int) ($config['rate_limit_max'] ?? 5));
-$rateLimitWindow = max(60, (int) ($config['rate_limit_window_sec'] ?? 600));
-$allowedOrigins = array_map('strval', (array) ($config['allowed_origins'] ?? []));
+$subjectPrefix = trim((string) $config['subject']);
+$rateLimitMax = max(1, (int) $config['rate_limit_max']);
+$rateLimitWindow = max(60, (int) $config['rate_limit_window_sec']);
+$allowedOrigins = array_map('strval', (array) $config['allowed_origins']);
 
 if (!filter_var($toEmail, FILTER_VALIDATE_EMAIL) || !filter_var($envelopeFrom, FILTER_VALIDATE_EMAIL)) {
     fail(500, 'Invalid mail settings. Check contact.config.php.');

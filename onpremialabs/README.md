@@ -71,10 +71,12 @@ through a third party. On success the dialog shows a thank-you message.
 On the server (Hostinger, PHP 8.1+):
 
 1. Upload `contact.php` next to `index.html`.
-2. Copy `contact.config.example.php` to **`contact.config.php`** on the server
-   and adjust it: the destination mailbox, the sending mailbox, the subject
-   prefix, the rate limit and the allowed origins. It is gitignored; the one
-   already on the hosting has the same keys and keeps working.
+2. Optionally, copy `contact.config.example.php` to **`contact.config.php`** on
+   the server to change the destination mailbox, the sending mailbox, the
+   subject prefix, the rate limit or the allowed origins. Without it,
+   `contact.php` uses the same values as the example (info@onpremialabs.com),
+   so losing the file when `public_html` is replaced does not break the form.
+   It is gitignored.
 3. `envelope_from` must be a real mailbox of the domain in Hostinger's Emails
    panel, so SPF and DMARC pass.
 4. Send one test message from the live site and check the inbox, and the spam
