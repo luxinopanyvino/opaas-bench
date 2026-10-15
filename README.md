@@ -10,7 +10,7 @@
 and prove it with a certificate anyone can verify offline.**
 
 [![CI](https://github.com/luxinopanyvino/opaas-bench/actions/workflows/ci.yml/badge.svg)](https://github.com/luxinopanyvino/opaas-bench/actions/workflows/ci.yml)
-[![Release](https://img.shields.io/github/v/release/luxinopanyvino/opaas-bench?color=1f4e3d)](https://github.com/luxinopanyvino/opaas-bench/releases)
+[![Version 0.2.0](https://img.shields.io/badge/version-0.2.0-1f4e3d)](https://github.com/luxinopanyvino/opaas-bench/releases/tag/v0.2.0)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)](pyproject.toml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Methodology 1.0-draft](https://img.shields.io/badge/methodology-1.0--draft-8fae6a)](docs/methodology.md)
