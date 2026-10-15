@@ -14,26 +14,48 @@ wheel only contains `src/opaas`.
 onpremialabs/
 ├── index.html          the whole page, in Spanish; complete without JavaScript
 └── assets/
-    ├── css/site.css    design tokens (light and dark), layout, motion
+    ├── css/site.css    design tokens (those of www.onpremialabs.com), layout, motion
     ├── js/i18n.js      English translations of every data-i18n key, and the
     │                   strings the scripts generate, in both languages
-    ├── js/site.js      language and theme switches, hero mesh, values tabs,
+    ├── js/site.js      language switch, menu panel, hero mesh, lit values,
     │                   product filter, OPAAS terminal, Evolve and NexoDual
     └── img/            favicon and the OPAAS meerkat (copy of docs/img/mascot.svg)
 ```
 
+## Design
+
+The site follows the design of the live www.onpremialabs.com, so both read as
+one brand: the deep navy background with blue and green glows, glass cards
+with 24px corners, the Outfit typeface, the emerald accent, the "Panel" with
+pill buttons, numbered cards, big green metrics, and partner logos in grey
+until hovered. The colour tokens at the top of `site.css` are the ones that
+site defines (`--bg-main`, `--bg-card`, `--accent-green`, …); keep them in
+step if the live site changes.
+
 ## Principles
 
-- **No third-party resources.** No web fonts, CDNs, analytics or cookies: the
-  site renders with the system font stack and loads only its own files. It is
-  how the sovereignty value is practised, and the page says so — keep it true.
 - **Spanish is the source text.** `index.html` holds it; `site.js` reads it from
   the page and swaps in `i18n.js` for English. A new text needs a `data-i18n`
-  key (or `data-i18n-html` / `data-i18n-aria`) and its English entry.
+  key (or `data-i18n-aria`) and its English entry.
 - **No claim the products cannot back.** Evolve and NexoDual are marked
-  *in development*; the OPAAS terminal is labelled an illustrative demo.
+  *in development*; the OPAAS terminal is labelled an illustrative demo, and
+  the evaluation blocks list only what OPAAS measures.
+- **No cookies, no analytics.** `localStorage` keeps only the chosen language.
 - **Motion is optional.** Everything animated stops under
   `prefers-reduced-motion` and when it is off screen.
+
+### External resources
+
+Two kinds, both deliberate:
+
+- **Outfit, from Google Fonts**, as the live site loads it. To serve the site
+  with no third-party request, download the Outfit `woff2` files (SIL Open
+  Font License) into `assets/fonts/`, declare them with `@font-face` at the top
+  of `site.css`, and remove the three Google Fonts `<link>`s from `index.html`.
+- **Partner logos and the Media Kit** are referenced from
+  `https://www.onpremialabs.com/`, where they already live. Served from that
+  domain they are same-origin; if a logo cannot load, the card shows the
+  partner's name instead.
 
 ## Running it locally
 

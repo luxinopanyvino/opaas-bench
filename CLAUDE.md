@@ -160,7 +160,7 @@ docs/     design.md, methodology.md, decisions.md, workplan.md, datasets.md, key
 tests/    967 tests, one file per module, plus conftest.py with the fake backends
 scripts/  sprite_from_png.py — regenerates cli/_sprite_data.py from docs/img/mascot.png
 web/      README describing the published site layout (the generator lives in src/)
-onpremialabs/  the lab's own website (static HTML/CSS/JS, no third-party resources);
+onpremialabs/  the lab's own website (static HTML/CSS/JS, the design of www.onpremialabs.com);
           not part of the package, excluded from the sdist — see its README
 ```
 

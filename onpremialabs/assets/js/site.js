@@ -1,7 +1,7 @@
 /* onpremIA Labs — site behaviour.
-   Plain JavaScript, no framework and no third-party code. The page is complete
-   without it (Spanish, every section visible); this file adds the language
-   switch, the theme, and the motion. Anything animated stops for visitors who
+   Plain JavaScript, no framework. The page is complete without it (Spanish,
+   every section visible, the panel always shown); this file adds the language
+   switch, the menu, and the motion. Anything animated stops for visitors who
    ask for reduced motion, and for parts of the page that are off screen. */
 
 (() => {
@@ -36,7 +36,6 @@
 
   // The Spanish text is read from the page once, so it is written in one place only.
   $$("[data-i18n]").forEach((el) => { el.dataset.es = el.textContent; });
-  $$("[data-i18n-html]").forEach((el) => { el.dataset.esHtml = el.innerHTML; });
   $$("[data-i18n-aria]").forEach((el) => { el.dataset.esAria = el.getAttribute("aria-label") || ""; });
 
   function applyLanguage(next) {
@@ -44,9 +43,6 @@
     const en = lang === "en" ? I18N.en : null;
     $$("[data-i18n]").forEach((el) => {
       el.textContent = (en && en[el.dataset.i18n]) || el.dataset.es;
-    });
-    $$("[data-i18n-html]").forEach((el) => {
-      el.innerHTML = (en && en[el.dataset.i18nHtml]) || el.dataset.esHtml;
     });
     $$("[data-i18n-aria]").forEach((el) => {
       el.setAttribute("aria-label", (en && en[el.dataset.i18nAria]) || el.dataset.esAria);
@@ -59,61 +55,47 @@
 
   const dyn = () => I18N.dynamic[lang] || I18N.dynamic.es;
   const onLanguage = (fn) => listeners.push(fn);
-
   $("#lang-toggle").addEventListener("click", () => applyLanguage(lang === "es" ? "en" : "es"));
 
-  /* ------------------------------------------------------------ theme */
+  /* ------------------------------------------------------------ top bar and menu */
 
-  const darkQuery = window.matchMedia("(prefers-color-scheme: dark)");
-  const effectiveTheme = () => root.dataset.theme || (darkQuery.matches ? "dark" : "light");
-  const themeButton = $("#theme-toggle");
+  const topbar = $(".topbar");
+  const menuBtn = $("#menu-btn");
+  const panel = $("#panel-nav");
+  const compact = window.matchMedia("(max-width: 900px)");
 
-  function labelTheme() {
-    const d = dyn();
-    themeButton.setAttribute("aria-label", effectiveTheme() === "dark" ? d.themeLight : d.themeDark);
-  }
-
-  themeButton.addEventListener("click", () => {
-    const next = effectiveTheme() === "dark" ? "light" : "dark";
-    root.dataset.theme = next;
-    store.set("opl-theme", next);
-    labelTheme();
-    mesh.recolour();
-  });
-  darkQuery.addEventListener?.("change", () => { labelTheme(); mesh.recolour(); });
-  onLanguage(labelTheme);
-
-  /* ------------------------------------------------------------ navigation */
-
-  const nav = $(".nav");
-  const burger = $("#nav-burger");
-  const links = $("#nav-links");
-
-  const onScroll = () => nav.classList.toggle("is-scrolled", window.scrollY > 8);
+  const onScroll = () => topbar.classList.toggle("is-scrolled", window.scrollY > 8);
   window.addEventListener("scroll", onScroll, { passive: true });
   onScroll();
 
-  burger.addEventListener("click", () => {
-    const open = burger.getAttribute("aria-expanded") !== "true";
-    burger.setAttribute("aria-expanded", String(open));
-    links.classList.toggle("is-open", open);
-  });
-  links.addEventListener("click", (e) => {
-    if (e.target.closest("a")) {
-      burger.setAttribute("aria-expanded", "false");
-      links.classList.remove("is-open");
+  function setMenu(open) {
+    menuBtn.setAttribute("aria-expanded", String(open));
+    panel.classList.toggle("is-open", open);
+  }
+  // On a phone the panel is the menu and opens in place; on a wide screen it is
+  // always shown, so the button brings it back into view instead.
+  menuBtn.addEventListener("click", () => {
+    if (compact.matches) {
+      const open = menuBtn.getAttribute("aria-expanded") !== "true";
+      setMenu(open);
+      if (open) panel.scrollIntoView({ block: "start" });
+    } else {
+      panel.scrollIntoView({ block: "start" });
+      $("a", panel).focus({ preventScroll: true });
     }
   });
+  panel.addEventListener("click", (e) => { if (e.target.closest("a") && compact.matches) setMenu(false); });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") setMenu(false); });
 
   if ("IntersectionObserver" in window) {
-    const navLinks = $$("a", links);
+    const pills = $$("a.pill", panel);
     const spy = new IntersectionObserver((entries) => {
       entries.forEach((entry) => {
         if (!entry.isIntersecting) return;
-        navLinks.forEach((a) => a.classList.toggle("is-current", a.hash === `#${entry.target.id}`));
+        pills.forEach((a) => a.classList.toggle("is-current", a.hash === `#${entry.target.id}`));
       });
     }, { rootMargin: "-45% 0px -50% 0px" });
-    navLinks.forEach((a) => { const s = $(a.hash); if (s) spy.observe(s); });
+    pills.forEach((a) => { const s = $(a.hash); if (s) spy.observe(s); });
   }
 
   /* ------------------------------------------------------------ reveal */
@@ -123,23 +105,16 @@
       entries.forEach((entry) => {
         if (entry.isIntersecting) { entry.target.classList.add("is-in"); io.unobserve(entry.target); }
       });
-    }, { threshold: 0.12, rootMargin: "0px 0px -40px 0px" });
+    }, { threshold: 0.1, rootMargin: "0px 0px -40px 0px" });
     $$(".reveal").forEach((el, i) => {
-      el.style.transitionDelay = `${(i % 4) * 70}ms`;
+      el.style.transitionDelay = `${(i % 5) * 60}ms`;
       io.observe(el);
     });
   } else {
     $$(".reveal").forEach((el) => el.classList.add("is-in"));
   }
 
-  /* ------------------------------------------------------------ hero: clock and rotator */
-
-  const clock = $("#board-clock");
-  const tick = () => {
-    clock.textContent = new Date().toLocaleTimeString(lang === "en" ? "en-GB" : "es-ES", { hour12: false });
-  };
-  tick();
-  setInterval(tick, 1000);
+  /* ------------------------------------------------------------ hero rotator */
 
   const rotator = $("#rotator");
   let rotIndex = 0;
@@ -150,8 +125,7 @@
     rotator.textContent = "";
     const step = () => {
       rotator.textContent = word.slice(0, ++i);
-      if (i < word.length) rotTimer = setTimeout(step, 70);
-      else rotTimer = setTimeout(done, 1900);
+      rotTimer = i < word.length ? setTimeout(step, 70) : setTimeout(done, 1900);
     };
     step();
   }
@@ -167,49 +141,37 @@
     const words = dyn().rotator;
     typeWord(words[rotIndex % words.length], () => eraseWord(() => { rotIndex++; rotate(); }));
   }
-  function startRotator() {
+  onLanguage(() => {
     clearTimeout(rotTimer);
-    if (reduced) { rotator.textContent = dyn().rotator.join(" · "); return; }
-    rotate();
-  }
-  onLanguage(startRotator);
+    if (reduced) rotator.textContent = dyn().rotator.join(" · ");
+    else rotate();
+  });
 
-  /* ------------------------------------------------------------ hero: agent mesh */
+  /* ------------------------------------------------------------ hero mesh */
 
-  const mesh = (() => {
+  (() => {
     const canvas = $("#mesh");
     const ctx = canvas.getContext("2d");
-    let w = 0, h = 0, dpr = 1, nodes = [], packets = [], raf = 0, running = false;
-    let colNode = "29,115,80", colWarm = "163,93,42";
-
-    function recolour() {
-      const css = getComputedStyle(root);
-      colNode = css.getPropertyValue("--mesh-node").trim() || colNode;
-      colWarm = css.getPropertyValue("--mesh-warm").trim() || colWarm;
-      if (!running) draw();
-    }
+    const GREEN = "16,185,129", BLUE = "59,130,246", SKY = "56,189,248";
+    let w = 0, h = 0, nodes = [], packets = [], raf = 0, running = false;
 
     function resize() {
       const rect = canvas.getBoundingClientRect();
-      dpr = Math.min(window.devicePixelRatio || 1, 2);
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
       w = rect.width; h = rect.height;
       canvas.width = Math.round(w * dpr); canvas.height = Math.round(h * dpr);
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      const count = Math.round(Math.min(90, Math.max(28, (w * h) / 16000)));
+      const count = Math.round(Math.min(80, Math.max(26, (w * h) / 14000)));
       nodes = Array.from({ length: count }, () => ({
-        x: Math.random() * w,
-        y: Math.random() * h,
-        vx: (Math.random() - 0.5) * 0.28,
-        vy: (Math.random() - 0.5) * 0.28,
-        r: Math.random() * 1.6 + 1.1,
-        agent: Math.random() < 0.14,
-        phase: Math.random() * Math.PI * 2,
+        x: Math.random() * w, y: Math.random() * h,
+        vx: (Math.random() - 0.5) * 0.3, vy: (Math.random() - 0.5) * 0.3,
+        r: Math.random() * 1.5 + 1, agent: Math.random() < 0.15, phase: Math.random() * 6.28,
       }));
       packets = [];
       if (!running) draw();
     }
 
-    const linkDist = () => Math.min(170, Math.max(110, w / 9));
+    const linkDist = () => Math.min(160, Math.max(100, w / 8));
 
     function step() {
       for (const n of nodes) {
@@ -217,13 +179,12 @@
         if (n.x < -20) n.x = w + 20; else if (n.x > w + 20) n.x = -20;
         if (n.y < -20) n.y = h + 20; else if (n.y > h + 20) n.y = -20;
       }
-      // An agent occasionally sends a message to a neighbour: a packet travelling a link.
+      // Now and then an agent sends a message to a neighbour: a packet along a link.
       if (packets.length < 6 && Math.random() < 0.05) {
         const agents = nodes.filter((n) => n.agent);
         const from = agents[Math.floor(Math.random() * agents.length)];
         if (from) {
-          const d = linkDist();
-          const near = nodes.filter((n) => n !== from && Math.hypot(n.x - from.x, n.y - from.y) < d);
+          const near = nodes.filter((n) => n !== from && Math.hypot(n.x - from.x, n.y - from.y) < linkDist());
           const to = near[Math.floor(Math.random() * near.length)];
           if (to) packets.push({ from, to, t: 0 });
         }
@@ -235,12 +196,11 @@
       ctx.clearRect(0, 0, w, h);
       const d = linkDist();
       for (let i = 0; i < nodes.length; i++) {
-        const a = nodes[i];
         for (let j = i + 1; j < nodes.length; j++) {
-          const b = nodes[j];
+          const a = nodes[i], b = nodes[j];
           const dist = Math.hypot(a.x - b.x, a.y - b.y);
           if (dist < d) {
-            ctx.strokeStyle = `rgba(${colNode},${(1 - dist / d) * 0.28})`;
+            ctx.strokeStyle = `rgba(${BLUE},${(1 - dist / d) * 0.3})`;
             ctx.lineWidth = 1;
             ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
           }
@@ -248,20 +208,19 @@
       }
       for (const n of nodes) {
         if (n.agent) {
-          const glow = 5 + Math.sin(n.phase) * 2.5;
-          ctx.fillStyle = `rgba(${colWarm},0.16)`;
-          ctx.beginPath(); ctx.arc(n.x, n.y, n.r + glow, 0, Math.PI * 2); ctx.fill();
-          ctx.fillStyle = `rgba(${colWarm},0.95)`;
+          ctx.fillStyle = `rgba(${GREEN},0.15)`;
+          ctx.beginPath(); ctx.arc(n.x, n.y, n.r + 5 + Math.sin(n.phase) * 2.5, 0, 6.283); ctx.fill();
+          ctx.fillStyle = `rgba(${GREEN},0.95)`;
         } else {
-          ctx.fillStyle = `rgba(${colNode},0.7)`;
+          ctx.fillStyle = `rgba(${SKY},0.55)`;
         }
-        ctx.beginPath(); ctx.arc(n.x, n.y, n.agent ? n.r + 1.2 : n.r, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.arc(n.x, n.y, n.agent ? n.r + 1.2 : n.r, 0, 6.283); ctx.fill();
       }
       for (const p of packets) {
-        const x = p.from.x + (p.to.x - p.from.x) * p.t;
-        const y = p.from.y + (p.to.y - p.from.y) * p.t;
-        ctx.fillStyle = `rgba(${colWarm},${Math.sin(p.t * Math.PI)})`;
-        ctx.beginPath(); ctx.arc(x, y, 2.4, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = `rgba(${GREEN},${Math.sin(p.t * Math.PI)})`;
+        ctx.beginPath();
+        ctx.arc(p.from.x + (p.to.x - p.from.x) * p.t, p.from.y + (p.to.y - p.from.y) * p.t, 2.4, 0, 6.283);
+        ctx.fill();
       }
     }
 
@@ -272,59 +231,30 @@
     let resizeTimer;
     window.addEventListener("resize", () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(resize, 150); });
     document.addEventListener("visibilitychange", () => (document.hidden ? stop() : start()));
-
-    recolour();
     resize();
     whileVisible(canvas, start, stop);
-    return { recolour };
   })();
 
-  /* ------------------------------------------------------------ values */
+  /* ------------------------------------------------------------ values: one lit at a time */
 
-  const valuesBox = $(".values");
-  const tabs = $$(".vtab");
-  const CYCLE_MS = 7000;
-  let valueIndex = 0, valueTimer = null, valuesAuto = !reduced, valuesOnScreen = false;
-  valuesBox.style.setProperty("--cycle", `${CYCLE_MS}ms`);
-
-  function selectValue(index, focus) {
-    valueIndex = (index + tabs.length) % tabs.length;
-    tabs.forEach((tab, i) => {
-      const on = i === valueIndex;
-      tab.setAttribute("aria-selected", String(on));
-      tab.tabIndex = on ? 0 : -1;
-      $(`#${tab.getAttribute("aria-controls")}`).hidden = !on;
-    });
-    if (focus) tabs[valueIndex].focus();
-    scheduleValues();
+  const values = $$(".value");
+  let valueIndex = -1, valueTimer = null, hovering = false;
+  function lightNext() {
+    if (hovering) return;
+    valueIndex = (valueIndex + 1) % values.length;
+    values.forEach((v, i) => v.classList.toggle("is-lit", i === valueIndex));
   }
-  function scheduleValues() {
-    clearTimeout(valueTimer);
-    if (valuesAuto && valuesOnScreen) valueTimer = setTimeout(() => selectValue(valueIndex + 1), CYCLE_MS);
-  }
-  function stopAuto() {
-    // Once a visitor picks a value themselves, the page stops changing it under them.
-    valuesAuto = false;
-    clearTimeout(valueTimer);
-    valuesBox.classList.add("is-paused");
-  }
-
-  tabs.forEach((tab, i) => tab.addEventListener("click", () => { stopAuto(); selectValue(i); }));
-  $(".values__tabs").addEventListener("keydown", (e) => {
-    const keys = { ArrowDown: 1, ArrowRight: 1, ArrowUp: -1, ArrowLeft: -1 };
-    if (e.key in keys) { e.preventDefault(); stopAuto(); selectValue(valueIndex + keys[e.key], true); }
-    if (e.key === "Home") { e.preventDefault(); stopAuto(); selectValue(0, true); }
-    if (e.key === "End") { e.preventDefault(); stopAuto(); selectValue(tabs.length - 1, true); }
-  });
-  if (reduced) valuesBox.classList.add("is-paused");
-  whileVisible(valuesBox, () => {
-    valuesOnScreen = true;
-    if (valuesAuto) selectValue(valueIndex); // restarts the progress bar from zero
-  }, () => { valuesOnScreen = false; clearTimeout(valueTimer); });
+  $(".values").addEventListener("mouseenter", () => { hovering = true; values.forEach((v) => v.classList.remove("is-lit")); });
+  $(".values").addEventListener("mouseleave", () => { hovering = false; });
+  whileVisible($(".values"), () => {
+    if (reduced || valueTimer) return;
+    lightNext();
+    valueTimer = setInterval(lightNext, 2600);
+  }, () => { clearInterval(valueTimer); valueTimer = null; });
 
   /* ------------------------------------------------------------ product filter */
 
-  const chips = $$(".chip[data-filter]");
+  const chips = $$("[data-filter]");
   const products = $$("#products .product");
   chips.forEach((chip) => chip.addEventListener("click", () => {
     const filter = chip.dataset.filter;
@@ -343,6 +273,7 @@
 
   /* ------------------------------------------------------------ OPAAS terminal */
 
+  // Real command names; the output is illustrative and the page says so.
   const SCRIPT = [
     ["cmd", "opaas discover scan --well-known -o inventory.json"],
     ["ok", "✓ engine  ollama  127.0.0.1:11434  qwen2.5:7b-instruct"],
@@ -404,7 +335,7 @@
   function evolveTick() {
     stageIndex = (stageIndex + 1) % stages.length;
     stages.forEach((s, i) => s.classList.toggle("is-on", i === stageIndex));
-    // A few modalities light up together: the flow combines them.
+    // A few modalities light up together: one flow combines them.
     const pick = new Set();
     while (pick.size < 3) pick.add(Math.floor(Math.random() * modalities.length));
     modalities.forEach((m, i) => m.classList.toggle("is-on", pick.has(i)));
@@ -428,16 +359,24 @@
     $("#actor-title").textContent = title;
     $("#actor-text").textContent = text;
     actorBox.classList.remove("is-swapping");
-    void actorBox.offsetWidth; // restart the animation
+    void actorBox.offsetWidth; // restarts the animation
     actorBox.classList.add("is-swapping");
   }
   actors.forEach((a) => a.addEventListener("click", () => showActor(a.dataset.actor)));
   onLanguage(() => showActor(currentActor));
 
+  /* ------------------------------------------------------------ partner logos */
+
+  // The logos live on www.onpremialabs.com; if one cannot load, its name stays.
+  $$(".partner__logo img").forEach((img) => {
+    const fallback = () => { img.replaceWith(Object.assign(document.createElement("b"), { textContent: img.alt })); };
+    if (img.complete && img.naturalWidth === 0) fallback();
+    else img.addEventListener("error", fallback);
+  });
+
   /* ------------------------------------------------------------ start */
 
   $("#year").textContent = String(new Date().getFullYear());
   const saved = store.get("opl-lang");
-  const preferred = saved || ((navigator.language || "es").toLowerCase().startsWith("en") ? "en" : "es");
-  applyLanguage(preferred);
+  applyLanguage(saved || ((navigator.language || "es").toLowerCase().startsWith("en") ? "en" : "es"));
 })();
