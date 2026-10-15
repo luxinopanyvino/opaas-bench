@@ -103,19 +103,24 @@ def _supplied(entry: str, manifest) -> tuple[str, Path, str]:
 
 
 def _invoke(args: list[str]) -> int:
-    """Runs one OPAAS command in this process, as the module's own CLI would."""
-    import click
+    """Runs one OPAAS command in this process, as the module's own CLI would.
 
+    It never imports `click`: typer bundles its own since 0.17, and `click` is
+    installed only when some other dependency pulls it in. Every exit typer
+    raises carries an `exit_code`; a usage error also formats its message.
+    """
     from opaas.cli.main import app as main_app
 
     console.print(f"[dim]$ opaas {' '.join(args)}[/dim]")
     try:
         main_app(args, standalone_mode=False)
-    except click.exceptions.Exit as exc:
-        return exc.exit_code
-    except click.ClickException as exc:
-        err_console.print(f"[red]{_plain(exc.format_message())}[/red]")
-        return exc.exit_code
+    except Exception as exc:  # noqa: BLE001 - typer's Exit and usage errors, whatever click
+        code = getattr(exc, "exit_code", None)
+        if not isinstance(code, int):
+            raise
+        if hasattr(exc, "format_message"):
+            err_console.print(f"[red]{_plain(exc.format_message())}[/red]")
+        return code
     return 0
 
 
