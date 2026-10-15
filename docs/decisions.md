@@ -50,6 +50,18 @@ Signing non-reproducible bytes produces a credential nobody can verify and that 
 
 ---
 
+## D62 — A smith report carries the digest of the agent's answer, not the answer
+
+**Status:** applied · **Fixes:** N4 in the smith report of [D47](#d47--smith-json-scenarios-mock-tools-as-ground-truth-no-auditability-for-a-bare-model) · **Affects:** [`smith/runner.py`](../src/opaas/smith/runner.py), `cli/smith.py`
+
+Every smith report wrote each run's final answer verbatim into `runs[].agent.final`. N4 says evidence never carries message content, and a smith report is meant to be published and signed: an answer can repeat anything the agent read in a tool output, including the personal data a scenario plants and, in an operator's own scenarios, their own documents. Found while adding agent-level toxicity (D60, S4), whose description said the text never reached the report when the runs section already held it.
+
+**Now:** `runs[].agent.final` is `{digest, chars}`; the text stays in memory, where the expectations and the toxicity classifier need it. `smith run --keep-finals` writes it as `value` beside the digest, as `--keep` does for the sentinel, and the report says which it holds (`finalAnswers: "digest" | "kept"`).
+
+**What is lost:** a reader of the report can no longer see what the agent answered, only whether it was the same answer twice. A smith report written before this change still holds the text; it should not be published without review.
+
+---
+
 ## D61 — One environment is recognised as one, whatever is loaded and whoever measured it
 
 **Status:** applied · **Revises:** the engine inventory of [D40](#d40--the-report-records-everything-the-host-serves-not-only-what-was-evaluated) · **Affects:** [`discover/inventory.py`](../src/opaas/discover/inventory.py), [`system/report.py`](../src/opaas/system/report.py), [`system/extract.py`](../src/opaas/system/extract.py), `sentinel overhead`, `swarm analyze`
