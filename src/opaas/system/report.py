@@ -229,6 +229,9 @@ def certifiability(
     certifiable and why, as a model credential says it is partial.
     """
     reasons: list[str] = []
+    if manifest.purpose.startswith("TO COMPLETE"):
+        reasons.append("The purpose is still the drafted marker: a person must state the "
+                       "intended use, which the AI Act risk classification follows.")
     if not environments.get("consistent"):
         detail = []
         if len(environments.get("inventories") or []) > 1:
@@ -383,6 +386,10 @@ def _observed_component(
     component: Any, inventory: dict[str, Any] | None, exercised: set[str]
 ) -> dict[str, Any]:
     entry = {"id": component.id, "kind": component.kind, "declared": True}
+    # What identifies it, so a later `watch` knows what to re-check without the manifest.
+    for name in ("model", "adapter"):
+        if component.fields.get(name):
+            entry[name] = component.fields[name]
     if component.id in exercised:
         return {**entry, "observed": True, "basis": "exercised by this audit"}
     if inventory is None:

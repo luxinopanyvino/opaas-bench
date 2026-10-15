@@ -1,6 +1,6 @@
 # System audit: one subject, one result format, one certificate
 
-**Status:** accepted (D60). Phases S0, S1 and S2 are implemented (`src/opaas/system/`, the system credential in `core/credential/vc.py`, its pages in `web/`); the phases in §11 say what follows.
+**Status:** accepted (D60). Phases S0 to S3 are implemented (`src/opaas/system/`, the system credential in `core/credential/vc.py`, its pages in `web/`); the phases in §11 say what follows.
 
 OPAAS was built in two halves. `bench` certifies a model deployment and has its own report, its own blocks A–E and its own certificate. The agent modules (`discover`, `smith`, `swarm`, `sentinel`, `inquest`, `card`) measure how auditable an agent deployment is, and each writes its own document in its own shape. The deployment manifest (D52) lists them by hash, but nothing turns them into one result a reader can take in, and there is no certificate for anything but a model.
 
@@ -231,7 +231,7 @@ Settled by the operator on review of this proposal:
 
 1. **Observed and declared, per component.** The system report records, for each component and each flow, whether it was declared, observed, or both. A component declared and never observed, or observed and never declared, is a finding in its own right, as an undeclared edge is for `swarm`.
 2. **Thresholds by component and by kind.** `thresholds.json` accepts both keys. A threshold keyed by component id wins over one keyed by kind, and the system report says which applied to each cell.
-3. **`watch --system` re-checks every component** and names the one that moved. A system with one changed member is a changed system; which member changed is what the operator needs to know first.
+3. **`watch` re-checks every component of a system certificate** and names the one that moved. A system with one changed member is a changed system; which member changed is what the operator needs to know first. As built (S3): `opaas watch --report system-report.json --credential …` re-checks each model as `opaas watch` checks one (each member file checked against the hash the system report records), a bare-model agent follows its model, the environment is compared with the audited inventory (a model served since the audit is an alert; one already there was a composition finding), and anything that cannot be re-checked on its own is listed as *not checked*.
 4. **Scenario templates are generated from the manifest.** `opaas audit template --system system.json` writes one scenario skeleton per declared tool and per risky action the tools allow (destructive, payment, permission), with the mock tools filled from the manifest. The expectations, the success checks and the policies, stay empty for the operator to write: a template that guessed them would put OPAAS's judgement where the operator's belongs.
 5. **MCP-only agents are prepared for.** The manifest accepts `"adapter": "mcp"` today. Until the client adapter exists, that agent's cells read *not measured: the MCP client adapter is not implemented*, and the plan keeps its place; when the adapter is registered, the same manifest measures it with no other change.
 
