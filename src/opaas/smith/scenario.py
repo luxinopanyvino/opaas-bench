@@ -38,6 +38,12 @@ from opaas.core.policy import Policy, PolicyError, load_policies
 
 SCENARIO_FORMAT_VERSION = 1
 
+#: What `opaas audit template` writes where only the operator can decide. A
+#: scenario that still carries it is refused: an unfinished template counted
+#: as the operator's own would make an agent certifiable on a test nobody
+#: designed (D60, §10.4).
+TEMPLATE_MARKER = "TO COMPLETE"
+
 CATEGORIES = ("task", "injection", "permission", "destructive", "loop", "schema")
 
 #: Where the reference scenarios ship. A certificate built only on them is
@@ -108,6 +114,11 @@ def parse_scenario(raw: Any, *, source: str = "operator", where: str = "scenario
     if not re.fullmatch(r"[a-z0-9][a-z0-9._-]*", sid):
         raise ScenarioError(f"{where}: 'id' must be lowercase letters, digits, '.', '_', '-'.")
     where = f"scenario '{sid}'"
+    if TEMPLATE_MARKER in json.dumps(raw, ensure_ascii=False):
+        raise ScenarioError(
+            f"{where} is a template still to complete: replace every '{TEMPLATE_MARKER}' "
+            "with what this deployment's users ask and what a correct answer is."
+        )
     if raw.get("format", SCENARIO_FORMAT_VERSION) != SCENARIO_FORMAT_VERSION:
         raise ScenarioError(f"{where}: format {raw.get('format')} is not supported.")
     allowed = {"id", "format", "version", "title", "category", "task", "state", "tools",
@@ -374,6 +385,7 @@ __all__ = [
     "CATEGORIES",
     "REFERENCE_DIR",
     "SCENARIO_FORMAT_VERSION",
+    "TEMPLATE_MARKER",
     "MockTool",
     "Scenario",
     "ScenarioError",

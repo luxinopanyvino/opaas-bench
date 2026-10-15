@@ -209,6 +209,60 @@ def draft_command(
                   "`opaas audit run`.")
 
 
+@app.command("template")
+def template_command(
+    system: Annotated[Path, typer.Argument(help="System manifest (JSON).")],
+    out: Annotated[Path, typer.Option("--out", "-o", help="Directory for the templates.")]
+    = Path("scenarios"),
+    manifest: Annotated[list[Path], typer.Option(
+        "--manifest", help="Tool manifest (MCP tools/list or OpenAI functions) to take each "
+        "tool's description and parameters from. Repeatable.")] = None,
+    force: Annotated[bool, typer.Option("--force", help="Overwrite existing files.")] = False,
+) -> None:
+    """Writes scenario templates for the manifest's tools: the operator writes the answers."""
+    from opaas.system.template import scenario_templates
+
+    try:
+        loaded = load_manifest(read_json(system), known_adapters=tuple(available_agents()))
+        schemas = _tool_schemas(manifest or [])
+    except (SystemManifestError, OSError, ValueError) as exc:
+        err_console.print(f"[red]{_plain(exc)}[/red]")
+        raise typer.Exit(code=2) from None
+    templates, notes = scenario_templates(loaded, tool_schemas=schemas)
+    existing = [name for name, _ in templates if (out / name).exists()]
+    if existing and not force:
+        err_console.print(f"[red]{len(existing)} template(s) already exist in {out}, perhaps "
+                          f"completed: {', '.join(existing)}. Pass --force to overwrite.[/red]")
+        raise typer.Exit(code=2)
+    out.mkdir(parents=True, exist_ok=True)
+    for name, scenario in templates:
+        (out / name).write_text(json.dumps(scenario, indent=2, ensure_ascii=False) + "\n",
+                                encoding="utf-8")
+        console.print(f"  {scenario['category']:<12} {out / name}")
+    for note in notes:
+        console.print(f"  [yellow]note:[/yellow] {_plain(note)}")
+    console.print("\nComplete them, then name the directory in the manifest's \"scenarios\".")
+
+
+def _tool_schemas(paths: list[Path]) -> dict[str, dict]:
+    """Each tool's description and parameters, from MCP tools/list or OpenAI function lists."""
+    schemas: dict[str, dict] = {}
+    for path in paths:
+        raw = read_json(path)
+        items = raw.get("tools") if isinstance(raw, dict) else raw
+        for item in items if isinstance(items, list) else []:
+            if not isinstance(item, dict):
+                continue
+            definition = item.get("function") if isinstance(item.get("function"), dict) else item
+            if definition.get("name"):
+                schema = definition.get("inputSchema") or definition.get("parameters")
+                schemas[str(definition["name"])] = {
+                    "description": definition.get("description"),
+                    **({"parameters": schema} if isinstance(schema, dict) else {}),
+                }
+    return schemas
+
+
 @app.command("validate")
 def validate_command(
     system: Annotated[Path, typer.Argument(help="System manifest (JSON).")],
