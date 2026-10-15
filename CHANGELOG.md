@@ -8,6 +8,49 @@ releases, for someone deciding whether to upgrade.
 The methodology version embedded in every report (`OPAAS_SPEC_VERSION`,
 `1.0-draft`) is separate from the package version, and did not change.
 
+## [0.2.1] — 2026-10-15
+
+A patch release. **Upgrade if you installed 0.2.0 without the `classifiers`
+extra:** `opaas audit run` failed there before running anything.
+
+### Upgrading
+
+- **Nothing to migrate.** Reports, credentials and certificates written by
+  0.2.0 verify unchanged, and the methodology version is the same.
+- **`discover scan` now sends a few read-only GETs to listeners that are not
+  engines** (D63), looking for agents that identify themselves. A scan of the
+  same host may therefore find agents 0.2.0 did not; an inventory in which
+  none is found keeps the hash 0.2.0 gave it.
+
+### Fixed
+
+- `opaas audit run` imported `click`, which OPAAS does not depend on: typer
+  stopped requiring it in 0.17, and it was only present when the
+  `classifiers` extra pulled it in through `huggingface-hub`. A test now fails
+  on any import of a package `pyproject.toml` does not declare.
+
+### Added — identifying a system's agents (D63)
+
+- `opaas discover scan` recognises agents that identify themselves: A2A agent
+  cards, Open WebUI, and OpenAPI documents whose title names an agent
+  framework. Each one found says on what basis; `--agent-endpoint` names a
+  remote one.
+- `--well-known` reads the MCP configurations of common clients (Claude
+  Desktop, Claude Code, Cursor, VS Code, Windsurf, Continue) from their usual
+  files, names only, never a value.
+- `opaas audit draft --records` drafts the agents that acted in a sentinel
+  log, OTel spans or JSONL, with the models and tools each one called and the
+  flows between them.
+- An agent smith cannot drive yet (`a2a`, `open-webui`, a framework, or known
+  only from records) is part of the system with a pending adapter: its
+  behaviour reads *not measured* with the reason, and the system is not
+  certifiable until it is measured.
+
+### Documentation
+
+- The README is rewritten around what OPAAS audits, the audit modes, the
+  methodology and the certificates each one produces.
+
 ## [0.2.0] — 2026-10-15
 
 The first tagged release. 0.1.0 was never tagged: it is the model
@@ -94,4 +137,5 @@ certificate for it.
   hash granularities (D61).
 - Smith reports carried the agent's answers verbatim (D62).
 
+[0.2.1]: https://github.com/luxinopanyvino/opaas-bench/releases/tag/v0.2.1
 [0.2.0]: https://github.com/luxinopanyvino/opaas-bench/releases/tag/v0.2.0
