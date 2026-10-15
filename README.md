@@ -9,7 +9,6 @@
 **Audit the AI systems you run yourself — models, agents and the infrastructure under them —<br>
 and prove it with a certificate anyone can verify offline.**
 
-[![CI](https://github.com/luxinopanyvino/opaas-bench/actions/workflows/ci.yml/badge.svg)](https://github.com/luxinopanyvino/opaas-bench/actions/workflows/ci.yml)
 [![Version 0.2.0](https://img.shields.io/badge/version-0.2.0-1f4e3d)](https://github.com/luxinopanyvino/opaas-bench/releases/tag/v0.2.0)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)](pyproject.toml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
