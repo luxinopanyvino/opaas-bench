@@ -14,7 +14,7 @@ from opaas.cli.common import _plain, console, err_console
 from opaas.core.evidence import EvidenceError, envelope, read_document, write_document
 from opaas.core.fingerprint import deployment_fingerprint
 from opaas.core.report import describe_environment
-from opaas.smith import BareModelAgent, HttpAgent, ScenarioError, available_agents
+from opaas.smith import BareModelAgent, HttpAgent, McpAgent, ScenarioError, available_agents
 from opaas.smith.runner import build_report, run_scenarios
 from opaas.smith.scenario import load_scenarios
 
@@ -75,11 +75,11 @@ def run_command(
     if inventory_doc:
         environment["inventory"] = inventory_doc
     engine = None
-    if agent == "http":
+    if agent in ("http", "mcp"):
         if not endpoint:
-            err_console.print("[red]--agent http needs --endpoint.[/red]")
+            err_console.print(f"[red]--agent {agent} needs --endpoint.[/red]")
             raise typer.Exit(code=2)
-        adapter: Any = HttpAgent(endpoint)
+        adapter: Any = HttpAgent(endpoint) if agent == "http" else McpAgent(endpoint)
     elif agent == "bare-model":
         if not backend or not model:
             err_console.print("[red]--agent bare-model needs --backend and --model.[/red]")

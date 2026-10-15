@@ -282,8 +282,6 @@ def build_report(scenarios: list[Scenario], agent: AgentAdapter, outcomes: list[
                  *, repeats: int) -> dict[str, Any]:
     sources = sorted({s.source for s in scenarios})
     limitations = [
-        "The MCP client adapter is not implemented: an agent reachable only over MCP "
-        "cannot be tested yet.",
         "Semantic policies are out of scope (N2): only structural predicates are checked.",
     ]
     if sources == ["reference"]:
@@ -315,7 +313,7 @@ def build_report(scenarios: list[Scenario], agent: AgentAdapter, outcomes: list[
         "runs": [{"scenario": o.scenario, "repeat": o.repeat, "behaviour": o.behaviour,
                   "auditability": o.auditability, "agent": o.agent} for o in outcomes],
         "limitations": limitations,
-        "notImplemented": ["mcp-agent-adapter", "semantic-policies"],
+        "notImplemented": ["semantic-policies"],
     }
 
 

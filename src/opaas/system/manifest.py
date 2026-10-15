@@ -44,10 +44,10 @@ _OPTIONAL_FIELDS = frozenset({
     "command", "name", "sentinel", "provider", "description",
 })
 
-#: Agent adapters that exist only in this list until they are implemented. The
-#: manifest accepts them so that a system's description does not change the
-#: day the adapter lands.
-PENDING_ADAPTERS = frozenset({"mcp"})
+#: Agent adapters the manifest accepts before they are implemented, so that a
+#: system's description does not change the day the adapter lands. Empty since
+#: the MCP adapter arrived (S4); the mechanism stays for the next one.
+PENDING_ADAPTERS: frozenset[str] = frozenset()
 
 _TOP_LEVEL = frozenset({
     "format", "id", "purpose", "components", "flows", "scenarios", "policies", "records",

@@ -16,7 +16,14 @@ if it keeps one, its own record of what it did.
   loopback port, posts the task with each tool's URL, and the agent calls
   them. The agent answers with its final text and, optionally, its record:
   a list of `AuditEvent` records (`record`) or an OPAAS event log (`log`).
-- `mcp`: not implemented. Declared in every smith report's limitations.
+- `mcp`: an agent exposed as an MCP server (D60, S4). OPAAS is its MCP client:
+  it initializes a session and calls the agent's task tool (`run_task` unless
+  told otherwise) with the task and the URL of a second MCP server, OPAAS's,
+  that exposes the scenario's mock tools. The agent calls those over MCP, so
+  the oracle sees every call exactly as with `http`. Both sides speak the
+  Streamable HTTP transport with JSON or SSE responses, implemented here
+  without a dependency: a scenario is a handful of calls, not a protocol
+  test suite.
 """
 
 from __future__ import annotations
@@ -255,8 +262,8 @@ def _traceparent(value: str | None) -> dict[str, str] | None:
 class _ToolServer:
     """The mock tools on a loopback port, for the duration of one scenario run."""
 
-    def __init__(self, agent: HttpAgent) -> None:
-        handler = _handler_for(agent)
+    def __init__(self, agent: HttpAgent | McpAgent) -> None:
+        handler = _mcp_handler_for(agent) if isinstance(agent, McpAgent) else _handler_for(agent)
         self._server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
         self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
         self._thread.start()
@@ -290,7 +297,223 @@ def _handler_for(agent: HttpAgent) -> type[BaseHTTPRequestHandler]:
     return Handler
 
 
-_REGISTRY: dict[str, type[AgentAdapter]] = {"bare-model": BareModelAgent, "http": HttpAgent}
+# ------------------------------------------------------------------------- mcp
+
+#: The MCP revision this client and server speak. A peer that answers another
+#: one is still talked to: the handful of methods used here did not change.
+MCP_PROTOCOL = "2025-06-18"
+
+
+class McpAgent(AgentAdapter):
+    """An agent exposed as an MCP server, whose tools are OPAAS's MCP mock server.
+
+    `serve=False` and an injected `transport` let tests drive both directions
+    in memory: the fake agent routes its tool calls into `handle_mcp_request`.
+    """
+
+    name: ClassVar[str] = "mcp"
+    keeps_record: ClassVar[bool] = True
+
+    def __init__(self, endpoint: str, *, task_tool: str = "run_task", timeout_s: float = 300.0,
+                 transport: httpx.BaseTransport | None = None, serve: bool = True,
+                 tools_base_url: str | None = None) -> None:
+        self.endpoint = endpoint
+        self.task_tool = task_tool
+        self.timeout_s = timeout_s
+        self.transport = transport
+        self.serve = serve
+        self.tools_base_url = tools_base_url
+        self._environment: MockEnvironment | None = None
+        self._ids = iter(range(1, 1_000_000))
+
+    def describe(self) -> dict[str, Any]:
+        parsed = httpx.URL(self.endpoint)
+        return {"adapter": self.name, "taskTool": self.task_tool, "protocol": MCP_PROTOCOL,
+                "endpoint": f"{parsed.scheme}://{parsed.host}"
+                + (f":{parsed.port}" if parsed.port else "")}
+
+    # -- OPAAS as the MCP server of the mock tools
+
+    def handle_mcp_request(self, body: bytes, headers: dict[str, str]) -> tuple[int, Any]:
+        """One JSON-RPC message or batch. Pure: the HTTP server only wraps it."""
+        try:
+            message = json.loads(body.decode("utf-8") or "null")
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            return 400, _rpc_error(None, -32700, "Parse error.")
+        lowered = {k.lower(): v for k, v in headers.items()}
+        if isinstance(message, list):
+            replies = [r for r in (self._answer(m, lowered) for m in message) if r is not None]
+            return (200, replies) if replies else (202, None)
+        reply = self._answer(message, lowered)
+        return (200, reply) if reply is not None else (202, None)
+
+    def _answer(self, message: Any, headers: dict[str, str]) -> dict[str, Any] | None:
+        if not isinstance(message, dict) or message.get("jsonrpc") != "2.0":
+            return _rpc_error(None, -32600, "Invalid request.")
+        method, request_id = message.get("method"), message.get("id")
+        if request_id is None:
+            return None  # a notification (initialized, cancelled): nothing to answer
+        params = message.get("params") or {}
+        environment = self._environment
+        if method == "initialize":
+            return _rpc_result(request_id, {
+                "protocolVersion": params.get("protocolVersion") or MCP_PROTOCOL,
+                "capabilities": {"tools": {"listChanged": False}},
+                "serverInfo": {"name": "opaas-smith-mock-tools", "version": "1"},
+            })
+        if method == "ping":
+            return _rpc_result(request_id, {})
+        if environment is None:
+            return _rpc_error(request_id, -32002, "No scenario is running.")
+        if method == "tools/list":
+            return _rpc_result(request_id, {"tools": [
+                {"name": t.name, "description": t.description, "inputSchema": t.parameters}
+                for t in environment.scenario.tools]})
+        if method == "tools/call":
+            raw_chain = headers.get("x-opaas-actor-chain")
+            chain = parse_actor_chain(raw_chain) if raw_chain else None
+            result = environment.call(str(params.get("name")), params.get("arguments") or {},
+                                      actor_chain=chain,
+                                      trace=_traceparent(headers.get("traceparent")))
+            if result.error is not None:
+                return _rpc_result(request_id, {"isError": True, "content": [
+                    {"type": "text", "text": result.error}]})
+            text = result.output if isinstance(result.output, str) else json.dumps(
+                result.output, ensure_ascii=False)
+            return _rpc_result(request_id, {"isError": False,
+                                            "content": [{"type": "text", "text": text}]})
+        return _rpc_error(request_id, -32601, f"Method not found: {method}.")
+
+    # -- OPAAS as the MCP client of the agent
+
+    def run(self, environment: MockEnvironment, *, max_turns: int) -> AgentRun:
+        self._environment = environment
+        server = _ToolServer(self) if self.serve else None
+        tools_url = f"{server.base_url}/mcp" if server else (self.tools_base_url
+                                                              or "memory://mcp")
+        try:
+            with httpx.Client(timeout=self.timeout_s, transport=self.transport) as client:
+                session = self._initialize(client)
+                reply = self._request(client, session, "tools/call", {
+                    "name": self.task_tool,
+                    "arguments": {
+                        "task": environment.scenario.task,
+                        "scenario": environment.scenario.id,
+                        "maxSteps": environment.scenario.max_steps,
+                        "tools": {"transport": "streamable-http", "url": tools_url},
+                        "actorChainHeader": "X-OPAAS-Actor-Chain",
+                    },
+                })
+        except (httpx.HTTPError, AgentError, ValueError) as exc:
+            return AgentRun(final=None, error=f"The MCP agent could not be used: {exc}")
+        finally:
+            if server:
+                server.close()
+            self._environment = None
+        return _run_from_tool_result(reply)
+
+    def _initialize(self, client: httpx.Client) -> str | None:
+        response = self._post(client, None, {
+            "jsonrpc": "2.0", "id": next(self._ids), "method": "initialize",
+            "params": {"protocolVersion": MCP_PROTOCOL, "capabilities": {},
+                       "clientInfo": {"name": "opaas-smith", "version": "1"}}})
+        _result_of(response)
+        session = response.headers.get("mcp-session-id")
+        self._post(client, session, {"jsonrpc": "2.0", "method": "notifications/initialized"})
+        return session
+
+    def _request(self, client: httpx.Client, session: str | None, method: str,
+                 params: dict[str, Any]) -> dict[str, Any]:
+        response = self._post(client, session, {"jsonrpc": "2.0", "id": next(self._ids),
+                                                "method": method, "params": params})
+        return _result_of(response)
+
+    def _post(self, client: httpx.Client, session: str | None,
+              message: dict[str, Any]) -> httpx.Response:
+        headers = {"Accept": "application/json, text/event-stream",
+                   "MCP-Protocol-Version": MCP_PROTOCOL}
+        if session:
+            headers["Mcp-Session-Id"] = session
+        response = client.post(self.endpoint, json=message, headers=headers)
+        if response.status_code >= 400:
+            raise AgentError(f"the agent answered HTTP {response.status_code}")
+        return response
+
+
+def _rpc_result(request_id: Any, result: dict[str, Any]) -> dict[str, Any]:
+    return {"jsonrpc": "2.0", "id": request_id, "result": result}
+
+
+def _rpc_error(request_id: Any, code: int, message: str) -> dict[str, Any]:
+    return {"jsonrpc": "2.0", "id": request_id, "error": {"code": code, "message": message}}
+
+
+def _result_of(response: httpx.Response) -> dict[str, Any]:
+    """The JSON-RPC result, from a JSON body or the last data line of an SSE stream."""
+    if "text/event-stream" in response.headers.get("content-type", ""):
+        messages = [json.loads(line[5:].strip()) for line in response.text.splitlines()
+                    if line.startswith("data:") and line[5:].strip()]
+        body: Any = next((m for m in reversed(messages) if "result" in m or "error" in m), None)
+    else:
+        body = response.json() if response.content else None
+    if not isinstance(body, dict):
+        raise AgentError("the agent sent no JSON-RPC answer")
+    if "error" in body:
+        error = body["error"] or {}
+        raise AgentError(f"the agent answered error {error.get('code')}: {error.get('message')}")
+    result = body.get("result")
+    if not isinstance(result, dict):
+        raise AgentError("the agent's JSON-RPC answer has no result")
+    return result
+
+
+def _run_from_tool_result(result: dict[str, Any]) -> AgentRun:
+    """The agent's answer: JSON in its text content ({final, record, log, turns}), or text."""
+    if result.get("isError"):
+        return AgentRun(final=None, error="The agent's task tool reported an error.")
+    structured = result.get("structuredContent")
+    texts = [c.get("text", "") for c in result.get("content") or []
+             if isinstance(c, dict) and c.get("type") == "text"]
+    body: Any = structured
+    if body is None and texts:
+        try:
+            body = json.loads(texts[0])
+        except json.JSONDecodeError:
+            return AgentRun(final="\n".join(texts))
+    if not isinstance(body, dict):
+        return AgentRun(final="\n".join(texts) if texts else None)
+    record = body.get("record")
+    return AgentRun(
+        final=None if body.get("final") is None else str(body["final"]),
+        record=[r for r in record if isinstance(r, dict)] if isinstance(record, list) else None,
+        log_text=body.get("log") if isinstance(body.get("log"), str) else None,
+        turns=int(body.get("turns") or 0),
+    )
+
+
+def _mcp_handler_for(agent: McpAgent) -> type[BaseHTTPRequestHandler]:
+    class Handler(BaseHTTPRequestHandler):
+        def do_POST(self) -> None:  # noqa: N802 - http.server's naming
+            length = int(self.headers.get("Content-Length") or 0)
+            status, body = agent.handle_mcp_request(self.rfile.read(length),
+                                                    dict(self.headers.items()))
+            data = b"" if body is None else json.dumps(body).encode("utf-8")
+            self.send_response(status)
+            if data:
+                self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
+        def log_message(self, *args: Any) -> None:
+            return
+
+    return Handler
+
+
+_REGISTRY: dict[str, type[AgentAdapter]] = {
+    "bare-model": BareModelAgent, "http": HttpAgent, "mcp": McpAgent,
+}
 
 
 def available_agents() -> list[str]:
@@ -314,6 +537,8 @@ __all__ = [
     "AgentRun",
     "BareModelAgent",
     "HttpAgent",
+    "MCP_PROTOCOL",
+    "McpAgent",
     "agent_keeps_record",
     "available_agents",
     "parse_reply",
