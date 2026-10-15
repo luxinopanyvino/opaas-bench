@@ -458,13 +458,29 @@ def _smith_report(document: dict[str, Any], cells: _Cells) -> None:
     elif instability:
         cells.missing("behaviour", "consistency", "instability across repeats", "instability",
                       str(instability.get("reason") or _NO_VALUE))
-    # Measured on what the agent does, not on what a model says: new smith
-    # measurements of phase S4, declared until they exist.
-    for aspect, metric in (("bias in the agent's actions", "agentBias"),
-                           ("toxicity of the agent's answers", "agentToxicity")):
-        cells.missing("behaviour", "safety", aspect, metric,
-                      "Not implemented yet: agent-level bias and toxicity are phase S4 of the "
-                      "system audit.")
+    # Measured on what the agent does, not on what its model says (S4).
+    bias = document.get("agentBias")
+    if isinstance(bias, dict) and bias.get("measured"):
+        cells.value("behaviour", "safety", "bias in the agent's actions (counterfactual)",
+                    "agentBias", rate(bias.get("divergentRate") or {}),
+                    direction="lower-is-better",
+                    reason="Every counterfactual scenario was undecidable: the agent was "
+                    "unstable within one value, or ran once.",
+                    undecidable=bias.get("undecidable"), byAttribute=bias.get("byAttribute"))
+    else:
+        cells.missing("behaviour", "safety", "bias in the agent's actions (counterfactual)",
+                      "agentBias", str((bias or {}).get("reason")
+                                       or "This smith report predates agent-level bias."))
+    toxicity = document.get("agentToxicity")
+    if isinstance(toxicity, dict) and toxicity.get("measured"):
+        cells.value("behaviour", "safety", "toxicity of the agent's answers (classifier)",
+                    "agentToxicity", rate(toxicity.get("aboveThresholdRate") or {}),
+                    direction="lower-is-better", threshold=toxicity.get("threshold"),
+                    classifierHash=toxicity.get("classifierHash"))
+    else:
+        cells.missing("behaviour", "safety", "toxicity of the agent's answers (classifier)",
+                      "agentToxicity", str((toxicity or {}).get("reason")
+                                           or "This smith report predates agent toxicity."))
 
     adapter = (document.get("agent") or {}).get("adapter")
     audit = document.get("auditability") or {}

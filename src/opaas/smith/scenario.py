@@ -17,6 +17,13 @@ line endings or key order do not change it, and a run records the hash of
 every scenario it used. A scenario that does not validate stops the run
 before any agent is called.
 
+**Counterfactual variants** (D60, S4). A `counterfactual` block names one
+personal attribute, a slot string and two or more values. The scenario runs
+once per value with the slot replaced everywhere (the task, the state, the
+tools' outputs), and the agent's actions are compared across values: the same
+task, one attribute changed, should get the same actions. The block itself
+is not substituted, and every variant keeps the scenario's id.
+
 Mock-tool responses are rules tried in order. `when` is a predicate over the
 call's arguments (`{"arg": "path", "eq": "/x"}`) or the current state
 (`{"state": ["files", "/x"], "exists": true}`); `output` is a value, where
@@ -44,7 +51,7 @@ SCENARIO_FORMAT_VERSION = 1
 #: designed (D60, §10.4).
 TEMPLATE_MARKER = "TO COMPLETE"
 
-CATEGORIES = ("task", "injection", "permission", "destructive", "loop", "schema")
+CATEGORIES = ("task", "injection", "permission", "destructive", "loop", "schema", "bias")
 
 #: Where the reference scenarios ship. A certificate built only on them is
 #: flagged, as `opaas-smoke` is: they test generic behaviour, not this
@@ -93,6 +100,8 @@ class Scenario:
     hash: str
     source: str
     notes: str = ""
+    #: {attribute, slot, values}: run once per value (see the module docstring).
+    counterfactual: dict[str, Any] | None = None
     raw: dict[str, Any] = field(default_factory=dict, compare=False, repr=False)
 
     def tool(self, name: str) -> MockTool | None:
@@ -122,7 +131,7 @@ def parse_scenario(raw: Any, *, source: str = "operator", where: str = "scenario
     if raw.get("format", SCENARIO_FORMAT_VERSION) != SCENARIO_FORMAT_VERSION:
         raise ScenarioError(f"{where}: format {raw.get('format')} is not supported.")
     allowed = {"id", "format", "version", "title", "category", "task", "state", "tools",
-               "expected", "policies", "adversarial", "budget", "notes"}
+               "expected", "policies", "adversarial", "budget", "notes", "counterfactual"}
     if unknown := set(raw) - allowed:
         raise ScenarioError(f"{where}: unknown keys {sorted(unknown)}.")
     category = raw.get("category")
@@ -165,6 +174,7 @@ def parse_scenario(raw: Any, *, source: str = "operator", where: str = "scenario
                 raise ScenarioError(f"{where}.adversarial[{index}]: the canary does not "
                                     "appear in any tool output, so nothing plants it.")
             canaries.append(canary)
+    counterfactual = _counterfactual(raw, where)
     max_steps = int((raw.get("budget") or {}).get("maxSteps", 10))
     if max_steps < 1:
         raise ScenarioError(f"{where}: budget.maxSteps must be at least 1.")
@@ -174,8 +184,48 @@ def parse_scenario(raw: Any, *, source: str = "operator", where: str = "scenario
         category=str(category), task=raw["task"].strip(), state=state, tools=tuple(tools),
         expected=tuple(expected), policies=policies, canaries=tuple(canaries),
         max_steps=max_steps, hash=scenario_hash(raw), source=source,
-        notes=str(raw.get("notes", "")), raw=raw,
+        notes=str(raw.get("notes", "")), raw=raw, counterfactual=counterfactual,
     )
+
+
+def _counterfactual(raw: dict[str, Any], where: str) -> dict[str, Any] | None:
+    block = raw.get("counterfactual")
+    if block is None:
+        return None
+    if not isinstance(block, dict) or set(block) - {"attribute", "slot", "values"}:
+        raise ScenarioError(f"{where}: counterfactual takes attribute, slot and values.")
+    attribute, slot, values = block.get("attribute"), block.get("slot"), block.get("values")
+    if not isinstance(attribute, str) or not attribute.strip():
+        raise ScenarioError(f"{where}: counterfactual.attribute names what changes "
+                            "(gender, age, origin…).")
+    if not isinstance(slot, str) or len(slot) < 3:
+        raise ScenarioError(f"{where}: counterfactual.slot is a placeholder of 3+ characters.")
+    if (not isinstance(values, list) or len(values) < 2
+            or not all(isinstance(v, str) and v and slot not in v for v in values)
+            or len(set(values)) != len(values)):
+        raise ScenarioError(f"{where}: counterfactual.values are two or more distinct, "
+                            "non-empty strings that do not contain the slot.")
+    body = {k: v for k, v in raw.items() if k != "counterfactual"}
+    if slot not in json.dumps(body, ensure_ascii=False):
+        raise ScenarioError(f"{where}: the slot {slot!r} appears nowhere, so no value would "
+                            "change anything.")
+    return {"attribute": attribute.strip(), "slot": slot, "values": list(values)}
+
+
+def scenario_variants(scenario: Scenario) -> list[tuple[str | None, Scenario]]:
+    """(value, scenario with the slot replaced) per counterfactual value; or the scenario."""
+    block = scenario.counterfactual
+    if block is None:
+        return [(None, scenario)]
+    body = {k: v for k, v in scenario.raw.items() if k != "counterfactual"}
+    text = json.dumps(body, ensure_ascii=False)
+    slot = json.dumps(block["slot"], ensure_ascii=False)[1:-1]
+    variants = []
+    for value in block["values"]:
+        replaced = json.loads(text.replace(slot, json.dumps(value, ensure_ascii=False)[1:-1]))
+        variant = parse_scenario(replaced, source=scenario.source, where=scenario.id)
+        variants.append((value, variant))
+    return variants
 
 
 def _tool(item: Any, where: str) -> MockTool:
@@ -397,4 +447,5 @@ __all__ = [
     "resolve_template",
     "scenario_hash",
     "scenario_set_hash",
+    "scenario_variants",
 ]
