@@ -1,0 +1,509 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>onpremIA Labs</title>
+  <meta name="description" content="onpremIA Labs: laboratorio de desarrollo de soluciones agénticas e inteligentes que se ejecutan en tu propia infraestructura. Creadores de OPAAS, Evolve y NexoDual.">
+  <meta name="color-scheme" content="light dark">
+  <meta property="og:title" content="onpremIA Labs">
+  <meta property="og:description" content="Laboratorio de soluciones agénticas e inteligentes, on-premise y de código abierto.">
+  <meta property="og:url" content="https://www.onpremialabs.com">
+  <link rel="icon" href="assets/img/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="assets/css/site.css">
+  <script>
+    // Applied before first paint so a saved theme never flashes the other one.
+    try {
+      const t = localStorage.getItem("opl-theme");
+      if (t === "light" || t === "dark") document.documentElement.dataset.theme = t;
+    } catch (e) { /* storage unavailable: follow the system */ }
+  </script>
+</head>
+<body>
+  <a class="skip" href="#main" data-i18n="skip">Saltar al contenido</a>
+
+  <!-- ============================================================ header -->
+  <header class="nav" id="top">
+    <div class="wrap nav__inner">
+      <a class="brand" href="#top" aria-label="onpremIA Labs">
+        <svg class="brand__mark" viewBox="0 0 40 40" aria-hidden="true">
+          <path d="M6 18 20 6l14 12v15a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1Z" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linejoin="round"/>
+          <circle cx="14" cy="27" r="2.6" class="brand__node"/>
+          <circle cx="26" cy="27" r="2.6" class="brand__node"/>
+          <circle cx="20" cy="19" r="2.6" class="brand__node brand__node--warm"/>
+          <path d="M14 27 20 19l6 8M14 27h12" fill="none" stroke="currentColor" stroke-width="1.6" opacity=".7"/>
+        </svg>
+        <span class="brand__name">onprem<b>IA</b> Labs</span>
+      </a>
+
+      <nav class="nav__links" id="nav-links" aria-label="Principal">
+        <a href="#lab" data-i18n="nav.lab">Laboratorio</a>
+        <a href="#valores" data-i18n="nav.values">Valores</a>
+        <a href="#productos" data-i18n="nav.products">Productos</a>
+        <a href="#opaas">OPAAS</a>
+        <a href="#abierto" data-i18n="nav.open">Open source</a>
+      </nav>
+
+      <div class="nav__tools">
+        <button class="tool" id="lang-toggle" type="button" aria-label="Cambiar idioma / Change language">
+          <span data-lang="es">ES</span><span aria-hidden="true">/</span><span data-lang="en">EN</span>
+        </button>
+        <button class="tool tool--icon" id="theme-toggle" type="button" aria-label="Cambiar tema" data-i18n-aria="theme">
+          <svg viewBox="0 0 24 24" aria-hidden="true" class="icon-sun"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6"/></svg>
+          <svg viewBox="0 0 24 24" aria-hidden="true" class="icon-moon"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5Z"/></svg>
+        </button>
+        <button class="tool tool--icon nav__burger" id="nav-burger" type="button" aria-expanded="false" aria-controls="nav-links" aria-label="Menú" data-i18n-aria="menu">
+          <span></span><span></span><span></span>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <main id="main">
+    <!-- ============================================================ hero -->
+    <section class="hero">
+      <canvas class="hero__canvas" id="mesh" aria-hidden="true"></canvas>
+      <div class="wrap hero__inner">
+        <div class="hero__copy">
+          <p class="eyebrow reveal"><span class="dot dot--live"></span><span data-i18n="hero.eyebrow">Laboratorio de IA · on-premise · código abierto</span></p>
+          <h1 class="reveal" data-i18n-html="hero.title">Inteligencia que vive <em>donde viven tus datos</em>.</h1>
+          <p class="lead reveal" data-i18n="hero.lead">onpremIA Labs diseña y desarrolla soluciones agénticas e inteligentes que se ejecutan en tu propia infraestructura, y libera como código abierto las herramientas para auditarlas, operarlas y aprender con ellas.</p>
+          <div class="cta reveal">
+            <a class="btn btn--primary" href="#opaas" data-i18n="hero.cta1">Conocer OPAAS</a>
+            <a class="btn btn--ghost" href="#productos" data-i18n="hero.cta2">Ver todos los productos</a>
+          </div>
+          <p class="hero__rotator reveal" aria-live="polite">
+            <span data-i18n="hero.rotPrefix">Construimos IA</span>
+            <span class="rotator" id="rotator">gobernable</span>
+          </p>
+        </div>
+
+        <aside class="board reveal" aria-label="Estado de los productos" data-i18n-aria="board.aria">
+          <div class="board__head">
+            <span class="board__title" data-i18n="board.title">Estado del laboratorio</span>
+            <span class="board__clock" id="board-clock">--:--:--</span>
+          </div>
+          <ul class="board__list">
+            <li>
+              <a href="#opaas">
+                <span class="dot dot--live"></span>
+                <span class="board__name">OPAAS</span>
+                <span class="board__desc" data-i18n="board.opaas">Auditoría de IA on-prem</span>
+                <span class="tag tag--live" data-i18n="status.live">Activo</span>
+              </a>
+            </li>
+            <li>
+              <a href="#evolve">
+                <span class="dot dot--build"></span>
+                <span class="board__name">Evolve</span>
+                <span class="board__desc" data-i18n="board.evolve">IA multimodal local y edge</span>
+                <span class="tag tag--build" data-i18n="status.build">En desarrollo</span>
+              </a>
+            </li>
+            <li>
+              <a href="#nexodual">
+                <span class="dot dot--build"></span>
+                <span class="board__name">NexoDual</span>
+                <span class="board__desc" data-i18n="board.nexo">Formación profesional dual</span>
+                <span class="tag tag--build" data-i18n="status.build">En desarrollo</span>
+              </a>
+            </li>
+          </ul>
+          <div class="board__foot">
+            <span><b>0</b> <span data-i18n="board.cloud">dependencias de nube obligatorias</span></span>
+            <span><b>MIT</b> <span data-i18n="board.license">licencia de OPAAS</span></span>
+          </div>
+        </aside>
+      </div>
+    </section>
+
+    <!-- ============================================================ lab -->
+    <section class="section" id="lab">
+      <div class="wrap">
+        <header class="section__head reveal">
+          <p class="kicker">01 · <span data-i18n="lab.kicker">El laboratorio</span></p>
+          <h2 data-i18n="lab.title">Un laboratorio para IA que puedes poseer, entender y demostrar.</h2>
+          <p class="section__lead" data-i18n="lab.lead">Investigamos, prototipamos y llevamos a producción sistemas inteligentes pensados para ejecutarse fuera de la nube: en servidores propios, estaciones con GPU y dispositivos en el borde. Lo que construimos para nosotros lo publicamos para la comunidad.</p>
+        </header>
+
+        <div class="grid grid--4">
+          <article class="card reveal">
+            <span class="card__icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><circle cx="6" cy="6" r="2.5"/><circle cx="18" cy="6" r="2.5"/><circle cx="12" cy="18" r="2.5"/><path d="M8 7.5 10.5 16M16 7.5 13.5 16M8.5 6h7"/></svg>
+            </span>
+            <h3 data-i18n="lab.c1.t">Soluciones agénticas</h3>
+            <p data-i18n="lab.c1.p">Agentes que usan herramientas, consultan datos internos y colaboran entre sí, con cada acción registrada y bajo políticas que tú defines.</p>
+          </article>
+          <article class="card reveal">
+            <span class="card__icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="8.5" y="8.5" width="7" height="7" rx="1"/><path d="M9 1.5V4M15 1.5V4M9 20v2.5M15 20v2.5M1.5 9H4M1.5 15H4M20 9h2.5M20 15h2.5"/></svg>
+            </span>
+            <h3 data-i18n="lab.c2.t">IA local y en el borde</h3>
+            <p data-i18n="lab.c2.p">Modelos de lenguaje, visión y voz cuantizados y desplegados en tu hardware, incluso sin conexión a internet.</p>
+          </article>
+          <article class="card reveal">
+            <span class="card__icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><path d="M12 2.5 4 6v6c0 4.6 3.4 8.5 8 9.5 4.6-1 8-4.9 8-9.5V6Z"/><path d="m8.5 12 2.5 2.5 4.5-5"/></svg>
+            </span>
+            <h3 data-i18n="lab.c3.t">Auditoría y certificación</h3>
+            <p data-i18n="lab.c3.p">Medimos cómo se comportan modelos, agentes y sistemas completos, y lo convertimos en certificados firmados que cualquiera puede verificar.</p>
+          </article>
+          <article class="card reveal">
+            <span class="card__icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><path d="M2 9 12 4l10 5-10 5Z"/><path d="M6 11v5c0 1.7 2.7 3 6 3s6-1.3 6-3v-5M22 9v6"/></svg>
+            </span>
+            <h3 data-i18n="lab.c4.t">Talento y formación</h3>
+            <p data-i18n="lab.c4.p">Plataformas que acercan la formación al trabajo real, porque la tecnología solo es soberana si hay personas capaces de operarla.</p>
+          </article>
+        </div>
+
+        <ol class="method reveal" aria-label="Cómo trabajamos" data-i18n-aria="method.aria">
+          <li><span class="method__n">i</span><b data-i18n="method.1.t">Local primero</b><span data-i18n="method.1.p">Si puede ejecutarse en tu infraestructura, se ejecuta ahí.</span></li>
+          <li><span class="method__n">ii</span><b data-i18n="method.2.t">Medible</b><span data-i18n="method.2.p">Nada se afirma sin una medición que un tercero pueda repetir.</span></li>
+          <li><span class="method__n">iii</span><b data-i18n="method.3.t">Abierto</b><span data-i18n="method.3.p">Las herramientas se publican con licencia libre.</span></li>
+          <li><span class="method__n">iv</span><b data-i18n="method.4.t">Honesto</b><span data-i18n="method.4.p">Lo que no se pudo medir se declara, nunca se oculta.</span></li>
+        </ol>
+      </div>
+    </section>
+
+    <!-- ============================================================ values -->
+    <section class="section section--alt" id="valores">
+      <div class="wrap">
+        <header class="section__head reveal">
+          <p class="kicker">02 · <span data-i18n="values.kicker">Valores</span></p>
+          <h2 data-i18n="values.title">Cinco principios que se pueden comprobar, no solo leer.</h2>
+          <p class="section__lead" data-i18n="values.lead">Cada valor se traduce en una decisión de ingeniería concreta. Selecciona uno para ver cómo lo aplicamos.</p>
+        </header>
+
+        <div class="values reveal">
+          <div class="values__tabs" role="tablist" aria-label="Valores" data-i18n-aria="values.kicker">
+            <button role="tab" id="vt-gov" aria-controls="vp-gov" aria-selected="true" class="vtab" data-value="gov">
+              <span class="vtab__n">V1</span><span data-i18n="v.gov.t">Gobernanza</span>
+            </button>
+            <button role="tab" id="vt-sov" aria-controls="vp-sov" aria-selected="false" tabindex="-1" class="vtab" data-value="sov">
+              <span class="vtab__n">V2</span><span data-i18n="v.sov.t">Soberanía</span>
+            </button>
+            <button role="tab" id="vt-sec" aria-controls="vp-sec" aria-selected="false" tabindex="-1" class="vtab" data-value="sec">
+              <span class="vtab__n">V3</span><span data-i18n="v.sec.t">Seguridad</span>
+            </button>
+            <button role="tab" id="vt-id" aria-controls="vp-id" aria-selected="false" tabindex="-1" class="vtab" data-value="id">
+              <span class="vtab__n">V4</span><span data-i18n="v.id.t">Identidad</span>
+            </button>
+            <button role="tab" id="vt-xai" aria-controls="vp-xai" aria-selected="false" tabindex="-1" class="vtab" data-value="xai">
+              <span class="vtab__n">V5</span><span data-i18n="v.xai.t">Explicabilidad</span>
+            </button>
+          </div>
+
+          <div class="values__panels">
+            <article class="vpanel" role="tabpanel" id="vp-gov" aria-labelledby="vt-gov">
+              <div class="vpanel__glyph" aria-hidden="true"><svg viewBox="0 0 64 64"><path d="M8 54h48M12 54V26M24 54V26M40 54V26M52 54V26M6 22 32 8l26 14Z"/></svg></div>
+              <div>
+                <h3 data-i18n="v.gov.h">Las decisiones de una IA tienen dueño y rastro.</h3>
+                <p data-i18n="v.gov.p">Gobernar un sistema inteligente es poder responder quién hizo qué, con qué autorización y contra qué umbral. Por eso los umbrales los fija siempre quien opera el sistema, nunca la herramienta.</p>
+                <ul class="ticks">
+                  <li data-i18n="v.gov.l1">Registros encadenados por hash y sellados.</li>
+                  <li data-i18n="v.gov.l2">Políticas estructurales con veredictos cumple, viola o indeterminado.</li>
+                  <li data-i18n="v.gov.l3">Acciones indeterminadas retenidas para aprobación humana.</li>
+                </ul>
+              </div>
+            </article>
+            <article class="vpanel" role="tabpanel" id="vp-sov" aria-labelledby="vt-sov" hidden>
+              <div class="vpanel__glyph" aria-hidden="true"><svg viewBox="0 0 64 64"><path d="M10 30 32 12l22 18v24H10Z"/><rect x="24" y="36" width="16" height="18"/><path d="M32 12V4M28 6h8"/></svg></div>
+              <div>
+                <h3 data-i18n="v.sov.h">Tus datos, tus modelos, tu infraestructura.</h3>
+                <p data-i18n="v.sov.p">La soberanía es poder ejecutar, auditar y actualizar tu IA sin pedir permiso a un tercero ni enviarle tus datos. Diseñamos para entornos aislados de la red desde el primer día.</p>
+                <ul class="ticks">
+                  <li data-i18n="v.sov.l1">Funcionamiento sin conexión (air-gapped).</li>
+                  <li data-i18n="v.sov.l2">Verificación de certificados sin servidor y sin red.</li>
+                  <li data-i18n="v.sov.l3">Este sitio no carga fuentes, scripts ni analítica de terceros.</li>
+                </ul>
+              </div>
+            </article>
+            <article class="vpanel" role="tabpanel" id="vp-sec" aria-labelledby="vt-sec" hidden>
+              <div class="vpanel__glyph" aria-hidden="true"><svg viewBox="0 0 64 64"><rect x="12" y="28" width="40" height="28" rx="3"/><path d="M20 28v-8a12 12 0 0 1 24 0v8"/><circle cx="32" cy="41" r="4"/><path d="M32 45v5"/></svg></div>
+              <div>
+                <h3 data-i18n="v.sec.h">Seguro por diseño, mínimo por defecto.</h3>
+                <p data-i18n="v.sec.p">La evidencia que guardamos es la mínima necesaria: huellas criptográficas en lugar de contenido. Cada artefacto externo se fija por hash, y un cambio inesperado detiene el proceso.</p>
+                <ul class="ticks">
+                  <li data-i18n="v.sec.l1">Firmas Ed25519 sobre JSON canónico (RFC 8785).</li>
+                  <li data-i18n="v.sec.l2">Evidencia minimizada: digests, nunca mensajes ni secretos.</li>
+                  <li data-i18n="v.sec.l3">Datasets y modelos auxiliares fijados por SHA-256 y commit.</li>
+                </ul>
+              </div>
+            </article>
+            <article class="vpanel" role="tabpanel" id="vp-id" aria-labelledby="vt-id" hidden>
+              <div class="vpanel__glyph" aria-hidden="true"><svg viewBox="0 0 64 64"><rect x="6" y="14" width="52" height="36" rx="4"/><circle cx="22" cy="31" r="7"/><path d="M12 44c2-5 6-7 10-7s8 2 10 7M38 26h12M38 33h12M38 40h8"/></svg></div>
+              <div>
+                <h3 data-i18n="v.id.h">Cada componente sabe quién es, y lo puede demostrar.</h3>
+                <p data-i18n="v.id.p">Un resultado sin identidad no vale nada: hay que saber qué modelo, con qué cuantización, en qué motor y sobre qué hardware. Y qué agente actuó en nombre de quién.</p>
+                <ul class="ticks">
+                  <li data-i18n="v.id.l1">Huella del despliegue ligada a cada medición.</li>
+                  <li data-i18n="v.id.l2">Identificación de agentes, modelos y herramientas de un sistema.</li>
+                  <li data-i18n="v.id.l3">Emisores identificados con DID y credenciales verificables W3C.</li>
+                </ul>
+              </div>
+            </article>
+            <article class="vpanel" role="tabpanel" id="vp-xai" aria-labelledby="vt-xai" hidden>
+              <div class="vpanel__glyph" aria-hidden="true"><svg viewBox="0 0 64 64"><circle cx="28" cy="28" r="16"/><path d="m40 40 16 16M22 28h12M28 22v12"/></svg></div>
+              <div>
+                <h3 data-i18n="v.xai.h">Resultados que se pueden explicar y repetir.</h3>
+                <p data-i18n="v.xai.p">Preferimos varias cifras honestas a una nota única que lo esconde todo. Sin puntuaciones agregadas, sin modelos que juzgan a otros modelos y con cada limitación escrita.</p>
+                <ul class="ticks">
+                  <li data-i18n="v.xai.l1">Resultados por categoría, nunca una nota global.</li>
+                  <li data-i18n="v.xai.l2">Detección determinista, sin «LLM como juez».</li>
+                  <li data-i18n="v.xai.l3">Lo no medido se declara; un cero significa «medido y fue cero».</li>
+                </ul>
+              </div>
+            </article>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================================================ products -->
+    <section class="section" id="productos">
+      <div class="wrap">
+        <header class="section__head reveal">
+          <p class="kicker">03 · <span data-i18n="products.kicker">Productos</span></p>
+          <h2 data-i18n="products.title">Herramientas para operar IA propia, de principio a fin.</h2>
+          <p class="section__lead" data-i18n="products.lead">Auditar lo que ya funciona, construir y desplegar lo que viene, y formar a quienes lo harán posible.</p>
+        </header>
+
+        <div class="filters reveal" role="group" aria-label="Filtrar productos" data-i18n-aria="filters.aria">
+          <button class="chip is-active" type="button" data-filter="all" aria-pressed="true" data-i18n="filters.all">Todos</button>
+          <button class="chip" type="button" data-filter="live" aria-pressed="false" data-i18n="filters.live">Activos</button>
+          <button class="chip" type="button" data-filter="build" aria-pressed="false" data-i18n="filters.build">En desarrollo</button>
+        </div>
+
+        <div class="grid grid--3 products" id="products">
+          <a class="product reveal" href="#opaas" data-status="live">
+            <span class="product__top"><span class="tag tag--live" data-i18n="status.live">Activo</span><span class="product__ver">v0.2 · MIT</span></span>
+            <h3>OPAAS</h3>
+            <p class="product__sub">On-Prem AI Audit Suite</p>
+            <p data-i18n="products.opaas">Audita modelos, agentes y sistemas completos que ya están en marcha y emite certificados firmados verificables sin conexión.</p>
+            <span class="product__more" data-i18n="products.more">Ver detalle →</span>
+          </a>
+          <a class="product reveal" href="#evolve" data-status="build">
+            <span class="product__top"><span class="tag tag--build" data-i18n="status.build">En desarrollo</span></span>
+            <h3>Evolve</h3>
+            <p class="product__sub" data-i18n="products.evolveSub">IA multimodal local, no-code</p>
+            <p data-i18n="products.evolve">Plataforma air-gapped y autosostenida para adaptar, orquestar, evaluar y desplegar IA multimodal en hardware propio y dispositivos edge.</p>
+            <span class="product__more" data-i18n="products.more">Ver detalle →</span>
+          </a>
+          <a class="product reveal" href="#nexodual" data-status="build">
+            <span class="product__top"><span class="tag tag--build" data-i18n="status.build">En desarrollo</span></span>
+            <h3>NexoDual</h3>
+            <p class="product__sub" data-i18n="products.nexoSub">Formación profesional dual</p>
+            <p data-i18n="products.nexo">Plataforma digital no-code que conecta el talento académico con el mundo laboral a través de programas duales.</p>
+            <span class="product__more" data-i18n="products.more">Ver detalle →</span>
+          </a>
+        </div>
+        <p class="empty" id="products-empty" hidden data-i18n="filters.empty">No hay productos en esta categoría.</p>
+      </div>
+    </section>
+
+    <!-- ============================================================ OPAAS -->
+    <section class="section section--alt feature" id="opaas">
+      <div class="wrap feature__grid">
+        <div class="feature__copy reveal">
+          <div class="feature__title">
+            <img src="assets/img/opaas-mascot.svg" alt="" width="72" height="108" class="mascot">
+            <div>
+              <p class="kicker"><span class="tag tag--live" data-i18n="status.live">Activo</span> · <span data-i18n="opaas.kicker">Herramienta de código abierto</span></p>
+              <h2>OPAAS</h2>
+              <p class="feature__sub">On-Prem AI Audit Suite</p>
+            </div>
+          </div>
+          <p class="section__lead" data-i18n="opaas.lead">Evalúa un despliegue de IA que ya está funcionando, sin desplegar ni descargar el modelo, y convierte el resultado en un certificado digital firmado que un tercero puede verificar sin conexión.</p>
+          <ul class="ticks">
+            <li data-i18n="opaas.l1">Rendimiento, capacidad, consistencia, seguridad y cumplimiento del modelo (bloques A–E).</li>
+            <li data-i18n="opaas.l2">Auditabilidad de agentes: escenarios con verdad de base instrumentada, flujos multiagente y registros.</li>
+            <li data-i18n="opaas.l3">Auditoría del sistema completo: modelos, agentes, herramientas y registros al servicio de un propósito.</li>
+            <li data-i18n="opaas.l4">Credenciales verificables W3C firmadas con Ed25519 y vigilancia continua de cambios.</li>
+          </ul>
+          <div class="cta">
+            <a class="btn btn--primary" href="https://github.com/luxinopanyvino/opaas-bench" target="_blank" rel="noopener">
+              <svg viewBox="0 0 24 24" aria-hidden="true" class="btn__icon"><path d="M12 .5a11.5 11.5 0 0 0-3.6 22.4c.6.1.8-.3.8-.6v-2c-3.2.7-3.9-1.5-3.9-1.5-.5-1.3-1.3-1.7-1.3-1.7-1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1 1.8 2.8 1.3 3.5 1 .1-.8.4-1.3.7-1.6-2.6-.3-5.3-1.3-5.3-5.7 0-1.3.5-2.3 1.2-3.1-.1-.3-.5-1.5.1-3.1 0 0 1-.3 3.2 1.2a11 11 0 0 1 5.8 0c2.2-1.5 3.2-1.2 3.2-1.2.6 1.6.2 2.8.1 3.1.8.8 1.2 1.9 1.2 3.1 0 4.4-2.7 5.4-5.3 5.7.4.4.8 1.1.8 2.2v3.3c0 .3.2.7.8.6A11.5 11.5 0 0 0 12 .5Z" fill="currentColor"/></svg>
+              <span data-i18n="opaas.repo">Repositorio en GitHub</span>
+            </a>
+            <a class="btn btn--ghost" href="https://github.com/luxinopanyvino/opaas-bench#quick-start" target="_blank" rel="noopener" data-i18n="opaas.quick">Guía de inicio</a>
+          </div>
+        </div>
+
+        <div class="terminal reveal" aria-label="Demostración ilustrativa del flujo de OPAAS" data-i18n-aria="opaas.termAria">
+          <div class="terminal__bar">
+            <span></span><span></span><span></span>
+            <em data-i18n="opaas.termTitle">demo ilustrativa · opaas</em>
+            <button class="terminal__replay" id="term-replay" type="button" aria-label="Repetir" data-i18n-aria="opaas.replay">↻</button>
+          </div>
+          <pre class="terminal__body" id="terminal"><code></code></pre>
+        </div>
+      </div>
+
+      <div class="wrap">
+        <ul class="modes reveal" aria-label="Modos de auditoría" data-i18n-aria="opaas.modesAria">
+          <li><code>bench</code><span data-i18n="mode.bench">Certifica un modelo en su despliegue real.</span></li>
+          <li><code>discover</code><span data-i18n="mode.discover">Inventaría motores, agentes y herramientas.</span></li>
+          <li><code>smith</code><span data-i18n="mode.smith">Escenarios con herramientas simuladas como verdad de base.</span></li>
+          <li><code>swarm</code><span data-i18n="mode.swarm">Flujos multiagente declarados frente a observados.</span></li>
+          <li><code>sentinel</code><span data-i18n="mode.sentinel">Proxy que observa y retiene acciones para un humano.</span></li>
+          <li><code>inquest</code><span data-i18n="mode.inquest">Auditoría posterior a partir de registros.</span></li>
+          <li><code>audit</code><span data-i18n="mode.audit">El sistema completo, con un único certificado.</span></li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- ============================================================ Evolve -->
+    <section class="section feature" id="evolve">
+      <div class="wrap feature__grid feature__grid--rev">
+        <div class="feature__copy reveal">
+          <p class="kicker"><span class="tag tag--build" data-i18n="status.build">En desarrollo</span> · <span data-i18n="evolve.kicker">Plataforma</span></p>
+          <h2>Evolve</h2>
+          <p class="feature__sub" data-i18n="evolve.sub">No-code · low-code · air-gapped · autosostenida</p>
+          <p class="section__lead" data-i18n="evolve.lead">Una plataforma para adaptar, orquestar, evaluar y desplegar inteligencia artificial multimodal de forma local, en hardware on-premise y dispositivos edge, sin depender de servicios externos para funcionar.</p>
+          <ul class="ticks">
+            <li data-i18n="evolve.l1">Diseño visual de flujos para quien no programa; extensible con código para quien sí.</li>
+            <li data-i18n="evolve.l2">Ciclo completo dentro de tu red: del ajuste del modelo a su despliegue y evaluación.</li>
+            <li data-i18n="evolve.l3">Del servidor con GPU al dispositivo edge, con el mismo flujo.</li>
+          </ul>
+          <p class="note" data-i18n="evolve.note">Evolve está en desarrollo activo. Publicaremos el repositorio cuando su primera versión sea utilizable.</p>
+        </div>
+
+        <div class="evolve reveal" aria-label="Ciclo de Evolve" data-i18n-aria="evolve.aria">
+          <ol class="stages" id="stages">
+            <li class="stage is-on"><span class="stage__n">01</span><b data-i18n="evolve.s1">Adaptar</b><small data-i18n="evolve.s1d">ajuste fino, cuantización, destilación</small></li>
+            <li class="stage"><span class="stage__n">02</span><b data-i18n="evolve.s2">Orquestar</b><small data-i18n="evolve.s2d">agentes, herramientas, RAG y grafos</small></li>
+            <li class="stage"><span class="stage__n">03</span><b data-i18n="evolve.s3">Evaluar</b><small data-i18n="evolve.s3d">métricas reproducibles antes de desplegar</small></li>
+            <li class="stage"><span class="stage__n">04</span><b data-i18n="evolve.s4">Desplegar</b><small data-i18n="evolve.s4d">on-premise y edge, sin conexión</small></li>
+          </ol>
+          <div class="modalities" aria-label="Modalidades" data-i18n-aria="evolve.modAria">
+            <span data-i18n="evolve.m1">Visión</span>
+            <span data-i18n="evolve.m2">Voz</span>
+            <span>SLMs</span>
+            <span>LLMs</span>
+            <span data-i18n="evolve.m5">Agentes</span>
+            <span>RAG</span>
+            <span data-i18n="evolve.m7">Grafos</span>
+          </div>
+          <div class="targets">
+            <span><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="7" rx="1.5"/><rect x="3" y="14" width="18" height="7" rx="1.5"/><path d="M7 6.5h.01M7 17.5h.01"/></svg><span data-i18n="evolve.t1">Servidores on-prem</span></span>
+            <span><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="12" rx="1.5"/><path d="M8 20h8M12 16v4"/></svg><span data-i18n="evolve.t2">Estaciones con GPU</span></span>
+            <span><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="1.5"/><path d="M9 2v4M15 2v4M9 18v4M15 18v4M2 9h4M2 15h4M18 9h4M18 15h4"/></svg><span data-i18n="evolve.t3">Dispositivos edge</span></span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================================================ NexoDual -->
+    <section class="section section--alt feature" id="nexodual">
+      <div class="wrap feature__grid">
+        <div class="feature__copy reveal">
+          <p class="kicker"><span class="tag tag--build" data-i18n="status.build">En desarrollo</span> · <span data-i18n="nexo.kicker">Plataforma educativa</span></p>
+          <h2>NexoDual</h2>
+          <p class="feature__sub" data-i18n="nexo.sub">Talento académico ⇄ mundo laboral</p>
+          <p class="section__lead" data-i18n="nexo.lead">Una plataforma digital no-code que centraliza la formación profesional dual: une a centros educativos, empresas y estudiantes en un mismo lugar, desde el convenio hasta la evaluación final.</p>
+          <p class="note" data-i18n="nexo.note">NexoDual está en desarrollo. Si representas a un centro educativo o a una empresa interesada en programas duales, nos encantará conversar.</p>
+        </div>
+
+        <div class="nexo-col reveal">
+          <p class="nexo__hint" data-i18n="nexo.hint">Selecciona un actor para ver qué aporta y qué obtiene.</p>
+          <div class="nexo">
+            <svg class="nexo__lines" viewBox="0 0 400 360" aria-hidden="true">
+              <line x1="200" y1="190" x2="200" y2="58" data-link="school"/>
+              <line x1="200" y1="190" x2="62" y2="296" data-link="company"/>
+              <line x1="200" y1="190" x2="338" y2="296" data-link="student"/>
+              <path d="M200 58 62 296 338 296Z" class="nexo__ring"/>
+            </svg>
+            <button class="actor actor--hub" type="button" data-actor="hub" aria-pressed="true">
+              <b>NexoDual</b>
+            </button>
+            <button class="actor actor--school" type="button" data-actor="school" aria-pressed="false">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 9 12 4l10 5-10 5Z"/><path d="M6 11v5c0 1.7 2.7 3 6 3s6-1.3 6-3v-5"/></svg>
+              <span data-i18n="nexo.school">Centros educativos</span>
+            </button>
+            <button class="actor actor--company" type="button" data-actor="company" aria-pressed="false">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 21V8l6-4v17M9 21V10l6-3v14M15 21V12l6-2v11M2 21h20"/></svg>
+              <span data-i18n="nexo.company">Empresas</span>
+            </button>
+            <button class="actor actor--student" type="button" data-actor="student" aria-pressed="false">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21c1-4.5 4.4-7 8-7s7 2.5 8 7"/></svg>
+              <span data-i18n="nexo.student">Estudiantes</span>
+            </button>
+          </div>
+          <div class="actor-detail" id="actor-detail" aria-live="polite">
+            <h3 id="actor-title" data-i18n="nexo.hub.t">Un solo nexo</h3>
+            <p id="actor-text" data-i18n="nexo.hub.p">Convenios, planes formativos, seguimiento de prácticas y evaluación, compartidos por las tres partes sin papeleo disperso.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================================================ open source -->
+    <section class="section" id="abierto">
+      <div class="wrap">
+        <div class="open reveal">
+          <div>
+            <p class="kicker">04 · <span data-i18n="open.kicker">Código abierto</span></p>
+            <h2 data-i18n="open.title">Herramientas abiertas, para que la confianza no dependa de nosotros.</h2>
+            <p class="section__lead" data-i18n="open.lead">Un certificado que solo su emisor puede comprobar no es un certificado. Por eso publicamos el código, la metodología y las decisiones —con lo que cada una cuesta— para que cualquiera pueda auditar al auditor.</p>
+            <div class="cta">
+              <a class="btn btn--primary" href="https://github.com/luxinopanyvino/opaas-bench" target="_blank" rel="noopener" data-i18n="open.cta">Contribuir a OPAAS</a>
+              <a class="btn btn--ghost" href="https://www.onpremialabs.com" data-i18n="open.site">www.onpremialabs.com</a>
+            </div>
+          </div>
+          <dl class="facts">
+            <div><dt>MIT</dt><dd data-i18n="open.f1">Licencia libre, uso comercial incluido.</dd></div>
+            <div><dt>RFC 8785</dt><dd data-i18n="open.f2">Todo lo firmado pasa por JSON canónico.</dd></div>
+            <div><dt>W3C VC</dt><dd data-i18n="open.f3">Credenciales verificables, estándar abierto.</dd></div>
+            <div><dt>0</dt><dd data-i18n="open.f4">Llamadas a servicios externos al verificar.</dd></div>
+          </dl>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- ============================================================ footer -->
+  <footer class="footer">
+    <div class="wrap footer__inner">
+      <div>
+        <a class="brand" href="#top" aria-label="onpremIA Labs">
+          <svg class="brand__mark" viewBox="0 0 40 40" aria-hidden="true">
+            <path d="M6 18 20 6l14 12v15a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1Z" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linejoin="round"/>
+            <circle cx="14" cy="27" r="2.6" class="brand__node"/>
+            <circle cx="26" cy="27" r="2.6" class="brand__node"/>
+            <circle cx="20" cy="19" r="2.6" class="brand__node brand__node--warm"/>
+          </svg>
+          <span class="brand__name">onprem<b>IA</b> Labs</span>
+        </a>
+        <p class="footer__tag" data-i18n="footer.tag">Laboratorio de desarrollo de soluciones agénticas e inteligentes.</p>
+      </div>
+      <nav class="footer__cols" aria-label="Pie de página" data-i18n-aria="footer.aria">
+        <div>
+          <b data-i18n="nav.products">Productos</b>
+          <a href="#opaas">OPAAS</a>
+          <a href="#evolve">Evolve</a>
+          <a href="#nexodual">NexoDual</a>
+        </div>
+        <div>
+          <b data-i18n="footer.lab">Laboratorio</b>
+          <a href="#lab" data-i18n="footer.about">Qué hacemos</a>
+          <a href="#valores" data-i18n="nav.values">Valores</a>
+          <a href="#abierto" data-i18n="nav.open">Open source</a>
+        </div>
+        <div>
+          <b data-i18n="footer.links">Enlaces</b>
+          <a href="https://github.com/luxinopanyvino/opaas-bench" target="_blank" rel="noopener">GitHub · OPAAS</a>
+          <a href="https://www.onpremialabs.com">onpremialabs.com</a>
+        </div>
+      </nav>
+    </div>
+    <div class="wrap footer__base">
+      <span>© <span id="year">2026</span> onpremIA Labs</span>
+      <span data-i18n="footer.privacy">Sin cookies, sin rastreo, sin recursos de terceros.</span>
+    </div>
+  </footer>
+
+  <script src="assets/js/i18n.js"></script>
+  <script src="assets/js/site.js"></script>
+</body>
+</html>

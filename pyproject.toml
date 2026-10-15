@@ -60,6 +60,10 @@ Repository = "https://github.com/luxinopanyvino/opaas-bench"
 [tool.hatch.build.targets.wheel]
 packages = ["src/opaas"]
 
+[tool.hatch.build.targets.sdist]
+# The lab's website lives in this repository but is not part of the package.
+exclude = ["onpremialabs"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
