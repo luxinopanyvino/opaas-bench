@@ -104,6 +104,7 @@ from opaas.sentinel.drift import (
     result_envelope,
 )
 from opaas.sentinel.drift import watch as run_watch
+from opaas.system.watch import system_result
 from opaas.web import SiteError, build_site, check_verify_url, load_entry, render_printable
 
 app = typer.Typer(
@@ -1624,6 +1625,14 @@ WatchInventory = Annotated[
         "inventory (D40). It reports, but never decides 'current' on its own.",
     ),
 ]
+WatchMember = Annotated[
+    list[str],
+    typer.Option(
+        "--member",
+        help="For a system certificate: component=path of a member that is not next to the "
+        "system report. Each is checked against the hash the report records. Repeatable.",
+    ),
+]
 
 
 @app.command("watch")
@@ -1639,6 +1648,7 @@ def watch_command(
     out: WatchOut = Path("watch.json"),
     log: WatchLog = None,
     inventory: WatchInventory = False,
+    member: WatchMember = None,
 ) -> None:
     """Checks that a certificate still describes the deployment (exit 0/1/3, 2 on error).
 
@@ -1667,10 +1677,11 @@ def watch_command(
 
     verification = verify_credential(document, public_key, report_path=report)
     failed = {check.name: check.detail for check in verification.checks if not check.ok}
-    report_hash = str(entry.eval_run.get("reportHash"))
+    report_hash = str(entry.report_hash)
 
     def finish(state: str, body: dict[str, Any] | None = None, detail: str | None = None):
-        result = result_envelope(
+        envelope_of = system_result if entry.is_system else result_envelope
+        result = envelope_of(
             state, credential=document, report_hash=report_hash, body=body, detail=detail
         )
         out.parent.mkdir(parents=True, exist_ok=True)
@@ -1693,6 +1704,14 @@ def watch_command(
         raise typer.Exit(code=2)
     if "validity" in failed:
         finish("expired", detail=failed["validity"])
+    if entry.is_system:
+        try:
+            body = _watch_system(entry, report, member or [], api_key=api_key, full=full,
+                                 inventory=inventory)
+        except ValueError as exc:
+            err_console.print(f"[red]{_plain(exc)}[/red]")
+            raise typer.Exit(code=2) from None
+        finish(body["state"], body)
 
     effective = entry.report.get("configuration", {}).get("effectiveConfig", {})
     backend_name, model = effective.get("backend"), effective.get("model")
@@ -1738,16 +1757,123 @@ def watch_command(
     finish(body["state"], body)
 
 
+def _watch_model(
+    report: dict[str, Any], *, base_url: str | None, api_key: str | None, full: bool
+) -> dict[str, Any]:
+    """`opaas watch` for one certified bench report, as one component of a system."""
+    effective = report.get("configuration", {}).get("effectiveConfig", {})
+    backend_name, model = effective.get("backend"), effective.get("model")
+    if not backend_name or not model:
+        return {"state": "inconclusive", "carriedBy": [], "checks": {},
+                "detail": "The report does not record which backend and model it ran against."}
+    try:
+        backend = get_backend(str(backend_name))
+        config = {name: effective.get(name)
+                  for name in ("prompt_mode", "num_ctx", "max_concurrency", "quantization",
+                               "timeout_s")
+                  if effective.get(name) is not None}
+        config["base_url"] = base_url or effective.get("base_url")
+        config["api_key"] = api_key
+        backend.load(str(model), config)
+    except BackendError as exc:
+        return {"state": "inconclusive", "carriedBy": [], "checks": {},
+                "detail": f"The endpoint could not be reached: {exc}"}
+    try:
+        current = deployment_fingerprint(backend, backend.get_backend_metadata(),
+                                         describe_environment())
+        return run_watch(report, backend, current, full=full)
+    finally:
+        backend.close()
+
+
+def _watch_system(
+    entry: Any, report_path: Path, members: list[str], *, api_key: str | None, full: bool,
+    inventory: bool,
+) -> dict[str, Any]:
+    """Every component of a system certificate, and which one moved (D60, §10.3)."""
+    from opaas.discover import discover as discover_full
+    from opaas.sentinel.inventory import check_environment
+    from opaas.system.watch import watch_system
+
+    supplied = {}
+    for item in members:
+        component, sep, path = item.partition("=")
+        if not sep or not path:
+            raise ValueError(f"--member takes component=path, got {item!r}.")
+        supplied[component] = Path(path)
+    base = report_path.resolve().parent
+    model_reports: dict[str, dict[str, Any]] = {}
+    baseline_inventory = None
+    for recorded in entry.report.get("members") or []:
+        path = supplied.get(recorded.get("component"))
+        if recorded.get("kind") not in ("model-report", "inventory"):
+            continue
+        path = path if path and recorded.get("kind") == "model-report" else (
+            base / str(recorded.get("file")))
+        if not path.is_file():
+            continue
+        if file_digest(path) != recorded.get("hash"):
+            raise ValueError(
+                f"{path} is not the member the system report certifies: its hash is not "
+                f"{recorded.get('hash')}."
+            )
+        document = json.loads(path.read_text(encoding="utf-8-sig"))
+        if recorded["kind"] == "model-report":
+            model_reports[str(recorded["component"])] = document
+        else:
+            baseline_inventory = document.get("inventory")
+    current = discover_full(containers=False) if inventory and baseline_inventory else None
+    return watch_system(
+        entry.report, model_reports=model_reports,
+        check_model=lambda _cid, doc: _watch_model(doc, base_url=None, api_key=api_key,
+                                                   full=full),
+        baseline_inventory=baseline_inventory, current_inventory=current,
+        check_environment=check_environment,
+    )
+
+
 _STATE_STYLE = {
     "current": "green",
     "drifted": "red",
     "expired": "red",
     "inconclusive": "yellow",
     "disabled": "dim",
+    "not-checked": "dim",
 }
 
 
+def _print_system_watch(result: dict[str, Any], out: Path) -> None:
+    state = result["state"]
+    console.print(
+        f"[bold {_STATE_STYLE[state]}]{state.upper()}[/bold {_STATE_STYLE[state]}]"
+        f"  ·  {_plain(result.get('credentialId'))}"
+    )
+    if result.get("detail"):
+        console.print(f"  {_plain(result['detail'])}")
+    for component, entry in result["components"].items():
+        style = _STATE_STYLE.get(entry["state"], "white")
+        line = f"  [{style}]{entry['state']:<13}[/{style}] {_plain(component)} ({entry['kind']})"
+        if entry.get("carriedBy"):
+            line += f" · carried by {', '.join(entry['carriedBy'])}"
+        console.print(line)
+        if entry.get("detail") and entry["state"] != "current":
+            console.print(f"                  [dim]{_plain(entry['detail'])}[/dim]")
+    environment = result.get("environment")
+    if environment:
+        style = _STATE_STYLE.get(environment["state"], "white")
+        console.print(f"  [{style}]{environment['state']:<13}[/{style}] environment · "
+                      f"{_plain(environment.get('detail'))}")
+        for alert in environment.get("alerts") or []:
+            console.print(f"                  [dim]{_plain(alert.get('detail'))}[/dim]")
+    if result.get("changed"):
+        console.print(f"\n  Moved: {', '.join(result['changed'])}")
+    console.print(f"\n  {out}")
+
+
 def _print_watch(result: dict[str, Any], out: Path) -> None:
+    if "components" in result:
+        _print_system_watch(result, out)
+        return
     state = result["state"]
     console.print(
         f"[bold {_STATE_STYLE[state]}]{state.upper()}[/bold {_STATE_STYLE[state]}]"

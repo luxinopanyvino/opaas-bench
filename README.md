@@ -531,6 +531,12 @@ not the model or the agent, is the audited subject. Describe it in a `system.jso
 measurement format, where every cell is *measured*, *not measured* or *not applicable*,
 each with its reason; the document itself is never rewritten.
 
+You do not have to type the manifest: `opaas audit draft -o system.json` writes one from
+what the host serves (every model, and the MCP servers and tools in the configurations you
+name), which audits on the same host with nothing declared missing and nothing observed
+undeclared. It leaves the purpose as a marker the report refuses to certify until you write
+it, and tells you what it could not decide (agents, flows, records).
+
 `opaas audit run system.json -o out/` audits the whole system: it runs only what the
 manifest calls for (discover, bench per model, smith per agent, sentinel per proxy,
 inquest and swarm per record source) and writes `system-report.json`: every member by
@@ -546,6 +552,12 @@ components, the coverage table and whether the system is certifiable. It is cert
 when every member was measured in one environment, every agent ran your own scenarios,
 no component is a cloud baseline, no bench report is partial and no step failed;
 otherwise the credential lists every reason, and `verify` warns.
+
+`opaas watch --report out/system-report.json --credential system-credential.json --inventory`
+watches a system certificate: every model is re-checked as `opaas watch` checks one, a
+bare-model agent follows its model, the environment is compared with the one audited, and
+the components that moved are named. Agents, proxies and tools that cannot be re-checked on
+their own are listed as not checked, never assumed current.
 
 ## What is measured
 
@@ -679,7 +691,7 @@ The ones you will actually reach for. Full list with `opaas run --help`.
 | `opaas trust` | Lists pinned trust anchors, or pins one after showing its fingerprint |
 | `opaas admit` | Checks a report against the public registry's admission rules |
 | `opaas publish` | Generates the static certificate site |
-| `opaas watch` | Checks between certifications that a certificate still describes the deployment (exit 0/1/3) |
+| `opaas watch` | Checks between certifications that a certificate still describes the deployment, or every component of a system certificate (exit 0/1/3) |
 | `opaas certificate` | Renders a printable certificate (A4, to PDF) with a QR code to the published page |
 | `opaas log-verify` | Checks the transparency log |
 | `opaas compliance` | Generates the block E declaration template |
@@ -699,6 +711,7 @@ The ones you will actually reach for. Full list with `opaas run --help`.
 | `opaas card build` / `manifest` | Auditability Card; deployment manifest |
 | `opaas evidence sign` / `verify` | Sign and verify any evidence document |
 | `opaas audit run` | Audit a system from its manifest and write the system report (D60) |
+| `opaas audit draft` | Draft a system manifest from what the host serves (D60) |
 | `opaas audit validate` / `extract` | Check a system manifest; read any document into measurements (D60) |
 
 ## How verification works

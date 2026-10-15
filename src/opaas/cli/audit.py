@@ -8,6 +8,7 @@ member keeps its bytes and its hash.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Annotated
 
@@ -155,6 +156,57 @@ _SHORT = {"performance": "perf", "capability": "capab", "consistency": "consist"
           "safety": "safety", "compliance": "compl", "actionRecoverability": "Q1",
           "lifecycleCoverage": "Q2", "policyCheckability": "Q3",
           "responsibilityAttribution": "Q4", "evidenceIntegrity": "Q5", "degradation": "Q6"}
+
+
+@app.command("draft")
+def draft_command(
+    out: Annotated[Path, typer.Option("--out", "-o", help="Manifest to write.")]
+    = Path("system.json"),
+    inventory: Annotated[Path | None, typer.Option(
+        "--inventory", "-i", help="A `discover scan` document; without it, the host is scanned "
+        "now.")] = None,
+    endpoint: Annotated[list[str], typer.Option(
+        "--endpoint", help="A remote engine to include, by URL. Repeatable.")] = None,
+    config: Annotated[list[Path], typer.Option(
+        "--config", help="MCP configuration file the agents use. Repeatable.")] = None,
+    manifest: Annotated[list[Path], typer.Option(
+        "--manifest", help="Tool manifest (MCP tools/list or OpenAI functions). Repeatable.")]
+    = None,
+    system_id: Annotated[str, typer.Option("--id", help="The system's id.")] = "system",
+    purpose: Annotated[str | None, typer.Option(
+        "--purpose", help="The intended use. Left as a marker when omitted: the system is not "
+        "certifiable until a person writes it.")] = None,
+    force: Annotated[bool, typer.Option("--force", help="Overwrite an existing file.")] = False,
+) -> None:
+    """Drafts a system manifest from what the host serves: every model, MCP server and tool."""
+    from opaas.discover import discover
+    from opaas.system.draft import draft_manifest
+
+    if out.exists() and not force:
+        err_console.print(f"[red]{out} exists: a draft never overwrites a manifest someone "
+                          "completed. Pass --force, or choose another --out.[/red]")
+        raise typer.Exit(code=2)
+    try:
+        observed = (read_json(inventory)["inventory"] if inventory
+                    else discover(endpoints=endpoint or [], configs=config or [],
+                                  manifests=manifest or [], containers=False))
+    except (OSError, ValueError, KeyError) as exc:
+        err_console.print(f"[red]{_plain(exc)}[/red]")
+        raise typer.Exit(code=2) from None
+    document, notes = draft_manifest(observed, system_id=system_id, purpose=purpose)
+    for note in notes:
+        console.print(f"  [yellow]note:[/yellow] {_plain(note)}")
+    try:
+        load_manifest(document, known_adapters=tuple(available_agents()))
+    except SystemManifestError as exc:
+        err_console.print(f"[red]The draft is not a valid manifest: {_plain(exc)}[/red]")
+        raise typer.Exit(code=1) from None
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(document, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    for component in document["components"]:
+        console.print(f"  {component['kind']:<11} {_plain(component['id'])}")
+    console.print(f"\n{out}: complete the purpose, then add agents, flows and records before "
+                  "`opaas audit run`.")
 
 
 @app.command("validate")
