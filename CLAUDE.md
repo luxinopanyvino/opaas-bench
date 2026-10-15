@@ -324,6 +324,10 @@ naming what is missing, rather than breaking mid-evaluation.
 
 - **`docs/workplan.md`** is the agent work plan; its status table says what each phase
   delivered and what was left out. Keep it in step with the code.
+- **`CHANGELOG.md`** says what changed between releases, pointing at the `D<n>` entries, with
+  an *Upgrading* section for whatever a user must check. A release bumps `pyproject.toml`,
+  `opaas.__version__` and `CITATION.cff` together; `OPAAS_SPEC_VERSION` changes only with the
+  methodology.
 - **`docs/decisions.md` is a living log.** Any change that departs from `docs/design.md`, or
   settles a point it left open, gets a `D<n>` entry saying what was decided, why, and
   **what is lost**. Revising an earlier decision updates that entry's status rather than

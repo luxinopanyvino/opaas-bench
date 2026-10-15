@@ -805,6 +805,7 @@ adapter.
 - [Remediation plan](docs/remediation-plan.md) — what is left, and what each item unblocks
 - [System design](docs/design.md) — credential, A–E parameters, backend architecture, end-to-end flow
 - [Design decisions](docs/decisions.md) — where and why the implementation departs from the design
+- [Changelog](CHANGELOG.md) — what changed between releases, and what to check when upgrading
 - [Work plan: auditable agents](docs/workplan.md) — the module split and the agent work, with its status
 
 ## Development
