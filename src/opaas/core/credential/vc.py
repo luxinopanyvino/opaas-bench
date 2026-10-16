@@ -15,27 +15,36 @@ central server" — the difference is substantial.
 
 from __future__ import annotations
 
-import hashlib
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 from urllib.parse import unquote
 
-from cryptography.exceptions import InvalidSignature
-from cryptography.hazmat.primitives.asymmetric.ed25519 import (
-    Ed25519PrivateKey,
-    Ed25519PublicKey,
-)
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 
-from opaas.core.canonical import canonicalize
-from opaas.core.credential.keys import b58decode, b58encode
+from opaas.core.credential.delegation import (
+    DELEGATION_FIELD,
+    DelegationError,
+    covers,
+    delegation_problem,
+    identity_for_signing,
+)
+from opaas.core.credential.keys import public_key_from_multibase, public_key_multibase
+from opaas.core.credential.proof import (
+    CREDENTIAL_CONTEXT,
+    CRYPTOSUITE,
+    DELEGATION,
+    PROOF_TYPE,
+    Signer,
+    check_proof,
+    sign_document,
+)
+from opaas.core.credential.proof import iso as _iso
+from opaas.core.credential.proof import parse_time as _parse
+from opaas.core.credential.trust import TrustRoot
 from opaas.core.hashing import file_digest, short_hash, slugify
 
-CREDENTIAL_CONTEXT = [
-    "https://www.w3.org/ns/credentials/v2",
-    "https://onpremialabs.com/credentials/v1",
-]
 CREDENTIAL_TYPE = ["VerifiableCredential", "OpaasModelCertificate"]
 #: One certificate for a whole system: every component, every dimension (D60).
 SYSTEM_CREDENTIAL_TYPE = ["VerifiableCredential", "OpaasSystemCertificate"]
@@ -56,9 +65,6 @@ EVIDENCE_KINDS = (
     #: from them, the composition declared and observed.
     "system-report",
 )
-PROOF_TYPE = "DataIntegrityProof"
-CRYPTOSUITE = "eddsa-jcs-2022"
-
 #: 90 days (D28). A new driver, engine release or quantization changes the
 #: result even when the model is the same, and on-prem stacks update faster
 #: than the 6 months the design suggested.
@@ -293,33 +299,43 @@ def _issuer_domain(credential: dict[str, Any]) -> str | None:
 
 def sign_credential(
     credential: dict[str, Any],
-    private_key: Ed25519PrivateKey,
+    private_key: Signer,
     *,
-    key_id: str,
+    key_id: str | None = None,
     created: datetime | None = None,
+    delegation: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Returns the credential with its Data Integrity `proof`."""
-    unsecured = {k: v for k, v in credential.items() if k != "proof"}
-    proof_config = {
-        "type": PROOF_TYPE,
-        "cryptosuite": CRYPTOSUITE,
-        "created": _iso(created or datetime.now(timezone.utc)),
-        "verificationMethod": key_id,
-        "proofPurpose": "assertionMethod",
-        "@context": credential.get("@context", CREDENTIAL_CONTEXT),
-    }
-    signature = private_key.sign(_signing_input(unsecured, proof_config))
+    """Returns the credential with its Data Integrity `proof`.
 
-    proof = {k: v for k, v in proof_config.items() if k != "@context"}
-    proof["proofValue"] = "z" + b58encode(signature)
-    return {**unsecured, "proof": proof}
-
-
-def _signing_input(unsecured: dict[str, Any], proof_config: dict[str, Any]) -> bytes:
-    """VC Data Integrity signing input: H(config) || H(document)."""
-    return hashlib.sha256(canonicalize(proof_config)).digest() + hashlib.sha256(
-        canonicalize(unsecured)
-    ).digest()
+    With a `delegation` (D65), the signer must be the key it delegates and
+    the signature must fall inside its window: otherwise nothing is signed.
+    The delegation is embedded in the signed body, and the proof names the
+    delegated key, so the credential carries everything `verify` needs to
+    walk from the root it already holds to this signature.
+    """
+    moment = created or datetime.now(timezone.utc)
+    unsecured = {k: v for k, v in credential.items() if k not in ("proof", DELEGATION_FIELD)}
+    if delegation is not None:
+        try:
+            issuer, delegated_id = identity_for_signing(
+                delegation, private_key.public_key(), at=moment
+            )
+        except DelegationError as exc:
+            raise CredentialError(str(exc)) from None
+        if unsecured.get("issuer") != issuer:
+            raise CredentialError(
+                f"The credential names {unsecured.get('issuer')!r} as issuer but the delegation "
+                f"is from {issuer!r}: it would not verify against that issuer's root."
+            )
+        if key_id is not None and key_id != delegated_id:
+            raise CredentialError(
+                f"The delegation names the key {delegated_id!r}, not {key_id!r}."
+            )
+        key_id = delegated_id
+        unsecured[DELEGATION_FIELD] = delegation
+    if key_id is None:
+        raise CredentialError("No verification method to sign under: pass key_id or a delegation.")
+    return sign_document(unsecured, private_key, key_id=key_id, created=moment)
 
 
 # ----------------------------------------------------------------- verification
@@ -347,18 +363,28 @@ class VerificationResult:
 
 def verify_credential(
     credential: dict[str, Any],
-    public_key: Ed25519PublicKey,
+    trust: Ed25519PublicKey | TrustRoot,
     *,
     now: datetime | None = None,
     report_path: Path | None = None,
+    revocation_lists: list[dict[str, Any]] | None = None,
 ) -> VerificationResult:
     """Verifies a credential completely offline.
 
-    Checks structure, cryptographic signature and validity period. If the
-    report is supplied, it also checks that it is exactly the certified report.
+    `trust` is where verification starts: a bare public key (trusted
+    directly, as `--key`) or a `TrustRoot` resolved from an anchor. From it,
+    the key that signed the credential is reached either directly or through
+    the embedded delegation (D65), with a fixed depth of one. Then the
+    signature and the validity period are checked and, if the report is
+    supplied, that it is exactly the certified report.
+
+    The browser verifier (`web/assets/verify.js`) walks the same chain with
+    the same check names, and a test pins that both reach the same verdict
+    on the same credentials.
     """
     result = VerificationResult()
     moment = now or datetime.now(timezone.utc)
+    root = trust if isinstance(trust, TrustRoot) else TrustRoot.direct(trust)
 
     types = credential.get("type") or []
     is_evidence = "OpaasEvidence" in types
@@ -385,7 +411,11 @@ def verify_credential(
     if not suite_ok:
         return result
 
-    result.add("signature", *_check_signature(credential, proof, public_key))
+    signing_key = _walk(credential, proof, root, revocation_lists or [], result)
+    if signing_key is None:
+        return result
+
+    result.add("signature", *check_proof(credential, signing_key))
     result.add("validity", *_check_validity(credential, moment))
 
     if report_path is not None:
@@ -413,26 +443,168 @@ def verify_credential(
     return result
 
 
-def _check_signature(
-    credential: dict[str, Any], proof: dict[str, Any], public_key: Ed25519PublicKey
-) -> tuple[bool, str]:
-    proof_value = str(proof.get("proofValue", ""))
-    if not proof_value.startswith("z"):
-        return False, "proofValue is not in base58btc multibase ('z...')"
+def _walk(
+    credential: dict[str, Any],
+    proof: dict[str, Any],
+    root: TrustRoot,
+    revocation_lists: list[dict[str, Any]],
+    result: VerificationResult,
+) -> Ed25519PublicKey | None:
+    """From the root to the key that signed the credential, or None after a failed step.
+
+    A failed step is recorded and ends the walk: per D65, the credential's
+    own signature is checked only once its key has been reached.
+    """
+    issuer = credential.get("issuer")
+    method = proof.get("verificationMethod")
+    if root.issuer is not None:
+        ok = root.issuer == issuer
+        result.add(
+            "anchor",
+            ok,
+            f"{root.issuer} ({root.origin})"
+            if ok
+            else f"the anchor is {root.issuer!r}, the credential names {issuer!r}",
+        )
+        if not ok:
+            return None
+
+    delegation = credential.get(DELEGATION_FIELD)
+    if delegation is None:
+        key = root.for_proof(method)
+        if revocation_lists and not _check_revocation(
+            revocation_lists, root, issuer, [key], result
+        ):
+            return None
+        return key
+
+    if problem := delegation_problem(delegation):
+        result.add("delegation", False, f"malformed delegation: {problem}")
+        return None
+    delegate = delegation["delegate"]
     try:
-        signature = b58decode(proof_value[1:])
+        delegated_key = public_key_from_multibase(str(delegate["publicKeyMultibase"]))
     except ValueError as exc:
-        return False, f"unreadable proofValue: {exc}"
+        result.add("delegation", False, f"unreadable delegated key: {exc}")
+        return None
 
-    unsecured = {k: v for k, v in credential.items() if k != "proof"}
-    proof_config = {k: v for k, v in proof.items() if k != "proofValue"}
-    proof_config["@context"] = credential.get("@context", CREDENTIAL_CONTEXT)
+    if root.is_direct and public_key_multibase(root.keys[0][1]) == delegate["publicKeyMultibase"]:
+        # --key names the issuing key itself: the verifier vouched for it, so
+        # the root is not needed, and neither is a list only the root can sign.
+        result.add("delegation", True, "not walked: the issuing key was supplied with --key")
+        result.warnings.append(
+            "Revocation was not checked: the issuing key was trusted directly with --key, "
+            "and only the root can vouch for a revocation list."
+        )
+        return delegated_key if _check_delegated_key(method, delegate, result) else None
+
+    if delegation.get("issuer") != issuer:
+        result.add(
+            "delegation",
+            False,
+            f"the delegation is from {delegation.get('issuer')!r}, the credential names "
+            f"{issuer!r}",
+        )
+        return None
+    root_method = (delegation.get("proof") or {}).get("verificationMethod")
+    root_key = root.exact(root_method)
+    if root_key is None:
+        result.add(
+            "delegation",
+            False,
+            f"signed by {root_method!r}, which is not a key of the anchor ({root.origin}). A key "
+            "no anchor delegates is not trusted, whatever the credential says about it.",
+        )
+        return None
+    ok, detail = check_proof(delegation, root_key, proof_purpose=DELEGATION)
+    result.add("delegation", ok, f"{delegate['id']} delegated by {root_method}: {detail}")
+    if not ok:
+        return None
 
     try:
-        public_key.verify(signature, _signing_input(unsecured, proof_config))
-    except InvalidSignature:
-        return False, "The signature does NOT match this key or the document was altered"
-    return True, f"valid Ed25519 ({proof.get('verificationMethod')})"
+        ok, detail = covers(delegation, _parse(proof.get("created")))
+    except (TypeError, ValueError) as exc:
+        ok, detail = False, f"unreadable proof.created: {exc}"
+    result.add("delegation-validity", ok, detail)
+    if not ok:
+        return None
+
+    if not _check_revocation(revocation_lists, root, issuer, [delegated_key, root_key], result):
+        return None
+    return delegated_key if _check_delegated_key(method, delegate, result) else None
+
+
+def _check_delegated_key(method: Any, delegate: dict[str, Any], result: VerificationResult) -> bool:
+    ok = method == delegate["id"]
+    result.add(
+        "delegated-key",
+        ok,
+        f"signed by {method}, the key the delegation names"
+        if ok
+        else f"signed by {method!r}, but the delegation names {delegate['id']!r}",
+    )
+    return ok
+
+
+def _check_revocation(
+    lists: list[dict[str, Any]],
+    root: TrustRoot,
+    issuer: Any,
+    keys: list[Ed25519PublicKey],
+    result: VerificationResult,
+) -> bool:
+    """None of `keys` is on a revocation list that verifies under the root.
+
+    A list that does not verify fails the check rather than being skipped: a
+    list someone placed among the anchors and the root did not sign is a
+    problem to look at, not noise to step around.
+    """
+    if not lists:
+        result.add(
+            "revocation",
+            True,
+            f"no revocation list held for {issuer}: a revoked key would go undetected",
+        )
+        result.warnings.append(
+            f"No revocation list for {issuer} was found, so revocation was not checked. "
+            "Install the issuer's current list with 'opaas trust --add', or pass --revocations."
+        )
+        return True
+    revoked: dict[str, dict[str, Any]] = {}
+    for listed in lists:
+        list_method = (listed.get("proof") or {}).get("verificationMethod")
+        list_key = root.exact(list_method)
+        if listed.get("issuer") != issuer or list_key is None:
+            result.add(
+                "revocation",
+                False,
+                f"a revocation list (updated {listed.get('updated')}) is not signed by a key of "
+                f"the anchor ({list_method!r} for {listed.get('issuer')!r})",
+            )
+            return False
+        ok, detail = check_proof(listed, list_key, proof_purpose=DELEGATION)
+        if not ok:
+            result.add(
+                "revocation",
+                False,
+                f"the revocation list updated {listed.get('updated')} does not verify: {detail}",
+            )
+            return False
+        for entry in listed.get("revoked") or []:
+            if isinstance(entry, dict) and isinstance(entry.get("publicKeyMultibase"), str):
+                revoked[entry["publicKeyMultibase"]] = entry
+    for key in keys:
+        if entry := revoked.get(public_key_multibase(key)):
+            result.add(
+                "revocation",
+                False,
+                f"{entry.get('id')} was REVOKED on {entry.get('revokedAt')} "
+                f"({entry.get('reason') or 'no reason given'})",
+            )
+            return False
+    updated = ", ".join(str(listed.get("updated")) for listed in lists)
+    result.add("revocation", True, f"not revoked (list updated {updated})")
+    return True
 
 
 def _check_validity(credential: dict[str, Any], now: datetime) -> tuple[bool, str]:
@@ -465,17 +637,3 @@ def _check_report(credential: dict[str, Any], report_path: Path) -> tuple[bool, 
     if actual != declared:
         return False, f"The report is NOT the certified one: {actual} != {declared}"
     return True, f"The report matches the certified one ({declared})"
-
-
-def _iso(moment: datetime) -> str:
-    return moment.astimezone(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
-
-
-def _parse(value: Any) -> datetime:
-    if not isinstance(value, str):
-        raise TypeError(f"Date missing or not a string: {value!r}")
-    # `fromisoformat` only learned to read the 'Z' suffix in 3.11, and every
-    # date we emit ends in one (`_iso`). Normalising it here keeps a credential
-    # verifiable on 3.10 — refusing to parse our own output would be absurd.
-    parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)

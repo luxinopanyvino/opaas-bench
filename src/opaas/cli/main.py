@@ -57,8 +57,10 @@ from opaas.cli.common import (  # noqa: E402 - shared with the module command gr
     _load_signing_key,
     _plain,
     _signing_identity,
+    _verification_trust,
     console,
     err_console,
+    read_json,
 )
 from opaas.cli.menu import MenuItem, is_interactive, present
 from opaas.core.credential import (
@@ -68,16 +70,19 @@ from opaas.core.credential import (
     build_system_credential,
     fingerprint,
     generate_root_keypair,
+    identity_for_signing,
+    is_revocation_list,
     load_public_key,
     public_identifier,
-    resolve_public_key,
+    resolve_trust,
     sign_credential,
     verify_credential,
 )
 from opaas.core.credential.keys import (
     public_key_from_did_document,
 )
-from opaas.core.credential.trust import user_anchor_dir
+from opaas.core.credential.proof import DELEGATION, check_proof
+from opaas.core.credential.trust import REVOCATIONS_DIRNAME, user_anchor_dir
 from opaas.core.credential.vc import DEFAULT_VALIDITY_DAYS
 from opaas.core.fingerprint import deployment_fingerprint
 from opaas.core.hashing import (
@@ -901,6 +906,13 @@ PublishDid = Annotated[
     Path,
     typer.Option("--did-document", help="did.json document with the issuer's public key."),
 ]
+PublishRevocations = Annotated[
+    Path | None,
+    typer.Option(
+        "--revocations",
+        help="The issuer's signed revocation list, so the browser checks it too (D65).",
+    ),
+]
 
 
 @app.command("publish")
@@ -909,6 +921,7 @@ def publish(
     credential: PublishCredentials,
     did_document: PublishDid,
     out: PublishOut = Path("site"),
+    revocations: PublishRevocations = None,
 ) -> None:
     """Generates the static certificate site."""
     if len(report) != len(credential):
@@ -920,11 +933,14 @@ def publish(
 
     try:
         did = json.loads(did_document.read_text(encoding="utf-8"))
+        revocation_list = read_json(revocations) if revocations is not None else None
+        if revocation_list is not None and not is_revocation_list(revocation_list):
+            raise SiteError(f"{revocations} is not a revocation list.")
         entries = [
             load_entry(report_path, credential_path)
             for report_path, credential_path in zip(report, credential, strict=True)
         ]
-        written = build_site(entries, out, did)
+        written = build_site(entries, out, did, revocations=revocation_list)
     except (SiteError, OSError, json.JSONDecodeError) as exc:
         err_console.print(f"[red]{exc}[/red]")
         raise typer.Exit(code=2) from None
@@ -1241,8 +1257,42 @@ LogFile = Annotated[
     Path | None,
     typer.Option("--log", help="Transparency log (JSONL) to record the issuance in."),
 ]
+SigningDelegation = Annotated[
+    Path | None,
+    typer.Option(
+        "--delegation",
+        help="Delegation from the root to this key ('opaas delegate'). The credential is "
+        "issued under the root's name and carries it; refused if it has expired or names "
+        "another key (D65).",
+    ),
+]
 
 
+
+
+def _issuing_identity(
+    key: Path, private_key: Any, issuer: str | None, delegation: Path | None
+) -> tuple[str, str, dict[str, Any] | None]:
+    """(issuer, verification method, delegation) a credential is signed under.
+
+    With a delegation the name is the root's, taken from the delegation once
+    it is checked to name this key and to cover now (D65); otherwise it is
+    the key's own, from the did.json beside it (D39).
+    """
+    if delegation is None:
+        return (*_signing_identity(key, private_key, issuer), None)
+    try:
+        document = read_json(delegation)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"{delegation} is not valid JSON: {exc}") from None
+    named, key_id = identity_for_signing(document, private_key.public_key())
+    if issuer is not None and issuer != named:
+        raise ValueError(
+            f"The delegation is from {named!r}, not {issuer!r}: the credential is issued under "
+            "the name of the root that delegated this key. Drop --issuer or use the right "
+            "delegation."
+        )
+    return named, key_id, document
 
 
 @app.command("sign")
@@ -1255,6 +1305,7 @@ def sign(
     validity_days: Validity = DEFAULT_VALIDITY_DAYS,
     report_url: ReportUrl = None,
     log: LogFile = None,
+    delegation: SigningDelegation = None,
 ) -> None:
     """Issues the signed W3C credential from a report, or from a system report (D60)."""
     if not input_path.exists():
@@ -1274,8 +1325,10 @@ def sign(
         raise typer.Exit(code=2) from None
 
     try:
-        issuer, key_id = _signing_identity(key, private_key, issuer)
-    except ValueError as exc:
+        issuer, key_id, delegation_document = _issuing_identity(
+            key, private_key, issuer, delegation
+        )
+    except (OSError, ValueError) as exc:
         err_console.print(f"[red]{_plain(exc)}[/red]")
         raise typer.Exit(code=2) from None
 
@@ -1294,7 +1347,13 @@ def sign(
         err_console.print(f"[red]{exc}[/red]")
         raise typer.Exit(code=2) from None
 
-    signed = sign_credential(credential, private_key, key_id=key_id)
+    try:
+        signed = sign_credential(
+            credential, private_key, key_id=key_id, delegation=delegation_document
+        )
+    except CredentialError as exc:
+        err_console.print(f"[red]{_plain(exc)}[/red]")
+        raise typer.Exit(code=2) from None
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(signed, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
@@ -1312,6 +1371,9 @@ def sign(
     console.print(f"  public   : {public_identifier(signed)}")
     console.print(f"  report   : {file_digest(input_path)}")
     console.print(f"  validity : {signed['issuanceDate']} → {signed['expirationDate']}")
+    if delegation_document is not None:
+        console.print(f"  key      : {_plain(key_id)}, delegated until "
+                      f"{delegation_document['validUntil']}")
     console.print(f"  file     : {out}")
     if entry is not None:
         console.print(f"  log      : entry {entry.index} in {log} ({entry.entryHash})")
@@ -1358,6 +1420,14 @@ VerifyReport = Annotated[
     Path | None,
     typer.Option("--report", help="Report to check against the certified hash."),
 ]
+VerifyRevocations = Annotated[
+    Path | None,
+    typer.Option(
+        "--revocations",
+        help="The issuer's signed revocation list. Without it, the ones installed beside the "
+        "anchors are used; never one from the credential.",
+    ),
+]
 
 
 @app.command("log-verify")
@@ -1402,6 +1472,10 @@ def trust_command(add: TrustAdd = None, yes: TrustYes = False) -> None:
         except json.JSONDecodeError as exc:
             err_console.print(f"[red]{add} is not valid JSON:[/red] {exc}")
             raise typer.Exit(code=2) from None
+
+        if is_revocation_list(document):
+            _install_revocation_list(document, add, yes)
+            return
 
         issuer = str(document.get("id") or "")
         try:
@@ -1450,6 +1524,53 @@ def trust_command(add: TrustAdd = None, yes: TrustYes = False) -> None:
     console.print(table)
 
 
+def _install_revocation_list(document: dict[str, Any], source: Path, yes: bool) -> None:
+    """Installs an issuer's revocation list beside the anchors, once it verifies under one.
+
+    The root that must have signed it is resolved like any anchor, never from
+    the list. An older list never replaces a newer one: that would quietly
+    un-revoke a key.
+    """
+    issuer = str(document.get("issuer") or "")
+    try:
+        root = resolve_trust(issuer)
+    except TrustAnchorError as exc:
+        err_console.print(f"[red]Pin the issuer's anchor first.[/red] {_plain(exc)}")
+        raise typer.Exit(code=2) from None
+    signed_by = (document.get("proof") or {}).get("verificationMethod")
+    root_key = root.exact(signed_by)
+    ok, detail = (
+        check_proof(document, root_key, proof_purpose=DELEGATION)
+        if root_key is not None
+        else (False, f"signed by {signed_by!r}, which is not a key of {root.origin}")
+    )
+    if not ok:
+        err_console.print(f"[red]{source} does not verify under {_plain(issuer)}:[/red] "
+                          f"{_plain(detail)}")
+        raise typer.Exit(code=2)
+
+    target = user_anchor_dir() / REVOCATIONS_DIRNAME / f"{slugify(issuer) or 'issuer'}.json"
+    if target.is_file():
+        current = read_json(target)
+        if str(current.get("updated", "")) > str(document.get("updated", "")):
+            err_console.print(
+                f"[red]The installed list ({current.get('updated')}) is newer than this one "
+                f"({document.get('updated')}).[/red] Installing it would un-revoke keys."
+            )
+            raise typer.Exit(code=2)
+    revoked = document.get("revoked") or []
+    console.print(f"  issuer  : {_plain(issuer)}")
+    console.print(f"  updated : {_plain(document.get('updated'))}, signed by {_plain(signed_by)}")
+    console.print(f"  revokes : {len(revoked)} key(s)")
+    for entry in revoked:
+        console.print(f"    - {_plain(entry.get('id'))} ({_plain(entry.get('reason'))})")
+    if not yes and not typer.confirm("Install this revocation list?", default=True):
+        raise typer.Exit(code=1)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
+    console.print(f"[green]Installed:[/green] {target}")
+
+
 @app.command("verify")
 def verify(
     credential: CredentialIn,
@@ -1457,6 +1578,7 @@ def verify(
     did_document: DidDocument = None,
     report: VerifyReport = None,
     log: LogFile = None,
+    revocations: VerifyRevocations = None,
 ) -> None:
     """Verifies a third-party credential, without a network."""
     if not credential.exists():
@@ -1470,19 +1592,16 @@ def verify(
         raise typer.Exit(code=2) from None
 
     issuer = str(document.get("issuer", ""))
-    proof = document.get("proof") or {}
     try:
-        public_key, origin = resolve_public_key(
-            issuer,
-            proof.get("verificationMethod"),
-            key_path=key,
-            did_document_path=did_document,
+        root, lists, list_origins = _verification_trust(
+            document, key=key, did_document=did_document, revocations=revocations
         )
     except (TrustAnchorError, ValueError) as exc:
         err_console.print(f"[red]Cannot verify:[/red] {exc}")
         raise typer.Exit(code=2) from None
+    origin = root.origin
 
-    result = verify_credential(document, public_key, report_path=report)
+    result = verify_credential(document, root, report_path=report, revocation_lists=lists)
 
     if log is not None:
         try:
@@ -1498,6 +1617,8 @@ def verify(
     console.print(f"\nCredential : {document.get('id', 'no id')}")
     console.print(f"Issuer     : {issuer}")
     console.print(f"Key        : {origin}")
+    for list_origin in list_origins:
+        console.print(f"Revocations: {list_origin}")
     for check in result.checks:
         mark = "[green]OK  [/green]" if check.ok else "[red]FAIL[/red]"
         console.print(f"  {mark} {check.name}: {check.detail}")
@@ -1552,19 +1673,14 @@ def certificate_command(
         raise typer.Exit(code=2) from None
 
     document = entry.credential
-    proof = document.get("proof") or {}
     try:
-        public_key, origin = resolve_public_key(
-            str(document.get("issuer", "")),
-            proof.get("verificationMethod"),
-            key_path=key,
-            did_document_path=did_document,
-        )
+        root, lists, _ = _verification_trust(document, key=key, did_document=did_document)
     except (TrustAnchorError, ValueError) as exc:
         err_console.print(f"[red]Cannot verify, so it will not be printed:[/red] {exc}")
         raise typer.Exit(code=2) from None
+    origin = root.origin
 
-    result = verify_credential(document, public_key, report_path=report)
+    result = verify_credential(document, root, report_path=report, revocation_lists=lists)
     if not result.valid:
         err_console.print(
             "[red bold]The credential does NOT verify; nothing was written.[/red bold]"
@@ -1663,19 +1779,15 @@ def watch_command(
         raise typer.Exit(code=2) from None
 
     document = entry.credential
-    proof = document.get("proof") or {}
     try:
-        public_key, _ = resolve_public_key(
-            str(document.get("issuer", "")),
-            proof.get("verificationMethod"),
-            key_path=key,
-            did_document_path=did_document,
-        )
+        root, lists, _ = _verification_trust(document, key=key, did_document=did_document)
     except (TrustAnchorError, ValueError) as exc:
         err_console.print(f"[red]Cannot verify the certificate to watch:[/red] {exc}")
         raise typer.Exit(code=2) from None
 
-    verification = verify_credential(document, public_key, report_path=report)
+    verification = verify_credential(
+        document, root, report_path=report, revocation_lists=lists
+    )
     failed = {check.name: check.detail for check in verification.checks if not check.ok}
     report_hash = str(entry.report_hash)
 
@@ -2441,6 +2553,7 @@ from opaas.cli import card as _card_cli  # noqa: E402
 from opaas.cli import discover as _discover_cli  # noqa: E402
 from opaas.cli import evidence as _evidence_cli  # noqa: E402
 from opaas.cli import inquest as _inquest_cli  # noqa: E402
+from opaas.cli import root as _root_cli  # noqa: E402
 from opaas.cli import sentinel as _sentinel_cli  # noqa: E402
 from opaas.cli import smith as _smith_cli  # noqa: E402
 from opaas.cli import swarm as _swarm_cli  # noqa: E402
@@ -2453,6 +2566,9 @@ app.add_typer(_inquest_cli.app, name="inquest")
 app.add_typer(_card_cli.app, name="card")
 app.add_typer(_evidence_cli.app, name="evidence")
 app.add_typer(_audit_cli.app, name="audit")
+# What the offline root signs (D65): top-level, beside keygen, sign and trust.
+app.command("delegate")(_root_cli.delegate)
+app.command("revoke")(_root_cli.revoke)
 
 
 if __name__ == "__main__":

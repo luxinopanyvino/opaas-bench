@@ -17,8 +17,10 @@ from opaas.cli.common import (
     _load_signing_key,
     _plain,
     _signing_identity,
+    _verification_trust,
     console,
     err_console,
+    read_json,
     write_json,
 )
 from opaas.core.credential import (
@@ -26,7 +28,7 @@ from opaas.core.credential import (
     CredentialError,
     TrustAnchorError,
     build_evidence_credential,
-    resolve_public_key,
+    identity_for_signing,
     sign_credential,
     verify_credential,
 )
@@ -46,6 +48,12 @@ Passphrase = Annotated[str | None, typer.Option("--passphrase", envvar="OPAAS_KE
                                                 help="Passphrase of the private key.")]
 Validity = Annotated[int, typer.Option("--validity-days", help="Days of validity.")]
 Log = Annotated[Path | None, typer.Option("--log", help="Transparency log to record it in.")]
+Delegation = Annotated[Path | None, typer.Option(
+    "--delegation", help="Delegation from the root to this key; signs under the root's name (D65).",
+)]
+Revocations = Annotated[Path | None, typer.Option(
+    "--revocations", help="The issuer's signed revocation list; defaults to the installed ones.",
+)]
 
 
 @app.command("sign")
@@ -57,20 +65,28 @@ def sign_evidence(
     passphrase: Passphrase = None,
     validity_days: Validity = DEFAULT_VALIDITY_DAYS,
     log: Log = None,
+    delegation: Delegation = None,
 ) -> None:
     """Signs an evidence document: the credential certifies the hash of its bytes."""
     try:
         body = read_document(document)
         private_key = _load_signing_key(key, passphrase)
-        issuer, key_id = _signing_identity(key, private_key, issuer)
+        delegated = read_json(delegation) if delegation is not None else None
+        if delegated is not None:
+            named, key_id = identity_for_signing(delegated, private_key.public_key())
+            if issuer is not None and issuer != named:
+                raise ValueError(f"The delegation is from {named!r}, not {issuer!r}.")
+            issuer = named
+        else:
+            issuer, key_id = _signing_identity(key, private_key, issuer)
         credential = build_evidence_credential(
             body, file_digest(document), kind=str(body.get("kind")), issuer=issuer,
             validity_days=validity_days,
         )
+        signed = sign_credential(credential, private_key, key_id=key_id, delegation=delegated)
     except (EvidenceError, CredentialError, OSError, TypeError, ValueError) as exc:
         err_console.print(f"[red]{_plain(exc)}[/red]")
         raise typer.Exit(code=2) from None
-    signed = sign_credential(credential, private_key, key_id=key_id)
     target = out or document.with_suffix(".vc.json")
     write_json(target, signed)
     if log is not None:
@@ -90,19 +106,18 @@ def verify_evidence(
     credential: Annotated[Path, typer.Option("--credential", "-c", help="Its credential.")],
     key: Annotated[Path | None, typer.Option("--key", "-k", help="Issuer public key.")] = None,
     did_document: Annotated[Path | None, typer.Option("--did-document")] = None,
+    revocations: Revocations = None,
 ) -> None:
     """Verifies the signature offline and that the document is the one signed."""
     try:
         signed = json.loads(credential.read_text(encoding="utf-8-sig"))
-        proof = signed.get("proof") or {}
-        public_key, _ = resolve_public_key(
-            str(signed.get("issuer", "")), proof.get("verificationMethod"),
-            key_path=key, did_document_path=did_document,
+        root, lists, _ = _verification_trust(
+            signed, key=key, did_document=did_document, revocations=revocations
         )
     except (OSError, json.JSONDecodeError, TrustAnchorError, ValueError) as exc:
         err_console.print(f"[red]{_plain(exc)}[/red]")
         raise typer.Exit(code=2) from None
-    result = verify_credential(signed, public_key, report_path=document)
+    result = verify_credential(signed, root, report_path=document, revocation_lists=lists)
     for check in result.checks:
         mark = "[green]ok  [/green]" if check.ok else "[red]FAIL[/red]"
         console.print(f"  {mark} {check.name}: {_plain(check.detail)}")

@@ -126,6 +126,38 @@ def build_did_document(
     }
 
 
+def build_root_did_document(did: str, public_keys: list[Ed25519PublicKey]) -> dict:
+    """The DID document of a root held on several tokens: `#key-1`, `#key-2`, … (D65).
+
+    Each key was generated on its own token and never left it; only the
+    public halves meet here. Every one is listed as an assertion method and as
+    a delegation capability, because the root signs delegations and
+    revocation lists, and a credential signed by a root key directly (before
+    D65, or for a test) must still verify.
+    """
+    if not public_keys:
+        raise ValueError("A root document needs at least one key.")
+    multibases = [public_key_multibase(key) for key in public_keys]
+    if len(set(multibases)) != len(multibases):
+        raise ValueError("The same key appears twice: each token must hold its own key.")
+    ids = [f"{did}#key-{index}" for index in range(1, len(public_keys) + 1)]
+    return {
+        "@context": ["https://www.w3.org/ns/did/v1", "https://w3id.org/security/suites/ed25519-2020/v1"],
+        "id": did,
+        "verificationMethod": [
+            {
+                "id": key_id,
+                "type": "Ed25519VerificationKey2020",
+                "controller": did,
+                "publicKeyMultibase": multibase,
+            }
+            for key_id, multibase in zip(ids, multibases, strict=True)
+        ],
+        "assertionMethod": ids,
+        "capabilityDelegation": ids,
+    }
+
+
 def public_key_multibase(public_key: Ed25519PublicKey) -> str:
     """base58btc multibase encoding with the ed25519-pub multicodec prefix (0xed01)."""
     raw = public_key.public_bytes(

@@ -47,6 +47,12 @@ classifiers = [
     # directly.
     "huggingface-hub>=0.24",
 ]
+# The offline root signs delegations from a hardware token through PKCS#11
+# (D65): a YubiKey's PIV applet via ykcs11, or OpenSC. Only the machine that
+# holds the token needs it; verifying never does.
+token = [
+    "python-pkcs11>=0.7",
+]
 
 [project.scripts]
 opaas = "opaas.cli.main:app"
