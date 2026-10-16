@@ -27,7 +27,13 @@ from opaas.sentinel.drift import EXIT_CODES
 from opaas.sentinel.gate import ApprovalQueue, GateError
 from opaas.sentinel.inventory import check_environment
 from opaas.sentinel.overhead import benchmark_overhead
-from opaas.sentinel.proxy import DEFAULT_KEEP, MODES, SentinelProxy, serve
+from opaas.sentinel.proxy import (
+    DEFAULT_KEEP,
+    DEFAULT_KEEP_OUTPUT,
+    MODES,
+    SentinelProxy,
+    serve,
+)
 
 app = typer.Typer(help="Observe and gate live traffic; watch the environment.",
                   no_args_is_help=True)
@@ -60,6 +66,10 @@ def observe_command(
     keep: Annotated[list[str], typer.Option(
         "--keep", help="Extra request field to keep in clear (dotted, * for lists). "
         "Repeatable. Everything else is a digest.")] = None,
+    keep_output: Annotated[list[str], typer.Option(
+        "--keep-output", help="Extra response field to keep in clear, e.g. "
+        "choices.*.message.content. A stream is assembled first, so the whole answer is "
+        "kept. Repeatable.")] = None,
     actor_chain: Annotated[str | None, typer.Option(
         "--actor-chain", help="Chain to record when a caller sends none, e.g. "
         "service:batch>agent:nightly. Recorded as configured, not as received.")] = None,
@@ -96,6 +106,7 @@ def observe_command(
         proxy = SentinelProxy(
             upstream, EventLog(log, signing_key=signing, seal_every=seal_every),
             policies=loaded, mode=mode, keep=(*DEFAULT_KEEP, *(keep or [])),
+            keep_output=(*DEFAULT_KEEP_OUTPUT, *(keep_output or [])),
             actor_chain=actor_chain, queue=ApprovalQueue(queue) if mode == "gate" else None,
             approval_timeout_s=approval_timeout, faults=plan, alert=alert,
         )

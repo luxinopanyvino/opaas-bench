@@ -236,3 +236,97 @@ def test_a_polite_stop_exits_like_ctrl_c_so_the_log_is_sealed():
             with pytest.raises(KeyboardInterrupt):
                 signal.getsignal(sig)(sig, None)
     assert {sig: signal.getsignal(sig) for sig in _TERMINATE_SIGNALS} == before
+
+
+# ----------------------------------------------------------------- streams
+
+
+def _stream_proxy(tmp_path, body: bytes, **kwargs):
+    def handler(request):
+        return httpx.Response(200, content=body,
+                              headers={"Content-Type": "text/event-stream"})
+    log = EventLog(tmp_path / "events.jsonl")
+    return SentinelProxy("http://engine.test", log, transport=httpx.MockTransport(handler),
+                         **kwargs)
+
+
+def _sse(*chunks) -> bytes:
+    lines = [f"data: {json.dumps(c)}\n\n" for c in chunks]
+    return ("".join(lines) + "data: [DONE]\n\n").encode()
+
+
+OPENAI_STREAM = _sse(
+    {"object": "chat.completion.chunk", "model": "qwen",
+     "choices": [{"index": 0, "delta": {"role": "assistant", "content": "The whole "}}]},
+    {"object": "chat.completion.chunk", "model": "qwen",
+     "choices": [{"index": 0, "delta": {"content": "private answer"}}]},
+    {"object": "chat.completion.chunk", "model": "qwen", "choices": [{"index": 0, "delta": {
+        "tool_calls": [{"index": 0, "id": "c1", "type": "function",
+                        "function": {"name": "search", "arguments": "{\"q\": "}}]}}]},
+    {"object": "chat.completion.chunk", "model": "qwen", "choices": [{"index": 0, "delta": {
+        "tool_calls": [{"index": 0, "function": {"arguments": "\"x\"}"}}]},
+        "finish_reason": "tool_calls"}]},
+    {"object": "chat.completion.chunk", "model": "qwen", "choices": [],
+     "usage": {"total_tokens": 9}},
+)
+
+
+def test_a_kept_streamed_answer_is_the_whole_answer_not_its_last_fragment(tmp_path):
+    proxy = _stream_proxy(tmp_path, OPENAI_STREAM, keep_output=(
+        "choices.*.message.content", "choices.*.message.tool_calls.*.function.arguments",
+        "choices.*.message.tool_calls.*.function.name", "usage"))
+    status, body = _call(proxy)
+    assert status == 200 and body == OPENAI_STREAM  # relayed byte for byte
+    kept = _records(tmp_path)[0]["output"]["value"]
+    assert kept["choices.*.message.content"] == ["The whole private answer"]
+    assert kept["choices.*.message.tool_calls.*.function.arguments"] == [['{"q": "x"}']]
+    assert kept["choices.*.message.tool_calls.*.function.name"] == [["search"]]
+    assert kept["usage"] == {"total_tokens": 9} and kept["streamed"] is True
+
+
+def test_a_stream_keeps_only_what_is_kept_by_default(tmp_path):
+    """Assembling a stream must not put its content in the record (N4)."""
+    proxy = _stream_proxy(tmp_path, OPENAI_STREAM)
+    _call(proxy)
+    record = _records(tmp_path)[0]
+    assert "private answer" not in json.dumps(record)
+    assert record["output"]["value"]["choices.*.finish_reason"] == ["tool_calls"]
+    assert record["output"]["value"]["choices.*.message.tool_calls.*.function.name"] == [
+        ["search"]]
+
+
+def test_an_ollama_stream_is_assembled_like_its_unstreamed_response(tmp_path):
+    lines = [{"model": "qwen", "message": {"role": "assistant", "content": "Hel"},
+              "done": False},
+             {"model": "qwen", "message": {"role": "assistant", "content": "lo"}, "done": False},
+             {"model": "qwen", "message": {"role": "assistant", "content": ""}, "done": True,
+              "done_reason": "stop", "eval_count": 2}]
+    body = "".join(json.dumps(line) + "\n" for line in lines).encode()
+    proxy = _stream_proxy(tmp_path, body, keep_output=("message.content", "done_reason",
+                                                       "eval_count"))
+    _call(proxy, path="/api/chat")
+    kept = _records(tmp_path)[0]["output"]["value"]
+    assert kept["message.content"] == "Hello"
+    assert kept["done_reason"] == "stop" and kept["eval_count"] == 2
+
+
+def test_a_stream_of_an_unknown_shape_says_only_its_last_line_was_kept(tmp_path):
+    body = _sse({"delta": "a"}, {"delta": "b", "usage": {"total_tokens": 3}})
+    proxy = _stream_proxy(tmp_path, body)
+    _call(proxy)
+    kept = _records(tmp_path)[0]["output"]["value"]
+    assert kept == {"usage": {"total_tokens": 3}, "streamed": True, "streamAssembled": False}
+
+
+def test_a_stream_longer_than_the_parse_limit_says_it_was_cut(tmp_path, monkeypatch):
+    from opaas.sentinel import proxy as proxy_module
+
+    monkeypatch.setattr(proxy_module, "_PARSE_LIMIT", 200)
+    proxy = _stream_proxy(tmp_path, OPENAI_STREAM, keep_output=("choices.*.message.content",))
+    _call(proxy)
+    record = _records(tmp_path)[0]
+    assert record["output"]["value"]["streamTruncated"] is True
+    # The digest still covers every byte relayed, not the prefix that was parsed.
+    import hashlib
+
+    assert record["output"]["digest"] == "sha256:" + hashlib.sha256(OPENAI_STREAM).hexdigest()

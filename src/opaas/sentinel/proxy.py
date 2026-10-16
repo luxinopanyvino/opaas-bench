@@ -21,6 +21,16 @@ tools offered and called — never message content or tool arguments. A
 policy over a value the proxy did not keep is undecidable, and the verdict
 says which field to keep.
 
+**A stream is kept as the response it adds up to (D64).** A streamed answer
+arrives as many chunks, each carrying a fragment. The proxy assembles the
+chunks into the document the same call would have returned unstreamed
+(OpenAI chat and completions, the Responses API, Ollama chat and generate)
+and applies `keep` to that, so `choices.*.message.content` kept under
+`--keep-output` is the whole answer, not its last fragment. A stream in a
+shape it does not know falls back to the last data line and says so
+(`streamAssembled: false`); one longer than the parse limit is assembled
+from its beginning and says that too (`streamTruncated`).
+
 **Who acted comes from the caller, never from a guess.** The
 `X-OPAAS-Actor-Chain` header (`user:alice>agent:planner`) or a chain the
 operator configures for the whole proxy (labelled as configured, not as
@@ -123,6 +133,7 @@ class _Pending:
     buffer: bytearray = field(default_factory=bytearray)
     status: int | None = None
     content_encoding: str | None = None
+    truncated: bool = False
 
 
 def pick(document: Any, paths: Sequence[str]) -> dict[str, Any]:
@@ -253,8 +264,9 @@ class SentinelProxy:
         try:
             for chunk in chunks:
                 pending.hasher.update(chunk)
-                if len(pending.buffer) < _PARSE_LIMIT:
-                    pending.buffer.extend(chunk)
+                room = _PARSE_LIMIT - len(pending.buffer)
+                pending.buffer.extend(chunk[:room])
+                pending.truncated = pending.truncated or len(chunk) > room
                 yield chunk
         except httpx.HTTPError as exc:
             error = f"upstream stream broke: {type(exc).__name__}"
@@ -324,7 +336,8 @@ class SentinelProxy:
         ended = time.perf_counter()
         record["output"] = {"digest": "sha256:" + pending.hasher.hexdigest()}
         if not pending.content_encoding and pending.buffer:
-            kept = _kept_output(bytes(pending.buffer), self.keep_output)
+            kept = _kept_output(bytes(pending.buffer), self.keep_output,
+                                truncated=pending.truncated)
             if kept:
                 record["output"]["value"] = kept
         record["extra"]["status"] = pending.status
@@ -483,22 +496,134 @@ def _classify(method: str, path: str, document: Any) -> tuple[str, str | None]:
     return "message", f"{method} {bare}"
 
 
-def _kept_output(body: bytes, keep: Sequence[str]) -> dict[str, Any]:
+def _kept_output(body: bytes, keep: Sequence[str], *, truncated: bool = False) -> dict[str, Any]:
     try:
         document = json.loads(body)
     except (UnicodeDecodeError, json.JSONDecodeError):
-        # A stream: keep what the last data line carries (usage, finish reason).
-        for line in reversed(body.decode("utf-8", "replace").splitlines()):
-            line = line.removeprefix("data:").strip()
-            if line.startswith("{"):
-                try:
-                    kept = pick(json.loads(line), keep)
-                except json.JSONDecodeError:
-                    continue
-                if kept:
-                    return {**kept, "streamed": True}
-        return {"streamed": True}
+        chunks = _stream_chunks(body)
+        if not chunks:
+            # Neither a JSON document nor a stream of them: nothing to keep,
+            # except that a body cut at the parse limit was cut.
+            return {"truncated": True} if truncated else {}
+        marks: dict[str, Any] = {"streamed": True}
+        if truncated:
+            marks["streamTruncated"] = True
+        assembled = assemble_stream(chunks)
+        if assembled is not None:
+            return {**pick(assembled, keep), **marks}
+        # A shape this proxy does not assemble: what the last data line
+        # carries (usage, finish reason), and a mark saying that is all.
+        for chunk in reversed(chunks):
+            kept = pick(chunk, keep)
+            if kept:
+                return {**kept, **marks, "streamAssembled": False}
+        return {**marks, "streamAssembled": False}
     return pick(document, keep) if isinstance(document, (dict, list)) else {}
+
+
+def _stream_chunks(body: bytes) -> list[dict[str, Any]]:
+    """The JSON objects of an SSE (`data: {...}`) or NDJSON stream, in order."""
+    chunks = []
+    for line in body.decode("utf-8", "replace").splitlines():
+        line = line.removeprefix("data:").strip()
+        if not line.startswith("{"):
+            continue  # `event:` lines, `[DONE]`, keep-alive comments
+        try:
+            chunk = json.loads(line)
+        except json.JSONDecodeError:
+            continue  # the last line of a stream cut at the parse limit
+        if isinstance(chunk, dict):
+            chunks.append(chunk)
+    return chunks
+
+
+def assemble_stream(chunks: Sequence[dict[str, Any]]) -> dict[str, Any] | None:
+    """The document a streamed call adds up to, or None for a shape not known here.
+
+    Fragments that are strings are concatenated in order; everything else
+    takes its last value, as the unstreamed response would carry it.
+    """
+    for chunk in reversed(chunks):
+        if chunk.get("type") == "response.completed" and isinstance(chunk.get("response"),
+                                                                     dict):
+            return chunk["response"]  # Responses API: the last event is the whole response
+    if any(isinstance(c.get("choices"), list) for c in chunks):
+        return _assemble_openai(chunks)
+    if any(isinstance(c.get("message"), dict) or isinstance(c.get("response"), str)
+           for c in chunks) and any("done" in c for c in chunks):
+        return _assemble_ollama(chunks)
+    return None
+
+
+def _assemble_openai(chunks: Sequence[dict[str, Any]]) -> dict[str, Any]:
+    document: dict[str, Any] = {}
+    choices: dict[int, dict[str, Any]] = {}
+    for chunk in chunks:
+        for key, value in chunk.items():
+            if key != "choices" and value is not None:
+                document[key] = value
+        for part in chunk.get("choices") or []:
+            if not isinstance(part, dict):
+                continue
+            choice = choices.setdefault(int(part.get("index", 0)), {"index": part.get("index", 0)})
+            if part.get("finish_reason") is not None:
+                choice["finish_reason"] = part["finish_reason"]
+            if isinstance(part.get("text"), str):  # /v1/completions
+                choice["text"] = choice.get("text", "") + part["text"]
+            delta = part.get("delta")
+            if isinstance(delta, dict):
+                _merge_delta(choice.setdefault("message", {}), delta)
+    if document.get("object") == "chat.completion.chunk":
+        document["object"] = "chat.completion"
+    document["choices"] = [choices[i] for i in sorted(choices)]
+    return document
+
+
+def _merge_delta(message: dict[str, Any], delta: dict[str, Any]) -> None:
+    for key, value in delta.items():
+        if key == "tool_calls" and isinstance(value, list):
+            calls = message.setdefault("tool_calls", [])
+            for fragment in value:
+                if not isinstance(fragment, dict):
+                    continue
+                index = int(fragment.get("index", len(calls)))
+                while len(calls) <= index:
+                    calls.append({})
+                call = calls[index]
+                for field_name in ("id", "type"):
+                    if fragment.get(field_name) is not None:
+                        call[field_name] = fragment[field_name]
+                function = fragment.get("function")
+                if isinstance(function, dict):
+                    target = call.setdefault("function", {})
+                    for name, piece in function.items():
+                        if isinstance(piece, str):
+                            target[name] = target.get(name, "") + piece
+        elif key == "role" or not isinstance(value, str):
+            if value is not None:
+                message[key] = value
+        else:
+            message[key] = message.get(key, "") + value
+
+
+def _assemble_ollama(chunks: Sequence[dict[str, Any]]) -> dict[str, Any]:
+    document: dict[str, Any] = {}
+    for chunk in chunks:
+        for key, value in chunk.items():
+            if key == "message" and isinstance(value, dict):
+                message = document.setdefault("message", {})
+                for name, piece in value.items():
+                    if name == "tool_calls" and isinstance(piece, list):
+                        message.setdefault("tool_calls", []).extend(piece)
+                    elif name in ("content", "thinking") and isinstance(piece, str):
+                        message[name] = message.get(name, "") + piece
+                    else:
+                        message[name] = piece
+            elif key == "response" and isinstance(value, str):  # /api/generate
+                document["response"] = document.get("response", "") + value
+            else:
+                document[key] = value
+    return document
 
 
 # ------------------------------------------------------------------- server
@@ -600,6 +725,7 @@ __all__ = [
     "FaultInjector",
     "ProxyResponse",
     "SentinelProxy",
+    "assemble_stream",
     "pick",
     "serve",
 ]
