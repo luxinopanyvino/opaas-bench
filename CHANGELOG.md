@@ -12,7 +12,8 @@ The methodology version embedded in every report (`OPAAS_SPEC_VERSION`,
 
 Phase 14 of the work plan: the operational gaps the status table declared
 left out (D64). Phase 10, steps 2 and 4: the root delegates to an issuing
-key, and keeps a revocation list (D65, D66).
+key, and keeps a revocation list (D65, D66). Phase 10, step 3 prepared: the
+ceremony runbook and its rehearsal (D67).
 
 ### Upgrading
 
@@ -58,6 +59,12 @@ key, and keeps a revocation list (D65, D66).
   PKCS#11 hardware token (`--pkcs11-module`, new `token` extra) or a key
   file. `opaas sign --delegation` and `opaas evidence sign --delegation`
   embed it, and refuse one that has expired or names another key (D66).
+- `opaas root-document`: the root's DID document from the two tokens'
+  public keys, with the fingerprints to check over a second channel (D67).
+- `docs/ceremony.md`, the production key ceremony step by step, and
+  `scripts/rehearse_ceremony.py`, which runs every `opaas` step of it with
+  throwaway keys: on two SoftHSM2 tokens when `SOFTHSM2_MODULE` is set,
+  with key files otherwise (and in `pytest`).
 - `opaas revoke`: the root's signed revocation list. `opaas trust --add`
   installs one after it verifies under a pinned anchor; `verify
   --revocations` names one explicitly; `opaas publish --revocations` gives

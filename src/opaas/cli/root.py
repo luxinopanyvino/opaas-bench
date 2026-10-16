@@ -1,18 +1,21 @@
-"""`opaas delegate` and `opaas revoke`: what the offline root signs (D65).
+"""`opaas root-document`, `delegate` and `revoke`: the offline root (D65).
 
-The root signs two kinds of document, a few times a year, from an offline
-machine with a hardware token: a delegation that lets an issuing key sign
-credentials for a while, and the revocation list that withdraws one. Both are
-top-level commands beside `keygen`, `sign` and `trust`, the other key
-commands (D41), and register on the main app at the end of `cli/main.py`.
+`root-document` assembles the root's DID document from the public halves of
+the token keys, once, at the ceremony. The root then signs two kinds of
+document, a few times a year, from an offline machine with a hardware token: a
+delegation that lets an issuing key sign credentials for a while, and the
+revocation list that withdraws one. All three are top-level commands beside
+`keygen`, `sign` and `trust`, the other key commands (D41), and register on
+the main app at the end of `cli/main.py`.
 
-Neither command takes a key from anything it is handed to sign about. The
+Neither signing command takes a key from anything it is handed to sign about. The
 root's identity comes from its own DID document (`--root-did-document`), and
 the signer must hold a key that document publishes.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -28,6 +31,7 @@ from opaas.core.credential import (
     SignerError,
     build_delegation,
     build_revocation_list,
+    build_root_did_document,
     fingerprint,
     is_revocation_list,
     load_public_key,
@@ -101,6 +105,74 @@ def _root(
 def _write(path: Path, document: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(document, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
+
+TokenPublicKeys = Annotated[
+    list[Path],
+    typer.Option(
+        "--public-key",
+        help="Public key (.pub.pem) exported from a root token. Repeat it: the first becomes "
+        "#key-1, the second #key-2, in the order given.",
+    ),
+]
+RootDidName = Annotated[
+    str,
+    typer.Option("--did", help="The root's DID, e.g. did:web:onpremialabs.com. Never defaulted."),
+]
+RootDocumentOut = Annotated[
+    Path, typer.Option("--out", "-o", help="DID document to write.")
+]
+RootOverwrite = Annotated[
+    bool, typer.Option("--overwrite", help="Replace an existing document at --out.")
+]
+
+
+def root_document(
+    public_keys: TokenPublicKeys,
+    did: RootDidName,
+    out: RootDocumentOut = Path("did.json"),
+    overwrite: RootOverwrite = False,
+) -> None:
+    """Assembles the root's DID document from the tokens' public keys (D65).
+
+    Each root key was generated on its own token and never left it; only the
+    public halves meet here, so this runs anywhere. What it prints is what the
+    ceremony writes down and checks over a second channel.
+    """
+    if len(public_keys) < 2:
+        # D65 holds the root on two tokens, each the other's backup. One key
+        # is a root that a single lost token ends.
+        console.print(
+            f"[yellow]{len(public_keys)} key given.[/yellow] D65 holds the root on two tokens, "
+            "each the other's backup; with one, losing it means a new root."
+        )
+    if out.exists() and not overwrite:
+        err_console.print(
+            f"[red]{out} already exists.[/red] A root document that is already published is "
+            "what verifiers pinned; pass --overwrite only to replace a draft."
+        )
+        raise typer.Exit(code=2)
+    try:
+        keys = [load_public_key(path) for path in public_keys]
+        document = build_root_did_document(did, keys)
+    except (OSError, TypeError, ValueError) as exc:
+        err_console.print(f"[red]{_plain(exc)}[/red]")
+        raise typer.Exit(code=2) from None
+    _write(out, document)
+
+    console.print("[green]Root DID document written.[/green]")
+    console.print(f"  issuer   : {_plain(did)}")
+    for path, key, method in zip(public_keys, keys, document["verificationMethod"], strict=True):
+        console.print(f"  {_plain(method['id'])}")
+        console.print(f"    from        : {path}")
+        console.print(f"    fingerprint : {fingerprint(key)}")
+        console.print(f"    multibase   : {method['publicKeyMultibase']}")
+    console.print(f"  file     : {out}")
+    console.print(f"  sha256   : {hashlib.sha256(out.read_bytes()).hexdigest()}")
+    console.print(
+        "\n[dim]Write the fingerprints down and check each against its token over a second "
+        "channel before anything is signed or published.[/dim]"
+    )
 
 
 IssuingKey = Annotated[

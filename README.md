@@ -471,7 +471,8 @@ An offline root can also delegate (D65): `opaas delegate` has it sign, from a ha
 a delegation naming an issuing key and a window of months; `opaas sign --delegation` embeds it,
 and `verify` (and the browser) accept the issuing key only once that delegation verifies under
 an anchor, covers the signature's date, and neither key is on the root's revocation list
-(`opaas revoke`, installed with `opaas trust --add revocations.json`).
+(`opaas revoke`, installed with `opaas trust --add revocations.json`). The production root is
+created in a ceremony written out in [the ceremony runbook](docs/ceremony.md).
 
 ---
 
@@ -563,6 +564,7 @@ The ones you will reach for. Full list with `opaas run --help`.
 | `opaas show <report>` | Summary of an existing report, with its hash |
 | `opaas compare` | Cross-references several reports under the interval-overlap rule |
 | `opaas keygen` | Generates an Ed25519 pair and its DID document |
+| `opaas root-document` | Writes the root's DID document from the public keys of its two hardware tokens (`#key-1`, `#key-2`), printing the fingerprints to check (D67) |
 | `opaas delegate` | The root delegates credential signing to an issuing key, from a hardware token (`--pkcs11-module`, `token` extra) or a key file (D65) |
 | `opaas revoke` | Adds a key to the root's signed revocation list |
 | `opaas sign` | Issues the signed credential from a model or system report; `--delegation` signs under the root's name with an issuing key |
