@@ -8,6 +8,43 @@ releases, for someone deciding whether to upgrade.
 The methodology version embedded in every report (`OPAAS_SPEC_VERSION`,
 `1.0-draft`) is separate from the package version, and did not change.
 
+## [Unreleased]
+
+Phase 14 of the work plan: the operational gaps the status table declared
+left out (D64).
+
+### Upgrading
+
+- **G05 changed meaning.** A skill with a signature file used to be `ok`. It
+  is now `ok` only when signed with `opaas discover sign-skill` and verified
+  under a key named with `discover gaps --skill-key`; with no key named, or a
+  signature in another scheme, it is `not-observed`. Gap scans say ruleset
+  version 2 and carry a new ruleset hash: compare them with version 1 scans as
+  a different instrument.
+- **Skill hashes leave out `signature.json` and `SIGNATURE`**, as they already
+  left out `.sig` and `.asc`. An inventory of a skill that carried one of
+  those files hashes differently, and `sentinel inventory` against an older
+  baseline reports that skill as changed: re-baseline after upgrading.
+- **G07 now judges agent runtimes**, which `discover scan` probes with one GET
+  to `/` (`agentProbes` 2). A runtime answering anonymously on a non-loopback
+  bind is a new gap. The environment hash does not change.
+- **The sentinel's kept output for streams** is now taken from the assembled
+  response, so streamed tool calls keep their names under the defaults; a
+  non-JSON body that is not a stream no longer records `streamed: true`.
+
+### Added
+
+- `opaas discover sign-skill` and `discover gaps --skill-key`: verified skill
+  signatures (G05).
+- `opaas sentinel observe --keep-output`: response fields kept in clear; a
+  stream is assembled before they are picked (OpenAI chat and completions,
+  Responses API, Ollama), and marked when it could not be or was cut.
+- `--notify-webhook` and `--notify-command` for `--mode gate`: approvers are
+  told an action is held, by its ids and digest only. The pending event
+  records whether each notice was delivered.
+- `discover scan` probes agent runtimes and prints what each answered; G07
+  covers them.
+
 ## [0.2.1] — 2026-10-15
 
 A patch release. **Upgrade if you installed 0.2.0 without the `classifiers`
