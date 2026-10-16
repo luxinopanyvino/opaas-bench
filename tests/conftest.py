@@ -147,6 +147,8 @@ def _no_discovery(monkeypatch):
     from opaas.discover import identify
 
     monkeypatch.setattr(identify, "probe_agents", lambda *args, **kwargs: [])
+    # Nor its agent runtimes (D64): left as listed, unprobed.
+    monkeypatch.setattr(identify, "probe_runtimes", lambda runtimes, *args, **kwargs: runtimes)
 
 
 @pytest.fixture(autouse=True)

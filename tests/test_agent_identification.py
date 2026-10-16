@@ -4,6 +4,7 @@ No test probes the host: identification runs on an injected transport, and
 the well-known configuration lookup on a temporary home.
 """
 
+import functools
 import json
 
 import httpx
@@ -14,8 +15,9 @@ from opaas.cli.main import app
 from opaas.core.events import AuditEvent, EventLog, evidence, parse_actor_chain
 from opaas.discover import discover
 from opaas.discover import identify as identify_module
-from opaas.discover.agents import agent_stack_hash
-from opaas.discover.identify import scan_agents, well_known_mcp_configs
+from opaas.discover.agents import agent_runtimes, agent_stack_hash
+from opaas.discover.gaps import GAP, NOT_OBSERVED, OK, scan_gaps
+from opaas.discover.identify import scan_agents, scan_runtimes, well_known_mcp_configs
 from opaas.discover.inventory import Listener
 from opaas.system import load_manifest
 from opaas.system.draft import draft_manifest
@@ -212,3 +214,91 @@ def test_framework_titles_map_to_adapters(title, adapter):
     routes = {42000: {"/openapi.json": (200, {"info": {"title": title}})}}
     found = scan_agents(_listeners(42000), transport=_transport(routes))
     assert found[0]["adapter"] == adapter
+
+
+# ------------------------------------------------------------ agent runtimes
+
+
+def _runtime_listeners():
+    return {
+        41010: Listener(port=41010, address="0.0.0.0", process="langgraph"),
+        41011: Listener(port=41011, address="0.0.0.0", process="flowise"),
+        41012: Listener(port=41012, address="0.0.0.0", process="letta"),
+        41013: Listener(port=41013, address="127.0.0.1", process="n8n"),
+        41014: Listener(port=41014, address="0.0.0.0", process="dify"),
+    }
+
+
+RUNTIME_ROUTES = {
+    41010: {"/": (200, {"secret": "do-not-keep"})},
+    41011: {"/": (401, {"detail": "Unauthorized"})},
+    # 41012 refuses connections
+    41013: {"/": (200, {})},
+    41014: {"/": (404, {})},
+}
+
+
+def test_agent_runtimes_are_probed_with_one_get_and_their_bodies_are_not_kept():
+    seen = []
+    transport = _transport(RUNTIME_ROUTES)
+
+    def handler(request):
+        seen.append((request.method, request.url.port, request.url.path))
+        return transport.handle_request(request)
+
+    listeners = _runtime_listeners()
+    runtimes = agent_runtimes(listeners)
+    probed = {r["port"]: r for r in scan_runtimes(runtimes, listeners,
+                                                  transport=httpx.MockTransport(handler))}
+    assert all(method == "GET" and path == "/" for method, _, path in seen)
+    assert probed[41010]["probe"]["answeredWithoutCredentials"] is True
+    assert probed[41011]["probe"]["requiresCredentials"] is True
+    assert probed[41012]["probe"] == {"request": "GET /", "answered": False,
+                                      "reason": "ConnectError"}
+    assert all(r["identified"] is False for r in probed.values()), \
+        "an answer to GET / is never an identification"
+    assert "do-not-keep" not in json.dumps(probed)
+
+
+def test_a_runtime_that_identified_itself_as_an_agent_says_so():
+    listeners = _runtime_listeners()
+    agent = {"kind": "langgraph", "port": 41010}
+    probed = scan_runtimes(agent_runtimes(listeners), listeners, agents=[agent],
+                           transport=_transport(RUNTIME_ROUTES))
+    runtime = next(r for r in probed if r["port"] == 41010)
+    assert runtime["identified"] is True and runtime["identifiedAs"] == "langgraph"
+
+
+def test_g07_judges_agent_runtimes_by_what_the_probe_saw(monkeypatch):
+    listeners = _runtime_listeners()
+    monkeypatch.setattr(identify_module, "probe_runtimes", functools.partial(
+        scan_runtimes, transport=_transport(RUNTIME_ROUTES)))
+    document = discover(engines={"engines": [], "hash": "sha256:eng"}, listeners=listeners,
+                        containers=False)
+    g07 = {f["subject"]: f for f in scan_gaps(document)["findings"] if f["rule"] == "G07"}
+    assert g07["agent runtime langgraph :41010"]["status"] == GAP
+    assert g07["agent runtime flowise :41011"]["status"] == OK
+    assert g07["agent runtime letta :41012"]["status"] == NOT_OBSERVED
+    assert g07["agent runtime n8n :41013"]["status"] == OK  # loopback only
+    assert g07["agent runtime dify :41014"]["status"] == NOT_OBSERVED
+
+
+def test_an_unprobed_runtime_is_not_observed_never_ok():
+    listeners = {41010: Listener(port=41010, address="0.0.0.0", process="langgraph")}
+    document = discover(engines={"engines": [], "hash": "sha256:eng"}, listeners=listeners,
+                        containers=False)  # the test fixture leaves runtimes unprobed
+    g07 = [f for f in scan_gaps(document)["findings"] if f["rule"] == "G07"]
+    assert [f["status"] for f in g07] == [NOT_OBSERVED]
+    assert "not probed" in g07[0]["detail"]
+
+
+def test_probing_runtimes_does_not_move_the_environment_hash(monkeypatch):
+    """A status code changes between scans; what the environment is does not."""
+    listeners = _runtime_listeners()
+    engines = {"engines": [], "hash": "sha256:eng"}
+    unprobed = discover(engines=engines, listeners=listeners, containers=False)
+    monkeypatch.setattr(identify_module, "probe_runtimes", functools.partial(
+        scan_runtimes, transport=_transport(RUNTIME_ROUTES)))
+    probed = discover(engines=engines, listeners=listeners, containers=False)
+    assert probed["hash"] == unprobed["hash"]
+    assert probed["agentStack"]["agentProbes"] == 2

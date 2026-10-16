@@ -406,9 +406,9 @@ def list_containers(runner: Runner | None = None) -> dict[str, Any]:
 def agent_runtimes(listeners: dict[int, Listener]) -> list[dict[str, Any]]:
     """Listeners whose process name suggests an agent runtime or MCP server.
 
-    They are listed, never probed: unlike an engine, an agent runtime has no
-    well-known read-only endpoint, and guessing one would mean sending
-    requests to a service OPAAS does not understand.
+    Listed here from the process name alone. `discover` then probes each with
+    one GET to `/` (`identify.scan_runtimes`, D64): enough to tell whether it
+    speaks HTTP and asks for credentials, never a request that could act.
     """
     return [
         {"port": port, "process": listener.process, "bind": listener.bind,

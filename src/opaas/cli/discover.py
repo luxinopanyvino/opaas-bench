@@ -75,6 +75,12 @@ def scan_command(
     console.print(f"  MCP servers {servers} · tools {tools} · skills {skills_found} · "
                   f"agent runtimes {len(stack['agentRuntimes'])} · "
                   f"agents identified {len(stack.get('agentEndpoints', []))}")
+    for runtime in stack["agentRuntimes"]:
+        probe = runtime.get("probe") or {}
+        seen = (f"HTTP {probe['status']}" if probe.get("answered")
+                else "no HTTP answer" if probe else "not probed")
+        console.print(f"  runtime {_plain(str(runtime.get('process'))):<12} "
+                      f":{runtime.get('port'):<6} {runtime.get('bind'):<15} {seen}")
     for agent in stack.get("agentEndpoints", []):
         console.print(f"  agent  {agent['kind']:<12} {_plain(agent['name'])} at "
                       f"{agent['endpoint']} [dim]({_plain(agent['basis'])})[/dim]")

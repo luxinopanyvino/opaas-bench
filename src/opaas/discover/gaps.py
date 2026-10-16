@@ -63,7 +63,7 @@ RULES: tuple[Rule, ...] = (
     Rule("G06", "lifecycleCoverage", "Q2",
          "Approvals are represented as events in the log."),
     Rule("G07", "responsibilityAttribution", "Q4",
-         "No engine answers anonymous callers beyond this host."),
+         "No engine or agent runtime answers anonymous callers beyond this host."),
     Rule("G08", "responsibilityAttribution", "Q4",
          "Logged actions carry an actor chain."),
     Rule("G09", "evidenceIntegrity", "Q5",
@@ -280,10 +280,12 @@ def _g06_approvals(ctx: _Context) -> list[dict[str, Any]]:
         "record, and a policy requiring one is undecidable.")]
 
 
-def _g07_anonymous_engines(ctx: _Context) -> list[dict[str, Any]]:
-    engines = ctx.discovered.get("engines") or []
-    if not ctx.discovered.get("available") or not engines:
-        return [_finding("G07", NOT_OBSERVED, "engines", "No engine was found to assess.")]
+def _g07_anonymous_callers(ctx: _Context) -> list[dict[str, Any]]:
+    engines = (ctx.discovered.get("engines") or []) if ctx.discovered.get("available") else []
+    runtimes = ctx.stack.get("agentRuntimes") or []
+    if not engines and not runtimes:
+        return [_finding("G07", NOT_OBSERVED, "engines",
+                         "No engine or agent runtime was found to assess.")]
     out = []
     for engine in engines:
         subject = f"{engine.get('kind')} :{engine.get('port')}"
@@ -298,7 +300,36 @@ def _g07_anonymous_engines(ctx: _Context) -> list[dict[str, Any]]:
                                 "A named remote endpoint: its bind scope cannot be seen."))
         else:
             out.append(_finding("G07", OK, subject, f"Bound to {engine.get('bind')}."))
+    out += [_runtime_finding(runtime) for runtime in runtimes]
     return out
+
+
+def _runtime_finding(runtime: dict[str, Any]) -> dict[str, Any]:
+    subject = f"agent runtime {runtime.get('process')} :{runtime.get('port')}"
+    probe = runtime.get("probe")
+    bind = runtime.get("bind")
+    if probe is None:
+        return _finding("G07", NOT_OBSERVED, subject,
+                        "Listed by process name and not probed: whether it asks callers for "
+                        "credentials was not seen.")
+    if not probe.get("answered"):
+        return _finding("G07", NOT_OBSERVED, subject,
+                        "Did not answer an HTTP GET: whether it asks callers for credentials "
+                        "could not be seen.")
+    if probe.get("requiresCredentials"):
+        return _finding("G07", OK, subject,
+                        f"Asked an anonymous caller for credentials (HTTP {probe['status']}).")
+    if bind not in ("all-interfaces", "network"):
+        return _finding("G07", OK, subject, f"Bound to {bind}.")
+    if probe.get("answeredWithoutCredentials"):
+        return _finding(
+            "G07", GAP, subject,
+            f"Answered GET / without credentials on {bind}: what it serves cannot be "
+            "attributed to any principal. OPAAS sends only GETs, so whether its actions are "
+            "equally open was not tried.")
+    return _finding("G07", NOT_OBSERVED, subject,
+                    f"Answered HTTP {probe.get('status')} to GET /: that alone shows neither "
+                    "an open nor a closed door.")
 
 
 def _g08_actor_chains(ctx: _Context) -> list[dict[str, Any]]:
@@ -337,7 +368,7 @@ _CHECKS: tuple[Callable[[_Context], list[dict[str, Any]]], ...] = (
     _g04_pinning,
     _g05_signed_skills,
     _g06_approvals,
-    _g07_anonymous_engines,
+    _g07_anonymous_callers,
     _g08_actor_chains,
     _g09_container_digests,
 )
