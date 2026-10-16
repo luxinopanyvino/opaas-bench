@@ -414,14 +414,22 @@ class SentinelProxy:
             d["enforced"] = "pending"
         pending_record = {**record, "id": uuid.uuid4().hex, "phase": "pending",
                           "extra": {**record["extra"], "for": record["id"]}}
-        self._append(pending_record)
         if self.queue is None:
+            self._append(pending_record)
             return self._refuse(pending, "block", "Held for approval, but no queue is set.")
         pending_id = self.queue.submit({
             "event": record["id"], "target": record.get("target"),
             "actorChain": record.get("actorChain"), "args": record["args"],
             "policies": holding,
         })
+        pending_record["extra"]["pendingId"] = pending_id
+        # Whether approvers were told is part of the record: a hold nobody
+        # heard about times out into a refusal, and the log should say why.
+        notified = self.queue.notify(pending_id, event_id=record["id"],
+                                     digest=record["args"]["digest"])
+        if notified:
+            pending_record["extra"]["notification"] = notified
+        self._append(pending_record)
         decision = self.queue.wait(pending_id, self.approval_timeout_s)
         if decision is None or decision.decision != "approve":
             reason = "timed out" if decision is None else f"denied by {decision.by}"

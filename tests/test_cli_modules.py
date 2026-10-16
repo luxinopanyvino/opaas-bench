@@ -182,3 +182,11 @@ def test_sentinel_inventory_watch_exits_by_state(tmp_path):
                                   "--no-containers", "--skills", str(tmp_path / "skills"),
                                   "-o", str(tmp_path / "w.json")])
     assert drifted.exit_code == 1 and "skillsAdded" in drifted.output
+
+
+def test_notifying_approvers_outside_gate_mode_is_refused(tmp_path):
+    """Only gate holds actions: a notifier on an observing proxy would never fire."""
+    result = runner.invoke(app, ["sentinel", "observe", "-u", "http://engine.test", "--log",
+                                 str(tmp_path / "e.jsonl"), "--notify-webhook",
+                                 "http://hooks.test/x"])
+    assert result.exit_code == 2 and "--mode gate" in _flat(result.output)

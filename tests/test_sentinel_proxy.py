@@ -7,7 +7,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from opaas.core.events import EventLog, read_log, verify_chain, verify_seals
 from opaas.core.policy import load_policies
-from opaas.sentinel.gate import ApprovalQueue, GateError
+from opaas.sentinel.gate import ApprovalQueue, CommandNotifier, GateError, WebhookNotifier
 from opaas.sentinel.overhead import benchmark_overhead
 from opaas.sentinel.proxy import SentinelProxy, pick
 
@@ -330,3 +330,80 @@ def test_a_stream_longer_than_the_parse_limit_says_it_was_cut(tmp_path, monkeypa
     import hashlib
 
     assert record["output"]["digest"] == "sha256:" + hashlib.sha256(OPENAI_STREAM).hexdigest()
+
+
+# ------------------------------------------------------------ notifications
+
+
+HOLD_ALL = [{"id": "approve-first", "kind": "precedes", "enforce": "approve",
+             "scope": {"field": "action", "eq": "model_call"},
+             "match": {"field": "target", "eq": "qwen"},
+             "before": {"field": "action", "eq": "approval"}}]
+
+
+def _held(tmp_path, notifiers):
+    queue = ApprovalQueue(tmp_path / "queue", poll_s=0.01, notifiers=notifiers)
+    proxy = _proxy(tmp_path, policies=load_policies(HOLD_ALL), mode="gate", queue=queue,
+                   approval_timeout_s=0.05)
+    status, _ = _call(proxy, **{"X-OPAAS-Actor-Chain": "user:alice>agent:planner"})
+    return status, _records(tmp_path)
+
+
+def test_a_held_action_notifies_approvers_with_ids_and_digest_only(tmp_path):
+    received = []
+
+    def hook(request):
+        received.append(request)
+        return httpx.Response(204)
+
+    webhook = WebhookNotifier("https://chat.example/hooks/T0K3N?sig=abc",
+                              transport=httpx.MockTransport(hook))
+    status, records = _held(tmp_path, [webhook])
+    assert status == 403  # nobody approved in time: held, then refused
+    payload = json.loads(received[0].content)
+    pending = records[0]
+    assert payload == {"type": "opaas.approval.pending", "pending": pending["extra"]["pendingId"],
+                       "event": pending["extra"]["for"], "digest": pending["args"]["digest"]}
+    sent = received[0].content.decode()
+    assert "secret plans" not in sent and "qwen" not in sent and "alice" not in sent
+    assert pending["extra"]["notification"] == [
+        {"channel": "webhook", "endpoint": "https://chat.example", "delivered": True}]
+    assert "T0K3N" not in json.dumps(records)
+
+
+def test_a_failed_notice_leaves_the_action_held_and_says_so(tmp_path):
+    def broken(request):
+        raise httpx.ConnectError("refused")
+
+    status, records = _held(tmp_path, [WebhookNotifier(
+        "http://hooks.test/x", transport=httpx.MockTransport(broken))])
+    assert status == 403 and [r["phase"] for r in records] == ["pending", "block"]
+    notification = records[0]["extra"]["notification"][0]
+    assert notification["delivered"] is False and "unreachable" in notification["reason"]
+
+
+def test_a_notification_command_gets_the_notice_on_stdin_and_never_in_the_record(tmp_path):
+    calls = []
+
+    def runner(argv, stdin, env, timeout_s):
+        calls.append((list(argv), json.loads(stdin), env))
+        return 0
+
+    command = CommandNotifier(["/usr/local/bin/page-oncall", "--token", "s3cr3t"],
+                              runner=runner)
+    _, records = _held(tmp_path, [command])
+    argv, payload, env = calls[0]
+    assert argv[-1] == "s3cr3t" and set(payload) == {"type", "pending", "event", "digest"}
+    assert env["OPAAS_PENDING_ID"] == payload["pending"]
+    assert env["OPAAS_ACTION_DIGEST"] == records[0]["args"]["digest"]
+    assert records[0]["extra"]["notification"] == [
+        {"channel": "command", "program": "page-oncall", "delivered": True}]
+    assert "s3cr3t" not in json.dumps(records)
+
+
+def test_a_notification_command_that_fails_is_reported_not_raised(tmp_path):
+    queue = ApprovalQueue(tmp_path, notifiers=[
+        CommandNotifier(["notify"], runner=lambda *args: 3)])
+    outcome = queue.notify("p1", event_id="e1", digest="sha256:00")
+    assert outcome == [{"channel": "command", "program": "notify", "delivered": False,
+                        "reason": "command exited with status 3"}]
