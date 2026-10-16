@@ -48,7 +48,7 @@ def discover(
     `engines` and `listeners` can be injected; tests never probe the host.
     `well_known` adds the MCP configurations found in their usual places, and
     the agents that identify themselves are probed on every listener that is
-    not an engine (D63).
+    not an engine (D63). Agent runtimes get one GET each (D64).
     """
     if listeners is None:
         listeners, _ = _inventory.listening_ports()
@@ -69,6 +69,10 @@ def discover(
     stack["agentEndpoints"] = _identify.probe_agents(
         listeners or {}, endpoints=agent_endpoints, skip_ports=engine_ports)
     stack["agentProbes"] = _identify.AGENT_PROBES_VERSION
+    # Probed after identification, so a runtime that is an identified agent
+    # says so; probe results stay out of the stack hash, as ports do (D64).
+    stack["agentRuntimes"] = _identify.probe_runtimes(
+        stack["agentRuntimes"], listeners or {}, agents=stack["agentEndpoints"])
     if well_known:
         stack["wellKnownConfigs"] = [path.name for path in known]
         stack["notObserved"] = [n for n in stack["notObserved"]

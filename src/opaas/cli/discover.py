@@ -7,10 +7,11 @@ from typing import Annotated
 
 import typer
 
-from opaas.cli.common import _plain, console, err_console, read_json
+from opaas.cli.common import _load_signing_key, _plain, console, err_console, read_json
 from opaas.core.credential import load_public_key
 from opaas.core.evidence import EvidenceError, envelope, read_document, write_document
 from opaas.discover import discover
+from opaas.discover.agents import sign_skill
 from opaas.discover.gaps import scan_gaps
 
 app = typer.Typer(help="What runs here, and what can and cannot be audited about it.",
@@ -74,6 +75,12 @@ def scan_command(
     console.print(f"  MCP servers {servers} · tools {tools} · skills {skills_found} · "
                   f"agent runtimes {len(stack['agentRuntimes'])} · "
                   f"agents identified {len(stack.get('agentEndpoints', []))}")
+    for runtime in stack["agentRuntimes"]:
+        probe = runtime.get("probe") or {}
+        seen = (f"HTTP {probe['status']}" if probe.get("answered")
+                else "no HTTP answer" if probe else "not probed")
+        console.print(f"  runtime {_plain(str(runtime.get('process'))):<12} "
+                      f":{runtime.get('port'):<6} {runtime.get('bind'):<15} {seen}")
     for agent in stack.get("agentEndpoints", []):
         console.print(f"  agent  {agent['kind']:<12} {_plain(agent['name'])} at "
                       f"{agent['endpoint']} [dim]({_plain(agent['basis'])})[/dim]")
@@ -99,6 +106,10 @@ def gaps_command(
     logging_endpoint: Annotated[list[str], typer.Option(
         "--logging-endpoint", help="Scheme://host:port of a logging layer, such as the "
         "sentinel proxy. Repeatable.")] = None,
+    skill_key: Annotated[list[Path], typer.Option(
+        "--skill-key", help="Public key trusted to sign skills (G05). Repeatable. Without "
+        "one, signed skills are not observed: the key never comes from the signature.")]
+    = None,
     out: Out = Path("gaps.json"),
 ) -> None:
     """Deterministic auditability gap scan (OP1). A gap is never a predicted violation."""
@@ -106,6 +117,7 @@ def gaps_command(
         document = read_document(inventory, kind="inventory")
         declared = read_json(declaration) if declaration else None
         public_key = load_public_key(key) if key else None
+        skill_keys = [load_public_key(path) for path in skill_key or []]
     except (EvidenceError, OSError, ValueError) as exc:
         err_console.print(f"[red]{_plain(exc)}[/red]")
         raise typer.Exit(code=2) from None
@@ -114,7 +126,8 @@ def gaps_command(
             err_console.print(f"[red]Log not found:[/red] {path}")
             raise typer.Exit(code=2)
     result = scan_gaps(document["inventory"], logs=log or [], public_key=public_key,
-                       declaration=declared, logging_endpoints=logging_endpoint or [])
+                       declaration=declared, logging_endpoints=logging_endpoint or [],
+                       skill_keys=skill_keys)
     digest = write_document(out, envelope("gap-scan", result,
                                           environment={"inventory": document["inventory"]}))
     style = {"gap": "red", "ok": "green", "unsupported": "yellow", "not-observed": "dim"}
@@ -126,3 +139,27 @@ def gaps_command(
         )
     console.print(f"\n{result['counts']}  ·  {out} ({digest})")
     console.print(f"[dim]{result['note']}[/dim]")
+
+
+@app.command("sign-skill")
+def sign_skill_command(
+    skill: Annotated[Path, typer.Argument(help="Directory of one skill (SKILL.md or "
+                                                "skill.json).")],
+    key: Annotated[Path, typer.Option("--key", "-k", help="Ed25519 private key that signs "
+                                      "skills. Never the root key.")],
+    passphrase: Annotated[str | None, typer.Option("--passphrase",
+                                                   envvar="OPAAS_KEY_PASSPHRASE")] = None,
+) -> None:
+    """Signs a skill so G05 can verify it: writes signature.json next to it.
+
+    The signature covers every file of the skill except its signatures. Give
+    the matching public key to `discover gaps --skill-key`.
+    """
+    try:
+        signing = _load_signing_key(key, passphrase)
+        signature = sign_skill(skill, signing)
+    except (OSError, ValueError) as exc:
+        err_console.print(f"[red]{_plain(exc)}[/red]")
+        raise typer.Exit(code=2) from None
+    console.print(f"Signed {skill} ({signature['skillHash']}) with key "
+                  f"{signature['keyFingerprint']}.")

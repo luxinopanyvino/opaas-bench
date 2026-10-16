@@ -261,18 +261,21 @@ opaas discover scan --well-known -o inventory.json
 ```
 
 ```bash
-opaas discover gaps -i inventory.json --log events.jsonl -o gaps.json
+opaas discover gaps -i inventory.json --log events.jsonl --skill-key skills.pub.pem -o gaps.json
 ```
 
 A read-only inventory of the host: engines and versions, ports and bind scope (loopback or
 network), served models and their digests, GPUs and driver, MCP servers in the
 configurations of known clients (Claude Desktop, Claude Code, Cursor, VS Code, Windsurf,
 Continue), tool manifests, skills, containers by image digest, and **agents that identify
-themselves** (an A2A agent card, Open WebUI, an agent framework by its OpenAPI title). It
-records process names, never command lines, and names, never secrets. The gap scan applies
-nine versioned rules (logging layer, log integrity, free-form shell or HTTP tools, unpinned
-skills, approvals as events, anonymous engines, actor chains, image digests): a gap is a
-missing precondition for auditing, never a predicted violation.
+themselves** (an A2A agent card, Open WebUI, an agent framework by its OpenAPI title). Agent
+runtimes that do not identify themselves get one GET, enough to see whether they ask for
+credentials. It records process names, never command lines, and names, never secrets. The gap
+scan applies nine versioned rules (logging layer, log integrity, free-form shell or HTTP
+tools, unpinned skills, skill signatures, approvals as events, anonymous engines and agent
+runtimes, actor chains, image digests): a gap is a missing precondition for auditing, never a
+predicted violation. Sign a skill with `opaas discover sign-skill DIR --key skills.pem`; a
+signature counts only when it verifies under a key named with `--skill-key`.
 
 Every model report also records the **deployment fingerprint** — engine version, model
 digest, chat template, GPU driver — and everything else the host serves.
@@ -309,8 +312,10 @@ opaas inquest audit events.jsonl -p policies.json --key ops.pub.pem -o audit.jso
 
 The **sentinel** is a reverse proxy in front of the engine: every call becomes a
 hash-chained `AuditEvent` sealed with an operational key, bodies kept as digests. Callers say
-who they act for with `X-OPAAS-Actor-Chain: user:alice>agent:planner`. `--mode gate` (opt-in)
-blocks what policies forbid and holds actions for a named human approver. **Inquest** audits
+who they act for with `X-OPAAS-Actor-Chain: user:alice>agent:planner`. `--keep-output` keeps a
+response field in clear; a stream is assembled first, so the whole answer is kept. `--mode gate`
+(opt-in) blocks what policies forbid and holds actions for a named human approver, notified
+with `--notify-webhook` or `--notify-command` by the action's id and digest, never its content. **Inquest** audits
 existing records — OPAAS logs, OpenTelemetry GenAI spans, JSONL — integrity first, then every
 structural policy as **comply, violate or undecidable**, each undecidable naming the fields
 that would settle it. **Swarm** compares declared multi-agent flows with observed ones,
@@ -563,7 +568,7 @@ The ones you will reach for. Full list with `opaas run --help`.
 | `opaas compliance` | Writes the block E declaration template |
 | `opaas datasets` / `fetch` / `import` | Dataset and classifier cache: status, download, convert |
 | `opaas backends` / `suites` / `version` | Adapters, blocks, tool and methodology version |
-| `opaas discover scan` / `gaps` | Inventory of engines, agents and agent stack; auditability gap scan |
+| `opaas discover scan` / `gaps` / `sign-skill` | Inventory of engines, agents and agent stack; auditability gap scan; sign a skill for G05 |
 | `opaas smith scenarios` / `run` | Validate scenarios; run them against an agent |
 | `opaas sentinel observe` | Recording (and opt-in gating) reverse proxy |
 | `opaas sentinel approvals` / `approve` / `deny` | The gate's approval queue |
@@ -617,6 +622,12 @@ Stated as plainly as the report states it:
   deployment is; semantic policies are out of scope.
 - **ACR on existing records** — only smith, which has ground truth, measures it.
 - **The behaviour of an agent no adapter reaches** — it is listed with a pending adapter.
+- **Skill signatures in other schemes** (OpenPGP, minisign, Sigstore) — only OPAAS's own is
+  verified, and only under a key you name; the rest are *not observed*, never ok.
+- **Whether an agent runtime's actions need credentials** — it gets one GET to `/`, which
+  shows its front door only.
+- **Streams in shapes the sentinel does not assemble** — OpenAI, the Responses API and Ollama
+  are kept whole; any other keeps its last line, and the record says so.
 - **General infrastructure security** — OPAAS is not a pentest or an OS hardening audit; it
   looks at what touches the AI system, such as an engine exposed without credentials.
 

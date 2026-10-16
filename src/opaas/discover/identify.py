@@ -18,6 +18,14 @@ identified as engines, and every agent found says **how** it was identified
 sent that could change state, and nothing is guessed: a listener that answers
 none of these is not an agent as far as OPAAS knows.
 
+**Agent runtimes are probed, not only listed (D64).** A listener whose
+process name says agent runtime (D45) and that identified itself as none of
+the above still gets one GET to `/`, with the same short timeout. The answer
+says what the name could not: whether it speaks HTTP at all, and whether it
+asks an anonymous caller for credentials. That is what gap rule G07 needs
+about it; nothing in the answer's body is read or kept, and the status alone
+is never promoted to an identification.
+
 **MCP configurations in their usual places.** The MCP clients people use keep
 their server lists in known files (Claude Desktop, Claude Code, Cursor, VS
 Code, Windsurf, Continue). `well_known_mcp_configs` returns the ones that
@@ -41,7 +49,7 @@ import httpx
 from opaas.discover.inventory import Listener
 
 #: Bumped when a probe is added or changed: the inventory says which set it ran.
-AGENT_PROBES_VERSION = 1
+AGENT_PROBES_VERSION = 2
 
 #: Words in an OpenAPI title that mark an agent framework, and the adapter name
 #: it gets in a system manifest.
@@ -100,6 +108,50 @@ def scan_agents(
 
 #: What `discover` calls. Tests replace it: no test probes the host's ports.
 probe_agents = scan_agents
+
+
+def scan_runtimes(
+    runtimes: list[dict[str, Any]],
+    listeners: dict[int, Listener],
+    *,
+    agents: Iterable[dict[str, Any]] = (),
+    transport: httpx.BaseTransport | None = None,
+) -> list[dict[str, Any]]:
+    """The agent runtimes, each with what one GET to `/` showed about it.
+
+    A runtime on a port where an agent identified itself takes that
+    identification; every other one keeps `identified: false`, whatever it
+    answered.
+    """
+    by_port = {a.get("port"): a for a in agents if a.get("port") is not None}
+    probed = []
+    with httpx.Client(timeout=PROBE_TIMEOUT_S, transport=transport) as client:
+        for index, runtime in enumerate(runtimes):
+            runtime = dict(runtime)
+            agent = by_port.get(runtime.get("port"))
+            if agent is not None:
+                runtime.update(identified=True, identifiedAs=agent.get("kind"))
+            listener = listeners.get(runtime.get("port"))
+            if listener is not None and index < MAX_LISTENERS:
+                runtime["probe"] = _probe_runtime(client, listener.base_url)
+            probed.append(runtime)
+    return probed
+
+
+#: What `discover` calls. Tests replace it: no test probes the host's ports.
+probe_runtimes = scan_runtimes
+
+
+def _probe_runtime(client: httpx.Client, base_url: str) -> dict[str, Any]:
+    """Status only: the body is neither read for meaning nor kept."""
+    try:
+        response = client.get(base_url + "/", headers={"Accept": "*/*"})
+    except httpx.HTTPError as exc:
+        return {"request": "GET /", "answered": False, "reason": type(exc).__name__}
+    status = response.status_code
+    return {"request": "GET /", "answered": True, "status": status,
+            "requiresCredentials": status in (401, 403),
+            "answeredWithoutCredentials": 200 <= status < 300}
 
 
 def _get(client: httpx.Client, url: str) -> tuple[bool, Any]:
@@ -191,6 +243,8 @@ __all__ = [
     "AGENT_PROBES_VERSION",
     "FRAMEWORKS",
     "probe_agents",
+    "probe_runtimes",
     "scan_agents",
+    "scan_runtimes",
     "well_known_mcp_configs",
 ]

@@ -6,6 +6,8 @@
 from __future__ import annotations
 
 import json
+import os
+import shlex
 from pathlib import Path
 from typing import Annotated
 
@@ -24,10 +26,16 @@ from opaas.core.evidence import EvidenceError, envelope, read_document, write_do
 from opaas.core.policy import PolicyError, load_policies
 from opaas.discover import discover
 from opaas.sentinel.drift import EXIT_CODES
-from opaas.sentinel.gate import ApprovalQueue, GateError
+from opaas.sentinel.gate import ApprovalQueue, CommandNotifier, GateError, WebhookNotifier
 from opaas.sentinel.inventory import check_environment
 from opaas.sentinel.overhead import benchmark_overhead
-from opaas.sentinel.proxy import DEFAULT_KEEP, MODES, SentinelProxy, serve
+from opaas.sentinel.proxy import (
+    DEFAULT_KEEP,
+    DEFAULT_KEEP_OUTPUT,
+    MODES,
+    SentinelProxy,
+    serve,
+)
 
 app = typer.Typer(help="Observe and gate live traffic; watch the environment.",
                   no_args_is_help=True)
@@ -60,6 +68,10 @@ def observe_command(
     keep: Annotated[list[str], typer.Option(
         "--keep", help="Extra request field to keep in clear (dotted, * for lists). "
         "Repeatable. Everything else is a digest.")] = None,
+    keep_output: Annotated[list[str], typer.Option(
+        "--keep-output", help="Extra response field to keep in clear, e.g. "
+        "choices.*.message.content. A stream is assembled first, so the whole answer is "
+        "kept. Repeatable.")] = None,
     actor_chain: Annotated[str | None, typer.Option(
         "--actor-chain", help="Chain to record when a caller sends none, e.g. "
         "service:batch>agent:nightly. Recorded as configured, not as received.")] = None,
@@ -67,6 +79,13 @@ def observe_command(
         "--faults", help="Scripted fault plan (swarm). For test deployments only.")] = None,
     overhead_out: Annotated[Path | None, typer.Option(
         "--overhead-out", help="Where to write the measured overhead on shutdown.")] = None,
+    notify_webhook: Annotated[list[str], typer.Option(
+        "--notify-webhook", help="URL to POST to when an action is held (gate). The notice "
+        "carries the pending id, event id and digest only. Repeatable.")] = None,
+    notify_command: Annotated[list[str], typer.Option(
+        "--notify-command", help="Command to run when an action is held (gate), with the "
+        "notice as JSON on stdin and in OPAAS_PENDING_ID, OPAAS_EVENT_ID and "
+        "OPAAS_ACTION_DIGEST. Repeatable.")] = None,
 ) -> None:
     """Runs the proxy. Observe changes nothing in the traffic; gate is opt-in."""
     if mode not in MODES:
@@ -75,12 +94,20 @@ def observe_command(
     try:
         loaded = load_policies(read_json(policies)) if policies else []
         signing = _load_signing_key(key, passphrase) if key else None
+        notifiers = [
+            *(WebhookNotifier(url) for url in notify_webhook or []),
+            *(CommandNotifier(shlex.split(command, posix=os.name != "nt"))
+              for command in notify_command or []),
+        ]
+        if notifiers and mode != "gate":
+            raise ValueError("--notify-webhook and --notify-command tell approvers about held "
+                             "actions, and only --mode gate holds any.")
         plan = None
         if faults:
             from opaas.swarm import FaultPlan
 
             plan = FaultPlan(read_json(faults))
-    except (PolicyError, OSError, ValueError, TypeError) as exc:
+    except (PolicyError, GateError, OSError, ValueError, TypeError) as exc:
         err_console.print(f"[red]{_plain(exc)}[/red]")
         raise typer.Exit(code=2) from None
     host, _, port = listen.rpartition(":")
@@ -96,7 +123,9 @@ def observe_command(
         proxy = SentinelProxy(
             upstream, EventLog(log, signing_key=signing, seal_every=seal_every),
             policies=loaded, mode=mode, keep=(*DEFAULT_KEEP, *(keep or [])),
-            actor_chain=actor_chain, queue=ApprovalQueue(queue) if mode == "gate" else None,
+            keep_output=(*DEFAULT_KEEP_OUTPUT, *(keep_output or [])),
+            actor_chain=actor_chain,
+            queue=ApprovalQueue(queue, notifiers=notifiers) if mode == "gate" else None,
             approval_timeout_s=approval_timeout, faults=plan, alert=alert,
         )
     except ValueError as exc:

@@ -7,7 +7,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from opaas.core.events import EventLog, read_log, verify_chain, verify_seals
 from opaas.core.policy import load_policies
-from opaas.sentinel.gate import ApprovalQueue, GateError
+from opaas.sentinel.gate import ApprovalQueue, CommandNotifier, GateError, WebhookNotifier
 from opaas.sentinel.overhead import benchmark_overhead
 from opaas.sentinel.proxy import SentinelProxy, pick
 
@@ -236,3 +236,174 @@ def test_a_polite_stop_exits_like_ctrl_c_so_the_log_is_sealed():
             with pytest.raises(KeyboardInterrupt):
                 signal.getsignal(sig)(sig, None)
     assert {sig: signal.getsignal(sig) for sig in _TERMINATE_SIGNALS} == before
+
+
+# ----------------------------------------------------------------- streams
+
+
+def _stream_proxy(tmp_path, body: bytes, **kwargs):
+    def handler(request):
+        return httpx.Response(200, content=body,
+                              headers={"Content-Type": "text/event-stream"})
+    log = EventLog(tmp_path / "events.jsonl")
+    return SentinelProxy("http://engine.test", log, transport=httpx.MockTransport(handler),
+                         **kwargs)
+
+
+def _sse(*chunks) -> bytes:
+    lines = [f"data: {json.dumps(c)}\n\n" for c in chunks]
+    return ("".join(lines) + "data: [DONE]\n\n").encode()
+
+
+OPENAI_STREAM = _sse(
+    {"object": "chat.completion.chunk", "model": "qwen",
+     "choices": [{"index": 0, "delta": {"role": "assistant", "content": "The whole "}}]},
+    {"object": "chat.completion.chunk", "model": "qwen",
+     "choices": [{"index": 0, "delta": {"content": "private answer"}}]},
+    {"object": "chat.completion.chunk", "model": "qwen", "choices": [{"index": 0, "delta": {
+        "tool_calls": [{"index": 0, "id": "c1", "type": "function",
+                        "function": {"name": "search", "arguments": "{\"q\": "}}]}}]},
+    {"object": "chat.completion.chunk", "model": "qwen", "choices": [{"index": 0, "delta": {
+        "tool_calls": [{"index": 0, "function": {"arguments": "\"x\"}"}}]},
+        "finish_reason": "tool_calls"}]},
+    {"object": "chat.completion.chunk", "model": "qwen", "choices": [],
+     "usage": {"total_tokens": 9}},
+)
+
+
+def test_a_kept_streamed_answer_is_the_whole_answer_not_its_last_fragment(tmp_path):
+    proxy = _stream_proxy(tmp_path, OPENAI_STREAM, keep_output=(
+        "choices.*.message.content", "choices.*.message.tool_calls.*.function.arguments",
+        "choices.*.message.tool_calls.*.function.name", "usage"))
+    status, body = _call(proxy)
+    assert status == 200 and body == OPENAI_STREAM  # relayed byte for byte
+    kept = _records(tmp_path)[0]["output"]["value"]
+    assert kept["choices.*.message.content"] == ["The whole private answer"]
+    assert kept["choices.*.message.tool_calls.*.function.arguments"] == [['{"q": "x"}']]
+    assert kept["choices.*.message.tool_calls.*.function.name"] == [["search"]]
+    assert kept["usage"] == {"total_tokens": 9} and kept["streamed"] is True
+
+
+def test_a_stream_keeps_only_what_is_kept_by_default(tmp_path):
+    """Assembling a stream must not put its content in the record (N4)."""
+    proxy = _stream_proxy(tmp_path, OPENAI_STREAM)
+    _call(proxy)
+    record = _records(tmp_path)[0]
+    assert "private answer" not in json.dumps(record)
+    assert record["output"]["value"]["choices.*.finish_reason"] == ["tool_calls"]
+    assert record["output"]["value"]["choices.*.message.tool_calls.*.function.name"] == [
+        ["search"]]
+
+
+def test_an_ollama_stream_is_assembled_like_its_unstreamed_response(tmp_path):
+    lines = [{"model": "qwen", "message": {"role": "assistant", "content": "Hel"},
+              "done": False},
+             {"model": "qwen", "message": {"role": "assistant", "content": "lo"}, "done": False},
+             {"model": "qwen", "message": {"role": "assistant", "content": ""}, "done": True,
+              "done_reason": "stop", "eval_count": 2}]
+    body = "".join(json.dumps(line) + "\n" for line in lines).encode()
+    proxy = _stream_proxy(tmp_path, body, keep_output=("message.content", "done_reason",
+                                                       "eval_count"))
+    _call(proxy, path="/api/chat")
+    kept = _records(tmp_path)[0]["output"]["value"]
+    assert kept["message.content"] == "Hello"
+    assert kept["done_reason"] == "stop" and kept["eval_count"] == 2
+
+
+def test_a_stream_of_an_unknown_shape_says_only_its_last_line_was_kept(tmp_path):
+    body = _sse({"delta": "a"}, {"delta": "b", "usage": {"total_tokens": 3}})
+    proxy = _stream_proxy(tmp_path, body)
+    _call(proxy)
+    kept = _records(tmp_path)[0]["output"]["value"]
+    assert kept == {"usage": {"total_tokens": 3}, "streamed": True, "streamAssembled": False}
+
+
+def test_a_stream_longer_than_the_parse_limit_says_it_was_cut(tmp_path, monkeypatch):
+    from opaas.sentinel import proxy as proxy_module
+
+    monkeypatch.setattr(proxy_module, "_PARSE_LIMIT", 200)
+    proxy = _stream_proxy(tmp_path, OPENAI_STREAM, keep_output=("choices.*.message.content",))
+    _call(proxy)
+    record = _records(tmp_path)[0]
+    assert record["output"]["value"]["streamTruncated"] is True
+    # The digest still covers every byte relayed, not the prefix that was parsed.
+    import hashlib
+
+    assert record["output"]["digest"] == "sha256:" + hashlib.sha256(OPENAI_STREAM).hexdigest()
+
+
+# ------------------------------------------------------------ notifications
+
+
+HOLD_ALL = [{"id": "approve-first", "kind": "precedes", "enforce": "approve",
+             "scope": {"field": "action", "eq": "model_call"},
+             "match": {"field": "target", "eq": "qwen"},
+             "before": {"field": "action", "eq": "approval"}}]
+
+
+def _held(tmp_path, notifiers):
+    queue = ApprovalQueue(tmp_path / "queue", poll_s=0.01, notifiers=notifiers)
+    proxy = _proxy(tmp_path, policies=load_policies(HOLD_ALL), mode="gate", queue=queue,
+                   approval_timeout_s=0.05)
+    status, _ = _call(proxy, **{"X-OPAAS-Actor-Chain": "user:alice>agent:planner"})
+    return status, _records(tmp_path)
+
+
+def test_a_held_action_notifies_approvers_with_ids_and_digest_only(tmp_path):
+    received = []
+
+    def hook(request):
+        received.append(request)
+        return httpx.Response(204)
+
+    webhook = WebhookNotifier("https://chat.example/hooks/T0K3N?sig=abc",
+                              transport=httpx.MockTransport(hook))
+    status, records = _held(tmp_path, [webhook])
+    assert status == 403  # nobody approved in time: held, then refused
+    payload = json.loads(received[0].content)
+    pending = records[0]
+    assert payload == {"type": "opaas.approval.pending", "pending": pending["extra"]["pendingId"],
+                       "event": pending["extra"]["for"], "digest": pending["args"]["digest"]}
+    sent = received[0].content.decode()
+    assert "secret plans" not in sent and "qwen" not in sent and "alice" not in sent
+    assert pending["extra"]["notification"] == [
+        {"channel": "webhook", "endpoint": "https://chat.example", "delivered": True}]
+    assert "T0K3N" not in json.dumps(records)
+
+
+def test_a_failed_notice_leaves_the_action_held_and_says_so(tmp_path):
+    def broken(request):
+        raise httpx.ConnectError("refused")
+
+    status, records = _held(tmp_path, [WebhookNotifier(
+        "http://hooks.test/x", transport=httpx.MockTransport(broken))])
+    assert status == 403 and [r["phase"] for r in records] == ["pending", "block"]
+    notification = records[0]["extra"]["notification"][0]
+    assert notification["delivered"] is False and "unreachable" in notification["reason"]
+
+
+def test_a_notification_command_gets_the_notice_on_stdin_and_never_in_the_record(tmp_path):
+    calls = []
+
+    def runner(argv, stdin, env, timeout_s):
+        calls.append((list(argv), json.loads(stdin), env))
+        return 0
+
+    command = CommandNotifier(["/usr/local/bin/page-oncall", "--token", "s3cr3t"],
+                              runner=runner)
+    _, records = _held(tmp_path, [command])
+    argv, payload, env = calls[0]
+    assert argv[-1] == "s3cr3t" and set(payload) == {"type", "pending", "event", "digest"}
+    assert env["OPAAS_PENDING_ID"] == payload["pending"]
+    assert env["OPAAS_ACTION_DIGEST"] == records[0]["args"]["digest"]
+    assert records[0]["extra"]["notification"] == [
+        {"channel": "command", "program": "page-oncall", "delivered": True}]
+    assert "s3cr3t" not in json.dumps(records)
+
+
+def test_a_notification_command_that_fails_is_reported_not_raised(tmp_path):
+    queue = ApprovalQueue(tmp_path, notifiers=[
+        CommandNotifier(["notify"], runner=lambda *args: 3)])
+    outcome = queue.notify("p1", event_id="e1", digest="sha256:00")
+    assert outcome == [{"channel": "command", "program": "notify", "delivered": False,
+                        "reason": "command exited with status 3"}]

@@ -18,6 +18,14 @@ URL paths or query strings: those are where tokens live. Each entry carries a
 hash computed with environment values masked, so a change is detected without
 publishing what changed.
 
+**Skill signatures, in one scheme OPAAS can check (D64).** A skill signed
+with `sign_skill` carries a `signature.json`: an Ed25519 signature over the
+skill's content hash, the hash excluding the signature files themselves. The
+inventory records the signature as found; the gap scan (G05) verifies it
+against keys the operator names, never against a key the signature brings.
+Signatures in other schemes (`.sig`, `.asc`) are listed with their scheme
+unknown: OPAAS cannot tell a valid one from a forged one, and says so.
+
 **Containers by digest.** When `docker` or `podman` answers, running
 containers are listed with the image's repository digest. A container running
 from a tag alone is listed as such: a tag is a name, and a name can be
@@ -34,6 +42,11 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
+from cryptography.exceptions import InvalidSignature
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey, Ed25519PublicKey
+
+from opaas.core.canonical import canonicalize
+from opaas.core.credential.keys import b58decode, b58encode, fingerprint
 from opaas.core.hashing import sha256_file, sha256_json
 from opaas.discover.inventory import Listener
 
@@ -177,12 +190,129 @@ def classify_tool(name: str, description: str, schema: Any) -> str | None:
 # ----------------------------------------------------------------------- skills
 
 
+#: The one skill-signature scheme OPAAS verifies, and the file that carries it.
+SKILL_SIGNATURE_SCHEME = "opaas-skill-ed25519-jcs"
+SKILL_SIGNATURE_FILE = "signature.json"
+
+
+def _is_signature_file(path: Path) -> bool:
+    return path.suffix in (".sig", ".asc") or path.name in (SKILL_SIGNATURE_FILE, "SIGNATURE")
+
+
+def skill_hash(directory: Path) -> str:
+    """The hash a skill is identified, and signed, by: every file but its signatures.
+
+    A signature cannot cover itself, so every signature file is left out, the
+    one OPAAS reads and those it cannot. Adding or replacing a signature does
+    not change what the skill is.
+    """
+    files = sorted(p for p in directory.rglob("*") if p.is_file() and not _is_signature_file(p))
+    return sha256_json([
+        {"path": p.relative_to(directory).as_posix(), "sha256": sha256_file(p)} for p in files
+    ])
+
+
+def _signed_payload(content_hash: str) -> bytes:
+    return canonicalize({"scheme": SKILL_SIGNATURE_SCHEME, "skillHash": content_hash})
+
+
+def sign_skill(directory: Path, key: Ed25519PrivateKey) -> dict[str, Any]:
+    """Writes `signature.json` for the skill in `directory`, and returns it.
+
+    The signature names its key by fingerprint so a reader can tell which key
+    to try; the key itself is never in it, because a verifier that took the
+    key from the signature would accept anyone's (invariant 6, D4).
+    """
+    if not ((directory / "SKILL.md").is_file() or (directory / "skill.json").is_file()):
+        raise ValueError(f"{directory} is not a skill: it has neither SKILL.md nor skill.json.")
+    content_hash = skill_hash(directory)
+    signature = {
+        "scheme": SKILL_SIGNATURE_SCHEME,
+        "skillHash": content_hash,
+        "keyFingerprint": fingerprint(key.public_key()),
+        "proofValue": "z" + b58encode(key.sign(_signed_payload(content_hash))),
+    }
+    with (directory / SKILL_SIGNATURE_FILE).open("w", encoding="utf-8", newline="\n") as out:
+        out.write(json.dumps(signature, indent=2) + "\n")
+    return signature
+
+
+def verify_skill_signature(
+    skill: dict[str, Any], keys: Iterable[Ed25519PublicKey]
+) -> tuple[str, str]:
+    """('verified' | 'invalid' | 'unverifiable' | 'absent', why) for one inventoried skill.
+
+    Works on the inventory alone: the skill's hash there was computed from
+    the disk at discovery, and the signature must be over exactly that hash.
+    `unverifiable` is OPAAS not being able to look (an unknown scheme, no key
+    named), never a pass.
+    """
+    signature = skill.get("signature")
+    if signature is None:
+        if skill.get("signaturePresent"):
+            return "unverifiable", ("A signature file is present, but this inventory predates "
+                                    "signature verification: scan again to check it.")
+        return "absent", "No signature: its origin cannot be checked."
+    if signature.get("scheme") != SKILL_SIGNATURE_SCHEME:
+        return "unverifiable", (
+            f"{signature.get('file')} is a signature in a scheme OPAAS does not verify "
+            f"({signature.get('scheme')}): whether it is valid was not looked at.")
+    if signature.get("readable") is False:
+        return "invalid", (f"{signature.get('file')} cannot be read as a signature "
+                           f"({signature.get('reason')}): its origin cannot be checked.")
+    if signature.get("skillHash") != skill.get("hash"):
+        return "invalid", ("The signature covers different content from what is on disk: "
+                           "the skill changed after it was signed.")
+    keys = list(keys)
+    if not keys:
+        return "unverifiable", (
+            "Signed, but no trusted key was named to verify it with. The key is never "
+            "taken from the signature.")
+    try:
+        raw = b58decode(str(signature.get("proofValue", "")).removeprefix("z"))
+    except ValueError:
+        return "invalid", "The signature value is not valid base58."
+    for key in keys:
+        try:
+            key.verify(raw, _signed_payload(str(skill["hash"])))
+        except InvalidSignature:
+            continue
+        return "verified", f"Signature verifies under the key {fingerprint(key)}."
+    return "invalid", (f"The signature does not verify under any of the {len(keys)} named "
+                       "key(s): signed by another key, or altered.")
+
+
+def _read_signature(directory: Path) -> dict[str, Any] | None:
+    """The signature as found. Publishable: what a signature carries is public."""
+    path = directory / SKILL_SIGNATURE_FILE
+    if path.is_file():
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8-sig"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            return {"file": path.name, "scheme": SKILL_SIGNATURE_SCHEME, "readable": False,
+                    "reason": type(exc).__name__}
+        if isinstance(raw, dict) and raw.get("scheme") == SKILL_SIGNATURE_SCHEME:
+            fields = ("skillHash", "keyFingerprint", "proofValue")
+            if all(isinstance(raw.get(f), str) for f in fields):
+                return {"file": path.name, "scheme": SKILL_SIGNATURE_SCHEME,
+                        **{f: raw[f] for f in fields}}
+            return {"file": path.name, "scheme": SKILL_SIGNATURE_SCHEME, "readable": False,
+                    "reason": f"missing one of {', '.join(fields)}"}
+        scheme = raw.get("scheme") if isinstance(raw, dict) else None
+        return {"file": path.name, "scheme": str(scheme or "unknown")}
+    other = sorted(p for p in directory.rglob("*") if p.is_file() and _is_signature_file(p))
+    if other:
+        return {"file": other[0].relative_to(directory).as_posix(),
+                "scheme": "openpgp" if other[0].suffix == ".asc" else "unknown"}
+    return None
+
+
 def read_skills(root: Path) -> list[dict[str, Any]]:
     """Every skill under a named directory: one with SKILL.md or skill.json.
 
-    `signaturePresent` says a signature file sits next to the skill. OPAAS
-    cannot verify a signature scheme it does not know, and says *present*,
-    never *signed*.
+    `signaturePresent` says a signature file sits next to the skill;
+    `signature` says what it is. Whether it verifies is the gap scan's
+    question (G05), asked with the keys the operator trusts.
     """
     if not root.is_dir():
         return []
@@ -191,21 +321,19 @@ def read_skills(root: Path) -> list[dict[str, Any]]:
         directory = marker.parent
         files = sorted(p for p in directory.rglob("*") if p.is_file())
         version = _skill_version(marker)
-        skills.append({
+        signature = _read_signature(directory)
+        skill = {
             "name": directory.name,
             "path": directory.relative_to(root).as_posix() or ".",
             "version": version,
             "versionPinned": version is not None,
-            "signaturePresent": any(
-                p.suffix in (".sig", ".asc") or p.name in ("signature.json", "SIGNATURE")
-                for p in files
-            ),
-            "hash": sha256_json([
-                {"path": p.relative_to(directory).as_posix(), "sha256": sha256_file(p)}
-                for p in files if p.suffix not in (".sig", ".asc")
-            ]),
+            "signaturePresent": signature is not None,
+            "hash": skill_hash(directory),
             "fileCount": len(files),
-        })
+        }
+        if signature is not None:
+            skill["signature"] = signature
+        skills.append(skill)
     return skills
 
 
@@ -278,9 +406,9 @@ def list_containers(runner: Runner | None = None) -> dict[str, Any]:
 def agent_runtimes(listeners: dict[int, Listener]) -> list[dict[str, Any]]:
     """Listeners whose process name suggests an agent runtime or MCP server.
 
-    They are listed, never probed: unlike an engine, an agent runtime has no
-    well-known read-only endpoint, and guessing one would mean sending
-    requests to a service OPAAS does not understand.
+    Listed here from the process name alone. `discover` then probes each with
+    one GET to `/` (`identify.scan_runtimes`, D64): enough to tell whether it
+    speaks HTTP and asks for credentials, never a request that could act.
     """
     return [
         {"port": port, "process": listener.process, "bind": listener.bind,
@@ -362,6 +490,8 @@ def agent_stack_hash(stack: dict[str, Any]) -> str:
 
 __all__ = [
     "AGENT_PROCESS_HINTS",
+    "SKILL_SIGNATURE_FILE",
+    "SKILL_SIGNATURE_SCHEME",
     "agent_runtimes",
     "agent_stack_hash",
     "classify_tool",
@@ -370,4 +500,7 @@ __all__ = [
     "read_mcp_config",
     "read_skills",
     "read_tool_manifest",
+    "sign_skill",
+    "skill_hash",
+    "verify_skill_signature",
 ]

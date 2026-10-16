@@ -34,8 +34,9 @@ from opaas.core.events import read_log, records
 from opaas.core.hashing import sha256_json
 from opaas.core.integrity import assess_log
 from opaas.core.metrics import integrity_rank
+from opaas.discover.agents import verify_skill_signature
 
-RULESET_VERSION = 1
+RULESET_VERSION = 2
 
 GAP, OK, UNSUPPORTED, NOT_OBSERVED = "gap", "ok", "unsupported", "not-observed"
 
@@ -58,11 +59,11 @@ RULES: tuple[Rule, ...] = (
     Rule("G04", "responsibilityAttribution", "Q4",
          "Skills and MCP packages are pinned to a version."),
     Rule("G05", "evidenceIntegrity", "Q5",
-         "Skills carry a signature."),
+         "Skills carry a signature that verifies under a key the operator trusts."),
     Rule("G06", "lifecycleCoverage", "Q2",
          "Approvals are represented as events in the log."),
     Rule("G07", "responsibilityAttribution", "Q4",
-         "No engine answers anonymous callers beyond this host."),
+         "No engine or agent runtime answers anonymous callers beyond this host."),
     Rule("G08", "responsibilityAttribution", "Q4",
          "Logged actions carry an actor chain."),
     Rule("G09", "evidenceIntegrity", "Q5",
@@ -89,14 +90,20 @@ def scan_gaps(
     public_key: Ed25519PublicKey | None = None,
     declaration: dict[str, Any] | None = None,
     logging_endpoints: Iterable[str] = (),
+    skill_keys: Iterable[Ed25519PublicKey] = (),
 ) -> dict[str, Any]:
-    """Every rule against the discovery document and the named logs."""
+    """Every rule against the discovery document and the named logs.
+
+    `skill_keys` are the keys the operator trusts to sign skills (G05). With
+    none, a signed skill is `not-observed`: OPAAS looked at the signature and
+    had nothing to check it against.
+    """
     declaration = declaration or {}
     logs = list(logs)
     stack = discovered.get("agentStack") or {}
     loaded_logs = [_load(path, public_key, declaration) for path in logs]
     context = _Context(discovered, stack, loaded_logs, declaration,
-                       {e.lower().rstrip("/") for e in logging_endpoints})
+                       {e.lower().rstrip("/") for e in logging_endpoints}, list(skill_keys))
 
     findings: list[dict[str, Any]] = []
     for check in _CHECKS:
@@ -124,6 +131,7 @@ class _Context:
     logs: list[dict[str, Any]]
     declaration: dict[str, Any]
     logging_endpoints: set[str]
+    skill_keys: list[Ed25519PublicKey]
 
     def servers(self) -> list[dict[str, Any]]:
         return [s for c in self.stack.get("mcpConfigs", []) for s in c.get("servers", [])]
@@ -240,12 +248,14 @@ def _g05_signed_skills(ctx: _Context) -> list[dict[str, Any]]:
     skills = ctx.skills()
     if not skills:
         return [_finding("G05", NOT_OBSERVED, "skills", "No skill directory was named.")]
-    return [
-        _finding("G05", OK if s["signaturePresent"] else GAP, f"skill {s['path']}",
-                 "A signature file is present (OPAAS does not verify its scheme)."
-                 if s["signaturePresent"] else "No signature: its origin cannot be checked.")
-        for s in skills
-    ]
+    # Verified is ok; absent or failing is a gap; a signature OPAAS could not
+    # check (unknown scheme, no trusted key named) is not observed, never ok.
+    status = {"verified": OK, "invalid": GAP, "absent": GAP, "unverifiable": NOT_OBSERVED}
+    out = []
+    for skill in skills:
+        outcome, detail = verify_skill_signature(skill, ctx.skill_keys)
+        out.append(_finding("G05", status[outcome], f"skill {skill['path']}", detail))
+    return out
 
 
 def _g06_approvals(ctx: _Context) -> list[dict[str, Any]]:
@@ -270,10 +280,12 @@ def _g06_approvals(ctx: _Context) -> list[dict[str, Any]]:
         "record, and a policy requiring one is undecidable.")]
 
 
-def _g07_anonymous_engines(ctx: _Context) -> list[dict[str, Any]]:
-    engines = ctx.discovered.get("engines") or []
-    if not ctx.discovered.get("available") or not engines:
-        return [_finding("G07", NOT_OBSERVED, "engines", "No engine was found to assess.")]
+def _g07_anonymous_callers(ctx: _Context) -> list[dict[str, Any]]:
+    engines = (ctx.discovered.get("engines") or []) if ctx.discovered.get("available") else []
+    runtimes = ctx.stack.get("agentRuntimes") or []
+    if not engines and not runtimes:
+        return [_finding("G07", NOT_OBSERVED, "engines",
+                         "No engine or agent runtime was found to assess.")]
     out = []
     for engine in engines:
         subject = f"{engine.get('kind')} :{engine.get('port')}"
@@ -288,7 +300,36 @@ def _g07_anonymous_engines(ctx: _Context) -> list[dict[str, Any]]:
                                 "A named remote endpoint: its bind scope cannot be seen."))
         else:
             out.append(_finding("G07", OK, subject, f"Bound to {engine.get('bind')}."))
+    out += [_runtime_finding(runtime) for runtime in runtimes]
     return out
+
+
+def _runtime_finding(runtime: dict[str, Any]) -> dict[str, Any]:
+    subject = f"agent runtime {runtime.get('process')} :{runtime.get('port')}"
+    probe = runtime.get("probe")
+    bind = runtime.get("bind")
+    if probe is None:
+        return _finding("G07", NOT_OBSERVED, subject,
+                        "Listed by process name and not probed: whether it asks callers for "
+                        "credentials was not seen.")
+    if not probe.get("answered"):
+        return _finding("G07", NOT_OBSERVED, subject,
+                        "Did not answer an HTTP GET: whether it asks callers for credentials "
+                        "could not be seen.")
+    if probe.get("requiresCredentials"):
+        return _finding("G07", OK, subject,
+                        f"Asked an anonymous caller for credentials (HTTP {probe['status']}).")
+    if bind not in ("all-interfaces", "network"):
+        return _finding("G07", OK, subject, f"Bound to {bind}.")
+    if probe.get("answeredWithoutCredentials"):
+        return _finding(
+            "G07", GAP, subject,
+            f"Answered GET / without credentials on {bind}: what it serves cannot be "
+            "attributed to any principal. OPAAS sends only GETs, so whether its actions are "
+            "equally open was not tried.")
+    return _finding("G07", NOT_OBSERVED, subject,
+                    f"Answered HTTP {probe.get('status')} to GET /: that alone shows neither "
+                    "an open nor a closed door.")
 
 
 def _g08_actor_chains(ctx: _Context) -> list[dict[str, Any]]:
@@ -327,7 +368,7 @@ _CHECKS: tuple[Callable[[_Context], list[dict[str, Any]]], ...] = (
     _g04_pinning,
     _g05_signed_skills,
     _g06_approvals,
-    _g07_anonymous_engines,
+    _g07_anonymous_callers,
     _g08_actor_chains,
     _g09_container_digests,
 )
