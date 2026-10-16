@@ -64,6 +64,21 @@ def test_discover_scan_then_sign_and_verify_the_inventory(tmp_path, keys):
     assert tampered.exit_code == 1
 
 
+def test_a_skill_signed_with_sign_skill_verifies_in_the_gap_scan(tmp_path, keys):
+    skill = tmp_path / "skills" / "s"
+    skill.mkdir(parents=True)
+    (skill / "SKILL.md").write_text("---\nversion: 1.0.0\n---\nx", encoding="utf-8")
+    _ok(runner.invoke(app, ["discover", "sign-skill", str(skill), "--key",
+                            str(keys / "opaas-root-ed25519.pem"), "--passphrase", PASSPHRASE]))
+    inventory, gaps = tmp_path / "inventory.json", tmp_path / "gaps.json"
+    _ok(runner.invoke(app, ["discover", "scan", "--no-containers", "--skills",
+                            str(tmp_path / "skills"), "-o", str(inventory)]))
+    _ok(runner.invoke(app, ["discover", "gaps", "-i", str(inventory), "--skill-key",
+                            str(keys / "opaas-root-ed25519.pub.pem"), "-o", str(gaps)]))
+    findings = json.loads(gaps.read_text(encoding="utf-8"))["findings"]
+    assert next(f for f in findings if f["rule"] == "G05")["status"] == "ok"
+
+
 def test_gaps_audit_card_and_manifest_chain_together(tmp_path):
     inventory, gaps = tmp_path / "inventory.json", tmp_path / "gaps.json"
     log = _log(tmp_path)

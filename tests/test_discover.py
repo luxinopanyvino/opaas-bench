@@ -1,6 +1,7 @@
 import json
 
 import httpx
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from opaas.core.events import AuditEvent, EventLog, evidence, parse_actor_chain
 from opaas.discover import compare_discoveries, discover
@@ -10,6 +11,7 @@ from opaas.discover.agents import (
     read_mcp_config,
     read_skills,
     read_tool_manifest,
+    sign_skill,
 )
 from opaas.discover.gaps import GAP, NOT_OBSERVED, OK, UNSUPPORTED, ruleset_hash, scan_gaps
 from opaas.discover.inventory import Listener, scan
@@ -101,6 +103,78 @@ def test_skills_report_version_and_signature_presence(tmp_path):
     skills = {s["name"]: s for s in read_skills(tmp_path)}
     assert skills["pinned"]["version"] == "1.2.0" and skills["pinned"]["signaturePresent"]
     assert skills["loose"]["versionPinned"] is False
+
+
+def _skill(root, name, body="body"):
+    directory = root / name
+    directory.mkdir(parents=True)
+    (directory / "SKILL.md").write_text(f"---\nname: {name}\nversion: 1.0.0\n---\n{body}",
+                                        encoding="utf-8")
+    return directory
+
+
+def _g05(root, keys=()):
+    document = discover(engines=_engines(), listeners={}, skill_dirs=[root], containers=False)
+    findings = scan_gaps(document, skill_keys=keys)["findings"]
+    return {f["subject"]: f for f in findings if f["rule"] == "G05"}
+
+
+def test_a_skill_signed_by_a_trusted_key_verifies_and_a_tampered_one_does_not(tmp_path):
+    key = Ed25519PrivateKey.generate()
+    sign_skill(_skill(tmp_path, "good"), key)
+    tampered = _skill(tmp_path, "tampered")
+    sign_skill(tampered, key)
+    (tampered / "SKILL.md").write_text("---\nversion: 1.0.0\n---\nrm -rf /", encoding="utf-8")
+    sign_skill(_skill(tmp_path, "stranger"), Ed25519PrivateKey.generate())
+    _skill(tmp_path, "unsigned")
+    g05 = _g05(tmp_path, [key.public_key()])
+    assert g05["skill good"]["status"] == OK
+    assert g05["skill tampered"]["status"] == GAP
+    assert "changed after it was signed" in g05["skill tampered"]["detail"]
+    assert g05["skill stranger"]["status"] == GAP
+    assert g05["skill unsigned"]["status"] == GAP
+
+
+def test_a_signature_g05_cannot_check_is_not_observed_never_ok(tmp_path):
+    """No key named, or a scheme OPAAS does not know: it could not look."""
+    sign_skill(_skill(tmp_path, "signed"), Ed25519PrivateKey.generate())
+    foreign = _skill(tmp_path, "foreign")
+    (foreign / "SKILL.md.asc").write_text("-----BEGIN PGP SIGNATURE-----", encoding="utf-8")
+    g05 = _g05(tmp_path)
+    assert g05["skill signed"]["status"] == NOT_OBSERVED
+    assert "never taken from the signature" in g05["skill signed"]["detail"]
+    assert g05["skill foreign"]["status"] == NOT_OBSERVED
+    assert "openpgp" in g05["skill foreign"]["detail"]
+
+
+def test_the_key_a_signature_names_is_never_the_key_it_is_checked_with(tmp_path):
+    """A forged signature with a matching fingerprint still fails under the trusted key."""
+    trusted = Ed25519PrivateKey.generate()
+    forged = sign_skill(_skill(tmp_path, "forged"), Ed25519PrivateKey.generate())
+    signature_file = tmp_path / "forged" / "signature.json"
+    from opaas.core.credential.keys import fingerprint
+
+    forged["keyFingerprint"] = fingerprint(trusted.public_key())
+    signature_file.write_text(json.dumps(forged), encoding="utf-8")
+    assert _g05(tmp_path, [trusted.public_key()])["skill forged"]["status"] == GAP
+
+
+def test_signing_a_skill_does_not_change_what_the_skill_is(tmp_path):
+    directory = _skill(tmp_path, "s")
+    before = read_skills(tmp_path)[0]["hash"]
+    sign_skill(directory, Ed25519PrivateKey.generate())
+    after = read_skills(tmp_path)[0]
+    assert after["hash"] == before and after["signature"]["skillHash"] == before
+
+
+def test_an_inventory_from_before_verification_does_not_pass_g05(tmp_path):
+    """Older inventories said a signature was present; that alone is not a verification."""
+    stack = {"skills": [{"root": "r", "skills": [
+        {"path": "old", "hash": "sha256:x", "version": None, "versionPinned": False,
+         "signaturePresent": True}]}]}
+    findings = scan_gaps({"agentStack": stack})["findings"]
+    g05 = next(f for f in findings if f["rule"] == "G05")
+    assert g05["status"] == NOT_OBSERVED and "predates" in g05["detail"]
 
 
 def test_containers_are_listed_by_digest_and_never_by_command():
