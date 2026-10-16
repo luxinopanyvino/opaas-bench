@@ -467,6 +467,12 @@ key signs under its own name (`did:key`); to sign as your organisation, generate
 `--did did:web:yourdomain.com` and publish `did.json` there. The root key is the whole root of
 trust: see [key custody](docs/key-custody.md).
 
+An offline root can also delegate (D65): `opaas delegate` has it sign, from a hardware token,
+a delegation naming an issuing key and a window of months; `opaas sign --delegation` embeds it,
+and `verify` (and the browser) accept the issuing key only once that delegation verifies under
+an anchor, covers the signature's date, and neither key is on the root's revocation list
+(`opaas revoke`, installed with `opaas trust --add revocations.json`).
+
 ---
 
 ## Use cases
@@ -556,10 +562,12 @@ The ones you will reach for. Full list with `opaas run --help`.
 | `opaas run` | Runs blocks A–E and writes the report |
 | `opaas show <report>` | Summary of an existing report, with its hash |
 | `opaas compare` | Cross-references several reports under the interval-overlap rule |
-| `opaas keygen` | Generates the root Ed25519 pair (root of trust) |
-| `opaas sign` | Issues the signed credential from a model or system report |
-| `opaas verify` | Verifies a credential, offline |
-| `opaas trust` | Lists pinned trust anchors, or pins one after showing its fingerprint |
+| `opaas keygen` | Generates an Ed25519 pair and its DID document |
+| `opaas delegate` | The root delegates credential signing to an issuing key, from a hardware token (`--pkcs11-module`, `token` extra) or a key file (D65) |
+| `opaas revoke` | Adds a key to the root's signed revocation list |
+| `opaas sign` | Issues the signed credential from a model or system report; `--delegation` signs under the root's name with an issuing key |
+| `opaas verify` | Verifies a credential, offline, walking root → delegation → issuing key; `--revocations` names a list |
+| `opaas trust` | Lists pinned trust anchors, or pins one (or installs a revocation list) after showing what it is |
 | `opaas certificate` | Printable certificate (A4, to PDF) with a QR code to the published page |
 | `opaas publish` | Static certificate site with in-browser verification and badges |
 | `opaas watch` | Checks a certificate still describes the deployment, or every component of a system (exit 0/1/3) |
@@ -628,6 +636,8 @@ Stated as plainly as the report states it:
   shows its front door only.
 - **Streams in shapes the sentinel does not assemble** — OpenAI, the Responses API and Ollama
   are kept whole; any other keeps its last line, and the record says so.
+- **Revocations a verifier has not installed** — the revocation list is read offline, so a
+  verifier who never updates it never learns of one; `verify` says when it held no list.
 - **General infrastructure security** — OPAAS is not a pentest or an OS hardening audit; it
   looks at what touches the AI system, such as an engine exposed without credentials.
 

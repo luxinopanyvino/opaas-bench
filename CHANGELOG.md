@@ -11,9 +11,29 @@ The methodology version embedded in every report (`OPAAS_SPEC_VERSION`,
 ## [Unreleased]
 
 Phase 14 of the work plan: the operational gaps the status table declared
-left out (D64).
+left out (D64). Phase 10, steps 2 and 4: the root delegates to an issuing
+key, and keeps a revocation list (D65, D66).
 
 ### Upgrading
+
+- **`verify` prints new checks.** Every verification against a DID document
+  or an anchor now begins with `anchor`. A credential carrying a delegation
+  adds `delegation`, `delegation-validity`, `revocation` and `delegated-key`.
+  Scripts that parse the check list should expect them; credentials without a
+  delegation verify exactly as before, with the same verdict.
+- **Revocation lists are read beside the anchors.** `verify`, `certificate`,
+  `watch` and `evidence verify` read every list in
+  `~/.opaas/anchors/revocations/` (or `$OPAAS_ANCHOR_DIR/revocations/`) for
+  the credential's issuer. A list there that the issuer's root did not sign
+  fails verification for that issuer: remove stray files.
+- **The browser verifier recognised no model certificate.** It looked for
+  `OpasModelCertificate`, so the `structure` check failed on every model
+  certificate page. Republish your site with `opaas publish` to ship the
+  fixed `verify.js`.
+- **`verify_credential` takes a `TrustRoot` or a key.** Passing a public key
+  still works and still means *trust this key directly*. `sign_credential`
+  accepts any signer with `public_key()` and `sign()`; `key_id` is optional
+  when a delegation is given.
 
 - **G05 changed meaning.** A skill with a signature file used to be `ok`. It
   is now `ok` only when signed with `opaas discover sign-skill` and verified
@@ -34,6 +54,16 @@ left out (D64).
 
 ### Added
 
+- `opaas delegate`: the root signs a delegation to an issuing key, from a
+  PKCS#11 hardware token (`--pkcs11-module`, new `token` extra) or a key
+  file. `opaas sign --delegation` and `opaas evidence sign --delegation`
+  embed it, and refuse one that has expired or names another key (D66).
+- `opaas revoke`: the root's signed revocation list. `opaas trust --add`
+  installs one after it verifies under a pinned anchor; `verify
+  --revocations` names one explicitly; `opaas publish --revocations` gives
+  it to the browser.
+- `verify.js` walks the same delegation chain as `opaas verify`, and a test
+  runs it under Node to pin that both reach the same checks.
 - `opaas discover sign-skill` and `discover gaps --skill-key`: verified skill
   signatures (G05).
 - `opaas sentinel observe --keep-output`: response fields kept in clear; a

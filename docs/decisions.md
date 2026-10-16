@@ -50,9 +50,59 @@ Signing non-reproducible bytes produces a credential nobody can verify and that 
 
 ---
 
+## D66 — The delegation walk and the revocation list, as built
+
+**Status:** applied (phase 10, steps 2 and 4) · **Implements:** [D65](#d65--an-offline-root-on-two-tokens-delegates-to-an-issuing-key-issuances-stay-on-the-published-hash-chain) · **Affects:** [`credential/delegation.py`](../src/opaas/core/credential/delegation.py), [`credential/revocation.py`](../src/opaas/core/credential/revocation.py), [`credential/signers.py`](../src/opaas/core/credential/signers.py), [`credential/proof.py`](../src/opaas/core/credential/proof.py), [`credential/trust.py`](../src/opaas/core/credential/trust.py), [`credential/vc.py`](../src/opaas/core/credential/vc.py), [`web/assets/verify.js`](../src/opaas/web/assets/verify.js), `delegate`, `revoke`, `sign`, `verify`, `trust`, `publish`
+
+D65 decided the shape of the chain. Building it settled the points it left open.
+
+**The delegation.** An `OpaasKeyDelegation` names the issuer (the root's DID), the delegated key (`delegate.id`, `delegate.publicKeyMultibase`) and `validFrom` / `validUntil`. It is signed with the same `eddsa-jcs-2022` proof as a credential, now in one module (`proof.py`) that credentials, delegations and revocation lists share.
+
+- **The proof purpose is `capabilityDelegation`**, and verification requires it. A credential is signed for `assertionMethod`. The purpose is inside the signed proof configuration, so a root signature made for one cannot be replayed as the other.
+- **The delegated key's id lives under the root's DID** (`did:web:onpremialabs.com#issuing-…`), because it is the name every credential signed with it carries. Without `--id`, it is derived from the key's fingerprint.
+- **The credential carries the delegation in `issuerDelegation`, inside the signed body.** The issuing key's signature therefore also covers which delegation it claimed. The field is OPAAS's own and generic VC libraries ignore it (D65 already gave that up).
+- **`opaas delegate` refuses a delegation of 90 days or less**: D65 says delegations are always longer than a credential's life. It also re-verifies what the token signed before writing it.
+
+**Signing.** `sign --delegation` takes the issuer and the verification method from the delegation, after checking that it is signed, that it names the signing key, and that it covers now. Otherwise nothing is signed. `--issuer` that disagrees with it is refused. Without `--delegation`, signing is as D39 left it.
+
+**The signer.** Anything with `public_key()` and `sign(bytes)` signs. A key file already is one. `Pkcs11Signer` signs on a PKCS#11 token (a YubiKey's PIV applet through `ykcs11`, or OpenSC) with `CKM_EDDSA`, and reads back only the signature and the public key. It needs the new optional `token` extra (`python-pkcs11`), imported only when a token is opened. The PIN comes from `OPAAS_TOKEN_PIN` or the keyboard, never an argument. No test touches a token: they use a fake signer, and a stand-in for the binding.
+
+**The walk.** An anchor is now the root's whole DID document, every key it lists (`TrustRoot`). In order:
+
+1. `anchor` — the anchor is the credential's issuer.
+2. `delegation` — well formed, from the same issuer, nesting nothing, and signed for `capabilityDelegation` by a key the anchor publishes under exactly the method id the proof names. A delegation signed by any other key, including one the credential itself carries, fails here.
+3. `delegation-validity` — `validFrom ≤ proof.created < validUntil`.
+4. `revocation` — neither the issuing key nor the root key that delegated it is revoked.
+5. `delegated-key` — `proof.verificationMethod` is `delegate.id`.
+6. `signature`, `validity`, `report` — as before.
+
+The first step that fails ends the walk, so the credential's own signature is checked only once its key has been reached. A credential signed directly by an anchor key, with no delegation, gets the checks it always had, plus `anchor`. `--key` trusts that one key directly: the issuing key skips steps 2–4, with a warning that revocation was not checked, and a root key walks from itself.
+
+**Fixed depth** is enforced by shape: a delegation carrying another delegation is malformed.
+
+**The revocation list.** An `OpaasRevocationList` signed by a root key (`capabilityDelegation` too) lists keys by `publicKeyMultibase`, with an id, a date and a reason. `opaas revoke` creates or extends it, and refuses to extend a list the root did not sign. It is read from `--revocations`, then `<anchors>/revocations/` for the user's and the bundled anchors. It is never read from the credential, and `opaas trust --add` installs one only after it verifies under a pinned anchor and is not older than the one installed.
+
+- **A revoked key is refused for every credential it signed, whatever `proof.created` says.** After a compromise, the proof date is exactly what an attacker backdates. Legitimate credentials are reissued (key custody).
+- **A root key can be revoked too.** That covers a lost token: delegations it signed stop verifying, and the other token's keep working.
+- **A list that does not verify under the anchor fails the check.** It is not skipped: a list among the anchors that the root did not sign is something to look at.
+- **No list at all passes the check and says so.** The detail and a warning state that a revoked key would go undetected (invariant 2 in spirit: what was not checked is declared).
+
+**The browser.** `verify.js` walks the same steps with the same check names in the same order, from the DID document the site publishes. `publish --revocations` embeds the list and serves it at `/.well-known/opaas-revocations.json`. `tests/test_verify_parity.py` runs `verify.js` under Node on fifteen fixtures and requires the exact same list of checks as Python, outcomes included. Without `node` the test skips, and in CI it fails instead.
+
+**Found on the way:** `verify.js` checked for the type `OpasModelCertificate`, one *a* short. Every model certificate failed `structure` in the browser, and system and evidence credentials were not recognised at all. It now accepts the three types Python accepts. The parity test is what would have caught it.
+
+**What is lost:**
+
+- **Revocation is as fresh as the verifier's copy.** Offline means nobody is told. A verifier who never runs `trust --add` with a new list never learns of a revocation. The delegation's end date is the only bound that does not depend on them.
+- **A credential signed inside its delegation outlives it.** The window is checked at `proof.created` (D65), so a credential signed on the delegation's last day verifies for its full 90 days. A short delegation shortens how long a stolen issuing key can sign, not how long what it signed stays valid.
+- **Revocation fails closed on a bad list.** A corrupted or foreign file in `revocations/` makes every credential of that issuer fail until it is removed.
+- **The token code is untested against hardware.** `Pkcs11Signer` is written against python-pkcs11's documented API and tested against a stand-in. The first run on a real token is at the ceremony, which is why `delegate` re-verifies what the token signed.
+
+---
+
 ## D65 — An offline root on two tokens delegates to an issuing key; issuances stay on the published hash chain
 
-**Status:** accepted, not yet implemented (phase 10, steps 2–4) · **Settles:** the three open decisions of [`key-custody.md`](key-custody.md) · **Revises:** the wording of [D4](#d4--verify-never-takes-the-key-from-the-credential) · **Keeps:** [D21](#d21--the-log-is-a-hash-chain-and-it-is-not-called-certificate-transparency) · **Would affect:** [`credential/keys.py`](../src/opaas/core/credential/keys.py), [`credential/trust.py`](../src/opaas/core/credential/trust.py), [`credential/vc.py`](../src/opaas/core/credential/vc.py), [`web/assets/verify.js`](../src/opaas/web/assets/verify.js), `keygen`, `sign`, `verify`
+**Status:** accepted; steps 2 and 4 implemented in [D66](#d66--the-delegation-walk-and-the-revocation-list-as-built), step 3 (the ceremony and the bundled anchor) pending · **Settles:** the three open decisions of [`key-custody.md`](key-custody.md) · **Revises:** the wording of [D4](#d4--verify-never-takes-the-key-from-the-credential) · **Keeps:** [D21](#d21--the-log-is-a-hash-chain-and-it-is-not-called-certificate-transparency) · **Would affect:** [`credential/keys.py`](../src/opaas/core/credential/keys.py), [`credential/trust.py`](../src/opaas/core/credential/trust.py), [`credential/vc.py`](../src/opaas/core/credential/vc.py), [`web/assets/verify.js`](../src/opaas/web/assets/verify.js), `keygen`, `sign`, `verify`
 
 Phase 10 of the work plan cannot ship a bundled anchor until it is settled what that anchor is. Key custody left three questions open. Each is decided here, before any production key exists, because the anchor that ships in the package is very hard to take back once it is out.
 
