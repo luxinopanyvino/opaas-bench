@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import getpass
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -16,7 +17,14 @@ from typing import Any
 from rich.console import Console
 from rich.markup import escape
 
-from opaas.core.credential import load_private_key
+from opaas.core.credential import (
+    Pkcs11Signer,
+    Signer,
+    TrustRoot,
+    find_revocation_lists,
+    load_private_key,
+    resolve_trust,
+)
 from opaas.core.credential.keys import DID_DOCUMENT_FILENAME, public_key_multibase
 
 # emoji=False: Rich turns ":key:" into a key emoji, so "did:key:z6Mk…" printed
@@ -81,6 +89,59 @@ def _signing_identity(key: Path, private_key: Any, issuer: str | None) -> tuple[
         f"{document_path} does not list the key in {key.name}: it belongs to another key "
         "pair. Signing would produce a credential its own issuer document cannot verify."
     )
+
+
+def _open_root_signer(
+    *,
+    key: Path | None,
+    passphrase: str | None,
+    pkcs11_module: str | None,
+    key_label: str | None,
+    token_label: str | None,
+) -> Signer:
+    """The root's signer: a key file, or a PKCS#11 token that never lets the key out (D65).
+
+    The PIN is read from `OPAAS_TOKEN_PIN` or asked at the keyboard, never
+    taken as an argument, for the same reason as the passphrase.
+    """
+    if (key is None) == (pkcs11_module is None):
+        raise ValueError(
+            "Name exactly one root signer: --root-key <file.pem>, or --pkcs11-module <module> "
+            "with --key-label for a hardware token."
+        )
+    if key is not None:
+        return _load_signing_key(key, passphrase)
+    if not key_label:
+        raise ValueError("--pkcs11-module needs --key-label: the label of the key on the token.")
+    pin = os.environ.get("OPAAS_TOKEN_PIN")
+    if pin is None:
+        if not sys.stdin.isatty():
+            raise ValueError(
+                "No terminal to ask for the token PIN: set OPAAS_TOKEN_PIN, or run it by hand."
+            )
+        pin = getpass.getpass("Token PIN: ")
+    return Pkcs11Signer(
+        module=str(pkcs11_module), key_label=key_label, pin=pin, token_label=token_label
+    ).open()
+
+
+def _verification_trust(
+    credential: dict[str, Any],
+    *,
+    key: Path | None,
+    did_document: Path | None,
+    revocations: Path | None = None,
+) -> tuple[TrustRoot, list[dict[str, Any]], list[str]]:
+    """The root to verify from and the revocation lists held for its issuer.
+
+    Both come from the verifier's side (D4, D65): `--key` / `--did-document`,
+    the installed anchors, the bundled ones. Never from the credential.
+    Raises `TrustAnchorError` or `ValueError` saying what is missing.
+    """
+    issuer = str(credential.get("issuer", ""))
+    root = resolve_trust(issuer, key_path=key, did_document_path=did_document)
+    found = find_revocation_lists(issuer, path=revocations)
+    return root, [document for document, _ in found], [origin for _, origin in found]
 
 
 def _plain(value: Any) -> str:

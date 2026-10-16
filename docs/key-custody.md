@@ -2,7 +2,7 @@
 
 The root Ed25519 private key is the system's only secret. Every credential is signed with it; with the public one, published in the DID document, anyone verifies a credential **without depending on onpremIALabs infrastructure**. If the key is lost, no new credentials can be issued and nothing can be re-certified; if it leaks, anyone can issue certificates that look legitimate.
 
-> **What applies today, and what is decided.** The sections from *Generation* to *Rotation and revocation* describe how the tool works now: one key, in an encrypted file, signing every credential. [D65](decisions.md#d65--an-offline-root-on-two-tokens-delegates-to-an-issuing-key-issuances-stay-on-the-published-hash-chain) settles how the production root will be held, and that is different. The root stays offline on two hardware tokens and signs only delegations to an issuing key; the issuing key is the one that signs credentials. The decision is under [*Decided custody*](#decided-custody-d65) below. The tooling it needs is phase 10, step 2 of the [work plan](workplan.md#phase-10-production-root-of-trust), and until it exists no production key is generated.
+> **What applies today, and what is decided.** The sections from *Generation* to *Rotation and revocation* describe how the tool works now: one key, in an encrypted file, signing every credential. [D65](decisions.md#d65--an-offline-root-on-two-tokens-delegates-to-an-issuing-key-issuances-stay-on-the-published-hash-chain) settles how the production root will be held, and that is different. The root stays offline on two hardware tokens and signs only delegations to an issuing key; the issuing key is the one that signs credentials. The decision is under [*Decided custody*](#decided-custody-d65) below. The tooling it needs exists ([D66](decisions.md#d66--the-delegation-walk-and-the-revocation-list-as-built)): `opaas delegate`, `sign --delegation`, `opaas revoke` and the walk in `verify`. What remains is the ceremony itself (phase 10, step 3 of the [work plan](workplan.md#phase-10-production-root-of-trust)), and until it is run no production key exists.
 
 ## Generation
 
@@ -93,5 +93,43 @@ Both root keys are published in `did.json` and both are in the bundled anchor. T
 A delegation may travel with the credential, because it is believed only after it verifies under an anchor. A key in the credential that no anchor delegates is refused, as now. `--key` still means *trust this key directly*.
 
 **Rotation under D65.** A planned rotation of the issuing key is a new delegation signed by the root, published before the old one expires. A compromised issuing key goes on the revocation list and is replaced by a new delegation. Neither touches the anchor. Losing one token leaves the other root key working; the lost key is revoked in `did.json` and a replacement token gets a new key, which needs a new anchor in the next release. Losing both means a new root.
+
+### The commands (D66)
+
+The root signs from its token through PKCS#11 (`uv sync --extra token`), on the offline machine. The PIN is read from `OPAAS_TOKEN_PIN` or asked, never passed as an argument. `--root-key <file.pem>` signs from a file instead, which is what the rehearsal uses.
+
+```bash
+# On the offline machine, with token A (or B): delegate to the issuing key.
+opaas delegate --issuing-key issuing/opaas-root-ed25519.pub.pem \
+  --root-did-document root/did.json \
+  --pkcs11-module /usr/lib/libykcs11.so --key-label "root key-1" \
+  --id did:web:onpremialabs.com#issuing-2026-10 --valid-days 180 --out delegation.json
+
+# On the signing machine: every credential carries the delegation.
+opaas sign --input report.json --key issuing/opaas-root-ed25519.pem --delegation delegation.json
+```
+
+`root/did.json` lists both token keys as `#key-1` and `#key-2` (`credential.build_root_did_document` assembles it from the two public keys). The issuing key is generated with `opaas keygen` as any other key, and its own `did.json` is not used: with `--delegation`, the credential is issued under the root's name. `delegate` refuses a root key its document does not publish and a window of 90 days or less, and re-verifies what the token signed. `sign` refuses a delegation that has expired, has not started, or names another key.
+
+### Rotation and revocation under D65, step by step
+
+**Planned rotation of the issuing key** (before its delegation ends):
+
+1. Generate the new issuing key on the signing machine (`opaas keygen --out issuing-2027-04`), with a passphrase. Copy only its `.pub.pem` to the offline machine.
+2. On the offline machine, with either token: `opaas delegate --issuing-key …pub.pem --id did:web:onpremialabs.com#issuing-2027-04 …`. The new window starts before the old one ends, so there is no gap.
+3. Bring `delegation.json` back and sign with the new key and `--delegation`. Credentials signed with the old key stay valid: their delegation covered their `proof.created`.
+4. Once the old delegation has ended, the old key cannot sign anything that verifies. Destroy it and its backups.
+
+**Compromised issuing key:**
+
+1. On the offline machine: `opaas revoke --delegation <its delegation.json> --reason compromise --list revocations.json --root-did-document root/did.json --pkcs11-module … --key-label …`. The list is extended and re-signed. The first time, omit `--list` and a new one is written.
+2. Publish `revocations.json` beside `did.json` and in the public repository with the issuance log. Verifiers install it with `opaas trust --add revocations.json`, which checks it against the pinned root and refuses an older list than the one installed. The site carries it with `publish --revocations`.
+3. Every credential signed by that key now fails `revocation`, whatever its date: after a compromise, the proof date cannot be trusted. Rotate as above and reissue the credentials that had not expired, checking the issuance log for any that are not yours.
+
+**One token lost:** `opaas revoke --id did:web:onpremialabs.com#key-2 --reason "lost token" …`, signed with the remaining token. Delegations the lost key signed stop verifying, so any issuing key it delegated needs a new delegation from the remaining token. A replacement token gets a new key, which goes into `did.json` as `#key-3` and into the bundled anchor of the next release.
+
+**Both tokens lost:** there is no root left to sign a revocation. A new root is generated, published and shipped as a new anchor, and every live credential is reissued under it.
+
+The revocation list is read offline: a verifier who never installs a new list never learns of a revocation. What bounds that is the delegation's end date, which is why delegations are kept to months.
 
 **Issuance log.** The local hash chain of D21 stays the issuance log, and it is published in a public git repository, so every clone is a dated copy held by someone else. A public log, Certificate Transparency style, is not adopted: it would need the network at signing time and a third-party operator, and it would publish when credentials are issued and how many. What is given up is detecting a credential issued with a valid key and kept out of the published chain.

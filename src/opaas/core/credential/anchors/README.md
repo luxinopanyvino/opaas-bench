@@ -11,3 +11,7 @@ In the meantime, `verify` resolves the key in this order:
 3. this directory
 
 If it finds none, it fails saying exactly what is missing. It never uses the key that comes inside the credential itself.
+
+An anchor is a root (D65): every key its document lists can sign directly, and can delegate to an issuing key. A credential signed by an issuing key verifies only through a delegation one of those keys signed.
+
+Revocation lists signed by a root go in a `revocations/` directory beside the anchors (`~/.opaas/anchors/revocations/`, or `revocations/` here). `opaas trust --add revocations.json` installs one after it verifies. Like the anchor, none ships until the production root exists.

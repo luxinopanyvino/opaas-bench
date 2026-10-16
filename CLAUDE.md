@@ -57,7 +57,9 @@ Most are recorded, with what each one costs, in [`docs/decisions.md`](docs/decis
    substitute `json.dumps(sort_keys=True)`.
 6. **`verify` never takes the public key from the credential.** Resolution order is
    `--key`/`--did-document` → `~/.opaas/anchors/` (or `$OPAAS_ANCHOR_DIR`) → anchors
-   bundled with the tool; if none, it fails saying what is missing (D4).
+   bundled with the tool; if none, it fails saying what is missing (D4). A key the
+   credential carries is trusted only through a delegation that verifies under that
+   anchor, and `verify.js` must walk the same chain (D65, D66, `test_verify_parity.py`).
 7. **External artifacts are pinned.** Datasets carry a SHA-256 verified at registration
    (`bench/datasets/sources.py`); default classifiers carry a full commit revision, never a tag
    (`bench/classifiers/registry.py`). A mismatch stops the run. Bumping either is a deliberate,
@@ -113,8 +115,10 @@ src/opaas/
 │   ├── fingerprint.py  Deployment fingerprint: what was serving, not how OPAAS ran (D34)
 │   ├── stats.py        percentile/mean/summarize/wilson_interval/median_interval
 │   ├── transparency.py Hash-chain issuance log (explicitly NOT Certificate Transparency)
-│   ├── credential/     keys (Ed25519 + DID), vc (model certificates and OpaasEvidence),
-│   │                   trust (anchors), anchors/ (empty until the production key exists)
+│   ├── credential/     keys (Ed25519 + DID), proof (the eddsa-jcs-2022 proof), vc (model
+│   │                   certificates, OpaasEvidence, the verify walk), delegation and
+│   │                   revocation (root-signed, D65/D66), signers (PKCS#11 token), trust
+│   │                   (anchors, revocation lists), anchors/ (empty until the production key)
 │   ├── events.py       AuditEvent schema, EventLog (hash chain + Ed25519 seals) (D42)
 │   ├── policy.py       Structural policy language, three-valued verdicts (D43)
 │   ├── metrics.py      ACR, RF, LPC, GB, SPDR, ADL, AC, ACD, IS, VC; thresholds (D44)
@@ -157,7 +161,7 @@ src/opaas/
 docs/     design.md, methodology.md, decisions.md, workplan.md, datasets.md, key-custody.md,
           self-evaluation.md, implementation-plan.md, mitigation-plan.md,
           system-audit.md (proposal: the system as the audited subject, D60)
-tests/    988 tests, one file per module, plus conftest.py with the fake backends
+tests/    1026 tests, one file per module, plus conftest.py with the fake backends
 scripts/  sprite_from_png.py — regenerates cli/_sprite_data.py from docs/img/mascot.png
 web/      README describing the published site layout (the generator lives in src/)
 ```
@@ -189,7 +193,7 @@ uv lock --check                           # fails if uv.lock drifted from pyproj
 ```
 
 **Dependencies are locked on purpose.** `pyproject.toml` declares `>=` bounds; `uv.lock`
-pins the exact resolution of all 72 packages including extras. Run `uv lock` after changing
+pins the exact resolution of all 78 packages including extras. Run `uv lock` after changing
 a dependency. Plain `pip install .` ignores the lockfile — fine for trying the tool, not for
 reproducing a run.
 
@@ -200,7 +204,7 @@ a round trip.
 
 ### Known test state
 
-`uv run pytest` reports **988 passed**. The suite is green: treat any failure as yours.
+`uv run pytest` reports **1025 passed, 1 skipped**. The suite is green: treat any failure as yours.
 Most of its wall time is `nvidia-smi` being called by the bench tests; on a machine without
 it the suite is much faster.
 
@@ -320,6 +324,7 @@ naming what is missing, rather than breaking mid-evaluation.
 | `OPAAS_CACHE_DIR` | Overrides `~/.opaas/cache` (datasets, sources, classifiers) |
 | `OPAAS_ANCHOR_DIR` | Overrides `~/.opaas/anchors` for `verify` trust anchors |
 | `OPAAS_KEY_PASSPHRASE` | Non-interactive passphrase for `keygen`/`sign` |
+| `OPAAS_TOKEN_PIN` | Non-interactive PIN of the root's hardware token for `delegate`/`revoke` |
 
 ## Documentation duties
 

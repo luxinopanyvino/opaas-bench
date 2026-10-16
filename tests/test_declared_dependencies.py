@@ -21,6 +21,8 @@ DECLARED = {
     "cryptography": "cryptography", "psutil": "psutil", "segno": "segno",
     # The classifiers extra, imported lazily (CLAUDE.md, code conventions).
     "torch": "torch", "transformers": "transformers", "huggingface_hub": "huggingface-hub",
+    # The token extra: the root signs from a PKCS#11 hardware token (D65).
+    "pkcs11": "python-pkcs11",
     # The dev extra, used only by scripts/ to regenerate the sprite.
     "PIL": "pillow", "numpy": "numpy",
 }

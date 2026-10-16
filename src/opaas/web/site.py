@@ -116,8 +116,15 @@ def build_site(
     did_document: dict[str, Any],
     *,
     now: datetime | None = None,
+    revocations: dict[str, Any] | None = None,
 ) -> list[Path]:
-    """Writes the public registry and one page per certificate."""
+    """Writes the public registry and one page per certificate.
+
+    With `revocations`, the issuer's signed revocation list is published at
+    `/.well-known/opaas-revocations.json` and embedded in every page, so the
+    browser checks it as `opaas verify` does (D65). The browser still believes
+    it only once it verifies under the DID document.
+    """
     if not entries:
         raise SiteError("There are no certificates to publish")
 
@@ -135,9 +142,13 @@ def build_site(
     did_path = well_known / "did.json"
     did_path.write_text(json.dumps(did_document, indent=2) + "\n", encoding="utf-8")
     written.append(did_path)
+    if revocations is not None:
+        revocations_path = well_known / "opaas-revocations.json"
+        revocations_path.write_text(json.dumps(revocations, indent=2) + "\n", encoding="utf-8")
+        written.append(revocations_path)
 
     for entry in entries:
-        written.extend(_write_certificate(entry, out_dir, did_document, now))
+        written.extend(_write_certificate(entry, out_dir, did_document, now, revocations))
 
     index = out_dir / "index.html"
     index.write_text(_render_index(entries, now), encoding="utf-8")
@@ -146,7 +157,11 @@ def build_site(
 
 
 def _write_certificate(
-    entry: Entry, out_dir: Path, did_document: dict[str, Any], now: datetime | None
+    entry: Entry,
+    out_dir: Path,
+    did_document: dict[str, Any],
+    now: datetime | None,
+    revocations: dict[str, Any] | None = None,
 ) -> list[Path]:
     cert_dir = out_dir / "cert" / entry.slug
     cert_dir.mkdir(parents=True, exist_ok=True)
@@ -163,9 +178,24 @@ def _write_certificate(
 
     page = cert_dir / "index.html"
     render = _render_system_certificate if entry.is_system else _render_certificate
-    page.write_text(render(entry, did_document, now), encoding="utf-8")
+    page.write_text(
+        _with_revocations(render(entry, did_document, now), revocations), encoding="utf-8"
+    )
     written.append(page)
     return written
+
+
+def _with_revocations(page: str, revocations: dict[str, Any] | None) -> str:
+    """Embeds the revocation list next to the DID document, where verify.js looks for it."""
+    if revocations is None:
+        return page
+    data = json.dumps([revocations], ensure_ascii=False).replace("<", "\\u003c")
+    anchor = '<script src="../../assets/verify.js"></script>'
+    return page.replace(
+        anchor,
+        f'<script id="revocations-data" type="application/json">{data}</script>\n{anchor}',
+        1,
+    )
 
 
 # ---------------------------------------------------------------------- templates
