@@ -16,7 +16,7 @@ import base64
 import json
 import shutil
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -806,7 +806,3 @@ _BLOCK_TITLES = {
     "safety": "Block D — Behavior and safety",
     "compliance": "Block E — Compliance",
 }
-
-
-def now_utc() -> datetime:
-    return datetime.now(timezone.utc)

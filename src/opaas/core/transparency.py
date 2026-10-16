@@ -177,7 +177,3 @@ def inclusion_check(
             f"The logged report ({entry.reportHash}) is not this one ({report_hash})."
         )
     return True, f"Logged as entry {entry.index} on {entry.issuedAt}"
-
-
-def as_dicts(entries: list[LogEntry]) -> list[dict[str, Any]]:
-    return [asdict(entry) for entry in entries]

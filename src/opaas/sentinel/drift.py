@@ -89,8 +89,6 @@ LATENCY_MAX_TOKENS = 64
 BEHAVIOUR_ITEMS = 40
 EGRESS_REQUESTS = 5
 
-STATES = ("current", "drifted", "inconclusive", "expired")
-
 #: For schedulers. 3 departs from the CLI's 0/1/2 on purpose (D36): "the
 #: deployment changed" and "the check could not run" need different responses,
 #: and folding both into 1 would page someone for a network blip.
