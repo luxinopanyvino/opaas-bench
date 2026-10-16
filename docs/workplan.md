@@ -1,6 +1,6 @@
 # Work plan: from model certification to auditable agents
 
-**Status:** implemented, phases 0–7 (D40–D52). The [status table](#status) says what each phase delivered and what was left out. This plan splits OPAAS into modules (`discover`, `smith`, `swarm`, `sentinel`, `inquest`, `card`) around one shared evidence core. Each phase lands as its own pull requests with `D<n>` entries. Nothing here changes an invariant in [CLAUDE.md](../CLAUDE.md); where a module needs a new one, it is listed under [New invariants](#new-invariants).
+**Status:** implemented, phases 0–7 (D40–D52), with the system audit (8, D60) and agent identification (9, D63); phases 10–15 are planned. The [status table](#status) says what each phase delivered and what was left out. This plan splits OPAAS into modules (`discover`, `smith`, `swarm`, `sentinel`, `inquest`, `card`) around one shared evidence core. Each phase lands as its own pull requests with `D<n>` entries. Nothing here changes an invariant in [CLAUDE.md](../CLAUDE.md); where a module needs a new one, it is listed under [New invariants](#new-invariants).
 
 ---
 
@@ -195,6 +195,12 @@ This is the paper's missing end-to-end audit. The ground truth comes from instru
 | **6. card** | Auto-generated Auditability Card; multi-model, multi-agent deployment certificate | all | M |
 | **7. sentinel gate** | Allow, block or pending with an approval queue (opt-in) | 3 | M |
 | **8. System audit** (accepted, D60) | The system as the audited subject; one measurement format for every suite; `opaas audit`; one system certificate. Phases S0–S4 in [`system-audit.md`](system-audit.md) | all | L |
+| **10. Production root of trust** (planned) | Custody decisions settled; production key ceremony; bundled anchor; revocation list read offline by `verify`. [Detail](#phase-10-production-root-of-trust) | — | M |
+| **11. smith adapters for pending agents** (planned) | `a2a`, `open-webui` and framework adapters, with tools rerouted to the mock MCP server or observed through sentinel. [Detail](#phase-11-smith-adapters-for-pending-agents) | — | L |
+| **12. Block D beyond English** (planned) | Pinned Spanish datasets, refusal patterns and a calibrated multilingual toxicity classifier, reported per language. [Detail](#phase-12-block-d-beyond-english) | — | M |
+| **13. Domain scenario packs** (planned) | Versioned, hashed scenario packs per domain; richer templates; more counterfactual pairs. [Detail](#phase-13-domain-scenario-packs) | 11 | M |
+| **14. Declared operational gaps** (planned) | Skill signatures verified (G05); full stream output when kept; approver notification; agent runtimes probed. [Detail](#phase-14-declared-operational-gaps) | — | S–M |
+| **15. Engines without an OpenAI-compatible API** (optional) | Native adapters (Triton / TensorRT-LLM, TGI native) only when a real deployment needs one. [Detail](#phase-15-engines-without-an-openai-compatible-api-optional) | — | S |
 
 ### Status
 
@@ -210,6 +216,7 @@ This is the paper's missing end-to-end audit. The ground truth comes from instru
 | **7. sentinel gate** | Block, or hold for a named approver through a directory queue. Undecidable actions are held. Approvals recorded as attributable events (D50). | Notification of approvers. |
 | **8. System audit** | Accepted (D60), open questions settled: [`system-audit.md`](system-audit.md) §10. **S0:** system manifest with strict validation (MCP agents accepted ahead of their adapter); the measurement record with measured / not measured / not applicable; one extractor per document kind, every existing kind covered; `opaas audit validate` and `extract`. **S1:** `opaas audit run`: discover, bench, smith, sentinel, inquest (plus a degraded run for Q6) and swarm, only as the manifest calls for, citing supplied members; the system report with declared vs observed composition, coverage, Q1–Q6 from the cells, block E at system level, and thresholds by component and by kind with three-valued verdicts. **S2:** certifiability rules in the system report (one environment, operator scenarios for every agent, no cloud baseline, no partial bench, no failed step); `OpaasSystemCertificate` signed with `opaas sign`, verified offline with `opaas verify` (model certificates unchanged); the printable system certificate and its site page; environment fixes of D61. **S3:** `opaas audit draft` writes a manifest from the inventory (every served model, named MCP servers and tools; agents, flows and records left as notes; purpose as a marker the report refuses to certify); `opaas watch` on a system certificate re-checks every model, lets a bare-model agent follow its model, compares the environment with the audited one (only models served since the audit alert) and names what moved. **S4 (templates):** `opaas audit template` writes task, destructive, permission and injection skeletons per declared tool; smith refuses a scenario still marked `TO COMPLETE`. **S4 (MCP):** the `mcp` smith adapter, OPAAS as the agent's MCP client and as the MCP server of the mock tools, Streamable HTTP with JSON or SSE, no new dependency; MCP agents are measured, no longer pending. **S4 (agent bias and toxicity):** counterfactual scenarios (a 21st reference scenario, `bias-loan-decision`) compared on actions, divergent only when each value is stable, undecidable otherwise; the agent's final answers scored by the calibrated toxicity classifier. | — |
 | **9. Agent identification** | D63: discover identifies agents (A2A cards, Open WebUI, frameworks by OpenAPI title), reads well-known MCP configurations; `audit draft --records` drafts agents, models used and flows from records; pending adapters for agents smith cannot drive. | smith adapters for A2A and the frameworks. |
+| **10.–15.** | Planned, not started. | — |
 
 **Open questions (§6), as settled:** 1 — `observe` changes nothing and `gate` is opt-in (D46, D50). 2 — digests by default, the operator adds fields with `--keep` and declares retention on the card; whether a third party may require fields stays open. 3 — yes: a report on reference scenarios alone is `certifiable: false` (D47). 4 — yes, specified once in `smith`: counterfactual scenarios compared on the agent's actions (D60, S4).
 
@@ -217,6 +224,99 @@ This is the paper's missing end-to-end audit. The ground truth comes from instru
 - `discover` comes first because every later result binds to its fingerprint (N5).
 - `smith` comes before `swarm` because flows are scenarios composed.
 - `inquest` follows `sentinel observe`, because the best records to audit are the ones OPAAS itself produces at the strongest integrity level.
+
+### Phases 10–15: from a complete niche to real systems
+
+Phases 0–9 make OPAAS complete for what it set out to audit: models served by
+vLLM, Ollama or an OpenAI-compatible API, and agents reachable over HTTP or MCP.
+What stands between that and auditing the systems operators actually run is
+listed in the *Left out* column above, in the README's *What is not measured*,
+and in the open decisions of [`key-custody.md`](key-custody.md). These phases
+close those gaps. None changes an invariant; each lands as its own pull requests
+with its `D<n>` entry, tests that touch no network, GPU or real weights, and the
+matching updates to this table, the README, `methodology.md` and the CHANGELOG.
+
+Phases 10, 11, 12 and 14 touch disjoint parts of the tree and can proceed in
+parallel. Phase 10 goes first in priority: without it no certificate verifies
+on a clean machine without its key being handed over separately.
+
+#### Phase 10: production root of trust
+
+1. Settle the three open decisions of `key-custody.md`: hardware token or
+   encrypted file; an offline root signing intermediate issuing keys (preferred,
+   so an issuing key can rotate without touching the root); anchoring issuances
+   in a public log.
+2. If intermediates are chosen, `verify` walks root → issuing key → credential.
+   The key still never comes from the credential (invariant 6, D4).
+3. Run the rehearsed ceremony, publish the DID document, ship the anchor in
+   `core/credential/anchors/`.
+4. A revocation list `verify` reads offline, and a documented rotation procedure.
+
+**Done when** `opaas verify` succeeds on a clean machine with no `--key`, and a
+test pins resolution against the bundled anchor.
+
+#### Phase 11: smith adapters for pending agents
+
+1. A D-entry first, settling how ground truth survives an agent OPAAS does not
+   own (N3). Two cases: an agent whose tools can be pointed at OPAAS's mock MCP
+   server (S4) is measured fully, ACR included; an agent whose tools cannot be
+   rerouted is driven through its conversation endpoint and observed through
+   sentinel, and ACR and GB are declared not measured, never estimated.
+2. `a2a` first: it is a standard, and `discover` already reads the agent card.
+3. `open-webui`.
+4. Framework adapters over their HTTP APIs: LangGraph/LangServe, then Dify and
+   Flowise, then the rest of the D63 list.
+5. Each adapter takes an injectable transport, and every reference scenario
+   replays against a fake server in the tests.
+
+**Done when** a system with an A2A or LangGraph agent passes `opaas audit run`
+with no pending behaviour cells.
+
+#### Phase 12: block D beyond English
+
+1. Spanish datasets with compatible licenses (BBQ variants, a translated or
+   equivalent XSTest, multilingual RealToxicityPrompts), each a `Source` with its
+   SHA-256 and an importer that drops whole items (D15).
+2. Results reported per language. English and Spanish are different categories,
+   never pooled (invariant 1).
+3. A multilingual toxicity classifier pinned to a commit, with Spanish control
+   cases; uncalibrated means unpublished (D18).
+4. Spanish refusal and abstention patterns in `bench/refusal.py`. The pattern
+   hash changes, and that is the point.
+5. `methodology.md` states what may not be claimed from each Spanish figure.
+
+**Done when** block D reports Spanish results with their own provenance and
+calibration, and *What is not measured* says so.
+
+#### Phase 13: domain scenario packs
+
+1. Scenario packs kept apart from the reference set: payments and banking,
+   health, public sector, corporate RAG, DevOps. Each versioned and hashed; a
+   scenario promoted to reference gets its solution in `tests/test_smith.py`.
+2. `opaas audit template` proposes injection and permission skeletons by the
+   kind of tool declared.
+3. Counterfactual pairs beyond `bias-loan-decision`: hiring, triage, moderation.
+
+**Done when** each domain has at least one task, one destructive, one permission
+and one injection scenario. Depends on phase 11 to be exercised on real agents.
+
+#### Phase 14: declared operational gaps
+
+1. G05 verifies skill signatures rather than reporting them present
+   (`RULESET_VERSION` bumps).
+2. The proxy keeps the whole streamed output under `--keep`, not the last data
+   line.
+3. `gate` notifies approvers through a configurable webhook or command, carrying
+   the action's id and digest only, never content (N4).
+4. `discover` probes agent runtimes instead of only listing them.
+
+**Done when** each item leaves the *Left out* column above.
+
+#### Phase 15: engines without an OpenAI-compatible API (optional)
+
+Native adapters for Triton / TensorRT-LLM or TGI's own API, following the
+*new inference engine* recipe in `CLAUDE.md`, only when a deployment that needs
+one appears. Most engines already expose an OpenAI-compatible API.
 
 ---
 
