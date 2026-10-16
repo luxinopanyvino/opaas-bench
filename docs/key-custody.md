@@ -2,6 +2,8 @@
 
 The root Ed25519 private key is the system's only secret. Every credential is signed with it; with the public one, published in the DID document, anyone verifies a credential **without depending on onpremIALabs infrastructure**. If the key is lost, no new credentials can be issued and nothing can be re-certified; if it leaks, anyone can issue certificates that look legitimate.
 
+> **What applies today, and what is decided.** The sections from *Generation* to *Rotation and revocation* describe how the tool works now: one key, in an encrypted file, signing every credential. [D65](decisions.md#d65--an-offline-root-on-two-tokens-delegates-to-an-issuing-key-issuances-stay-on-the-published-hash-chain) settles how the production root will be held, and that is different. The root stays offline on two hardware tokens and signs only delegations to an issuing key; the issuing key is the one that signs credentials. The decision is under [*Decided custody*](#decided-custody-d65) below. The tooling it needs is phase 10, step 2 of the [work plan](workplan.md#phase-10-production-root-of-trust), and until it exists no production key is generated.
+
 ## Generation
 
 ```bash
@@ -64,8 +66,32 @@ The throwaway key was discarded. Nothing about the rehearsal is committed: bundl
 - On suspicion of compromise: publish the new key, mark the previous one as revoked in the DID document with the date, and reissue the credentials that have not expired.
 - The credentials' 90-day expiry (D28) limits the reach of a compromise on its own.
 
-## Open decisions
+## Decided custody (D65)
 
-- **Hardware token** (YubiKey / HSM) versus an encrypted file. A token removes the exportable copy of the key, at the cost of complicating automated signing and creating a single physical point of failure that demands a backup plan of its own.
-- **Anchoring in a public log** Certificate Transparency style (Phase 6): it would allow detecting unauthorized issuances even with a compromised key.
-- **Key separation**: an offline root key that only signs intermediate issuing keys, instead of signing credentials directly.
+The three questions left open here were settled in [D65](decisions.md#d65--an-offline-root-on-two-tokens-delegates-to-an-issuing-key-issuances-stay-on-the-published-hash-chain), which also records what each answer loses.
+
+**Key separation.** An offline root signs *delegations* to an issuing key, and only the issuing key signs credentials. A delegation states the issuing key's public key, its verification-method id and its validity window, and is signed with `eddsa-jcs-2022` over its JCS bytes. Depth is fixed at root → issuing key → credential. Delegations last months, never less than a credential's 90 days (D28); the exact length is chosen at the ceremony.
+
+**Where each key lives.**
+
+| Key | Held in | Used for | Backup |
+|---|---|---|---|
+| root `#key-1` | hardware token A, generated on it, never exported | signing delegations, a few times a year | token B |
+| root `#key-2` | hardware token B, generated on it, never exported | the same | token A |
+| issuing key | PKCS#8 file encrypted with a passphrase, on the signing machine | signing every credential | two encrypted copies on different media, passphrase kept apart (rule 3 above) |
+
+Both root keys are published in `did.json` and both are in the bundled anchor. The two tokens are kept in different places, each with its own PIN, and the PIN is never kept next to its token. The custody rules above apply to the issuing key unchanged. For the root they become: generated on the token, used only on an offline machine, and never brought online to sign a credential.
+
+**What `verify` does.** It takes the root from the same three places as today, never from the credential. It then checks, in order:
+
+1. the delegation's signature under that root;
+2. that the delegation's validity covers the credential's `proof.created`;
+3. that the issuing key is not on the revocation list;
+4. that `proof.verificationMethod` names the delegated key;
+5. the credential's signature under the issuing key.
+
+A delegation may travel with the credential, because it is believed only after it verifies under an anchor. A key in the credential that no anchor delegates is refused, as now. `--key` still means *trust this key directly*.
+
+**Rotation under D65.** A planned rotation of the issuing key is a new delegation signed by the root, published before the old one expires. A compromised issuing key goes on the revocation list and is replaced by a new delegation. Neither touches the anchor. Losing one token leaves the other root key working; the lost key is revoked in `did.json` and a replacement token gets a new key, which needs a new anchor in the next release. Losing both means a new root.
+
+**Issuance log.** The local hash chain of D21 stays the issuance log, and it is published in a public git repository, so every clone is a dated copy held by someone else. A public log, Certificate Transparency style, is not adopted: it would need the network at signing time and a third-party operator, and it would publish when credentials are issued and how many. What is given up is detecting a credential issued with a valid key and kept out of the published chain.

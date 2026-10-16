@@ -32,7 +32,7 @@ The report carries `coverage` (`blocksEvaluated`, `blocksMissing`, `complete`) a
 
 ## D4 — `verify` never takes the key from the credential
 
-**Status:** applied · **Affects:** [`credential/trust.py`](../src/opaas/core/credential/trust.py)
+**Status:** applied; wording made precise by [D65](#d65--an-offline-root-on-two-tokens-delegates-to-an-issuing-key-issuances-stay-on-the-published-hash-chain) (a key is trusted only if it chains to an anchor) · **Affects:** [`credential/trust.py`](../src/opaas/core/credential/trust.py)
 
 Verifying offline requires having the issuer's public key beforehand. Resolution, in order: explicit `--key` / `--did-document` → anchors installed in `~/.opaas/anchors/` (or `$OPAAS_ANCHOR_DIR`) → anchors bundled with the tool.
 
@@ -47,6 +47,53 @@ The bundled anchors directory is **empty** until the production root key exists,
 JCS delegates number serialization to ECMAScript, whose exponential notation rules we do not fully replicate. For |x| ≥ 1e21 or |x| < 1e-6 a `CanonicalizationError` is raised instead of emitting bytes another language could reproduce differently.
 
 Signing non-reproducible bytes produces a credential nobody can verify and that also looks correct at issuance time. A loud failure is preferable.
+
+---
+
+## D65 — An offline root on two tokens delegates to an issuing key; issuances stay on the published hash chain
+
+**Status:** accepted, not yet implemented (phase 10, steps 2–4) · **Settles:** the three open decisions of [`key-custody.md`](key-custody.md) · **Revises:** the wording of [D4](#d4--verify-never-takes-the-key-from-the-credential) · **Keeps:** [D21](#d21--the-log-is-a-hash-chain-and-it-is-not-called-certificate-transparency) · **Would affect:** [`credential/keys.py`](../src/opaas/core/credential/keys.py), [`credential/trust.py`](../src/opaas/core/credential/trust.py), [`credential/vc.py`](../src/opaas/core/credential/vc.py), [`web/assets/verify.js`](../src/opaas/web/assets/verify.js), `keygen`, `sign`, `verify`
+
+Phase 10 of the work plan cannot ship a bundled anchor until it is settled what that anchor is. Key custody left three questions open. Each is decided here, before any production key exists, because the anchor that ships in the package is very hard to take back once it is out.
+
+**Key separation: an offline root that signs issuing keys.** The root no longer signs credentials. It signs a *delegation*: a document stating the issuing key's public key, its verification-method id and its validity window, with the issuer set to `did:web:onpremialabs.com`. It is canonicalized with JCS and signed with `eddsa-jcs-2022`, the same as every other OPAAS signature (D1, D5). Credentials are signed with the issuing key.
+
+- **Why.** Signing directly with the root means the root is in use at every issuance, so a compromise means changing the root itself. Every verifier would then have to re-pin, and every OPAAS release already out would ship an anchor that is now wrong. With a delegation, a compromised or expiring issuing key is replaced by having the root sign a new one. The anchor and the published `did.json` stay as they are.
+- **Depth is fixed** at root → issuing key → credential. There is no path building, no X.509 and no chain of delegations.
+- **Delegations are short-lived**, months rather than years, and always longer than the 90 days a credential lives (D28). The exact length is chosen at the ceremony and recorded in the delegation.
+
+**Custody: the root on two hardware tokens, the issuing key in an encrypted file.**
+
+- **Two root keys**, each generated inside its own token (an Ed25519-capable YubiKey or equivalent) and never exported. Both are published in the DID document as `#key-1` and `#key-2`, and the two tokens are kept in different places. One token is the other's backup. Each holds its own key because a key generated on a token cannot be copied, and a key generated outside and then imported would lose the one property the token is for: that the root never existed anywhere it could be copied.
+- **The issuing key** stays where every key is today: PKCS#8 encrypted with a passphrase, with the custody rules of `key-custody.md`. It is the key used often, and automated signing has to stay possible.
+- **Why the split.** The root is used a few times a year, so needing a token for it costs almost nothing. A token at every issuance would cost a lot.
+
+**Issuances: the local hash chain, published in a public repository.** D21 stands: issuances stay on the hash chain. The chain is published in a public git repository, so every clone is a dated copy held by someone other than the issuer.
+
+- **A public log is not adopted** for now. That means Certificate Transparency style, Sigstore Rekor or anything else with a Merkle tree and independent monitors.
+- **Why.** A public log would need the network at signing time and would depend on an operator with no service commitment to OPAAS. Its entries are permanent and would publish when credentials are issued and how many, which is business information. Short delegations and a revocation list (phase 10, step 4) already bound how long a compromised issuing key can do damage. That is less than a public log detects, but it costs much less.
+- **An RFC 3161 timestamp was not chosen either.** It proves when something existed, not that nothing else was issued.
+
+**What changes in `verify`.**
+
+1. The root still comes only from `--key` / `--did-document`, `~/.opaas/anchors/` or the bundled anchors, in that order (D4).
+2. The delegation is checked against that root: its signature, and its validity window must cover the credential's `proof.created`.
+3. The issuing key must not be on the revocation list.
+4. `proof.verificationMethod` must name the delegated key.
+5. Only then is the credential's signature checked, with the issuing key.
+
+The delegation may travel with the credential, because it is not believed for what it says: it is believed only after it verifies under an anchor. D4's rule is therefore worded more precisely: **`verify` never trusts a key that does not chain to an anchor obtained outside the credential**. A key embedded in the credential with no delegation from an anchor is still refused. `--key` keeps its meaning: *trust this key directly*, whether it is the root or an issuing key. The browser verifier of the published site (`verify.js`) has to walk the same chain, or the site would accept less than the CLI does, or more.
+
+**Credentials signed before this change.** None was issued with a production key. Credentials signed directly by a test or self-issued key, with no delegation, keep verifying against that key through `--key`, `--did-document` or an installed anchor, exactly as now.
+
+**What is lost:**
+
+- **Unauthorized issuance may go unnoticed.** Someone holding a valid issuing key, or the root, can issue credentials nobody notices if they keep them out of the published chain. A public log would have exposed them; the hash chain only proves that the published log adds up. This was the main reason to want a public log, and it is given up on purpose.
+- **Credentials are bigger** by one delegation, and **there is a new failure**: a credential that does not verify because its delegation has expired. Signing with an expired delegation is refused at signing time, not discovered at verification.
+- **Generic VC libraries** understand the delegation no more than they understand `eddsa-jcs-2022` (D1). Outside OPAAS, a credential verifies only against the issuing key, supplied by hand.
+- **Losing both tokens means a new root**, and the anchor in every release changes. Losing one leaves the other. Tokens cost money, a token's firmware needs Ed25519 support, and the PIN is one more secret to keep apart from the token.
+- **Two verifiers need the walk**, Python and JavaScript. Tests have to pin that both agree on the same credentials.
+- **The issuing key is still a file.** A compromise of the signing machine together with the passphrase is still a full compromise of the issuing key, bounded by the delegation's validity and the revocation list rather than prevented.
 
 ---
 
@@ -764,7 +811,7 @@ Two safeguards that came out of testing it:
 
 ## D21 — The log is a hash chain, and it is not called Certificate Transparency
 
-**Status:** applied · **Affects:** [`transparency.py`](../src/opaas/core/transparency.py)
+**Status:** applied; kept over a public log by [D65](#d65--an-offline-root-on-two-tokens-delegates-to-an-issuing-key-issuances-stay-on-the-published-hash-chain) · **Affects:** [`transparency.py`](../src/opaas/core/transparency.py)
 
 Every issuance chains to the previous one. Altering, deleting or reordering an entry breaks the chain detectably, and a certificate missing from the log gives away an out-of-process issuance. `verify --log` adds the inclusion check.
 
@@ -1025,7 +1072,6 @@ The meerkat is drawn outside the repository. The terminal grid is generated from
 ## Design items still undecided
 
 - **Scoring/tier system.** Still does not exist, and there is a test (`test_report_has_no_aggregate_score`) that prevents one from slipping in by accident.
-- **Anchoring in a public log** Certificate Transparency style (Phase 6).
 - **Bias in agent decisions** (work plan, open question 4). The counterfactual-pair design of D32 extends to agents: the same task with one attribute changed. It belongs in `smith` as a scenario pair, and is not specified yet.
 - **Who decides which fields a deployment keeps in clear** (open question 2). The sentinel keeps digests by default and the operator adds fields with `--keep`; the card prints the operator's retention declaration. Whether a third party should be able to require fields is open.
 - **Revocation policy** for when an evaluated model changes version. The proposed sentinel (D33) would detect the change; how a certificate is then revoked is still open.
