@@ -50,6 +50,33 @@ Signing non-reproducible bytes produces a credential nobody can verify and that 
 
 ---
 
+## D67 — The ceremony's token profile, and how the signer finds the token's key
+
+**Status:** applied (phase 10, step 3 prepared; the ceremony itself pending) · **Implements:** [D65](#d65--an-offline-root-on-two-tokens-delegates-to-an-issuing-key-issuances-stay-on-the-published-hash-chain) · **Revises:** the token signer of [D66](#d66--the-delegation-walk-and-the-revocation-list-as-built) · **Affects:** [`credential/signers.py`](../src/opaas/core/credential/signers.py), [`cli/root.py`](../src/opaas/cli/root.py), [`docs/ceremony.md`](ceremony.md), [`scripts/rehearse_ceremony.py`](../scripts/rehearse_ceremony.py), `root-document`
+
+Preparing the ceremony so that nothing in it runs for the first time on the day meant writing it out command by command and rehearsing it against a real PKCS#11 module. Both showed things D66's stand-in could not.
+
+**The root document has its own command.** `opaas root-document --public-key A.pub.pem --public-key B.pub.pem --did did:web:onpremialabs.com` writes the DID document from the two tokens' public halves, in the order given (`#key-1`, `#key-2`). It prints each key's fingerprint and multibase and the file's SHA-256, which are what the ceremony writes down and checks over a second channel. The DID is never defaulted (D39). One key given twice is refused, because each token must hold its own key. An existing file is kept unless `--overwrite`, because a published root document is what verifiers pinned. A single key is accepted with a warning, since D65 holds the root on two tokens.
+
+**The signer pairs the token's two halves by `CKA_ID`, not by label.** PKCS#11 links a private key to its public key through `CKA_ID`. The label is only a name. Yubico's `ykcs11` labels them `Private key for PIV Authentication` and `Public key for PIV Authentication`, so D66's signer, which looked both up by the one `--key-label`, could not have opened a YubiKey. It now finds the private key by label, then the public key by the private key's `CKA_ID`, and falls back on the label for a token without ids. Found against SoftHSM2 with the halves labelled as `ykcs11` labels them: by label, `NoSuchKey`; by id, found.
+
+**A key that wants the PIN at every signature is refused when opened.** `ykcs11` marks some keys `CKA_ALWAYS_AUTHENTICATE`, slot 9c always and PIN policy ALWAYS. Such a key needs a context-specific login between `C_SignInit` and `C_Sign`, and python-pkcs11's `sign` makes both calls at once, leaving nowhere to put it (its `reaffirm_credentials` exists, but cannot be called there). The signer reads the attribute and stops before anything is signed, naming the profile to use instead.
+
+**A failed open logs out.** A session left logged in after a refusal answered the next attempt in the same process with `UserAlreadyLoggedIn`, which hides whether that PIN was right.
+
+**The ceremony's token profile.** YubiKey 5 with firmware 5.7 or later (the first with Ed25519 in PIV); the key generated on the device in **slot 9a** with **PIN policy ONCE** and **touch policy ALWAYS**; PIN, PUK and management key changed from the defaults, the management key stored on the token behind the PIN (`--protect`). The on-device attestation of each key goes to the public log repository with `did.json`, as evidence that the key was generated on the token and never imported. Token B proves it can sign by delegating to a throwaway key that token A then revokes. That revocation is the first revocation list, so verifiers start with a list that verifies, and B signs no second live delegation to the production issuing key. The full order is [the ceremony runbook](ceremony.md).
+
+**The rehearsal is a script and a test.** `scripts/rehearse_ceremony.py` runs every `opaas` command of the runbook in order, in subprocesses, under `did:web:rehearsal.example`. It uses two SoftHSM2 tokens when `SOFTHSM2_MODULE` names a module with Ed25519, and two encrypted key files with `--files`. The file-key run is part of `pytest`. The token run is skipped unless the module is set, and the script exits 3 rather than fake a module without `CKM_EDDSA`. It refuses to run, and fails, if `core/credential/anchors/` holds any JSON.
+
+**What is lost:**
+
+- **PIN policy ONCE is weaker than ALWAYS.** Once the PIN is entered, each further signature in that session needs only a touch. The session lasts one command on an offline machine, and touch ALWAYS keeps a person at every signature, but a machine compromised during the ceremony could get more signatures than the operator meant for the same PIN.
+- **Slot 9a is the PIV "authentication" slot.** The name does not matter to OPAAS, but someone who later uses the token for PIV logins would be using the root key. The tokens are used for nothing else.
+- **The ceremony still runs `ykman`, `ykcs11` and an on-token Ed25519 signature for the first time** unless the dress rehearsal with a spare token is done. No machine here had either a YubiKey 5.7 or a SoftHSM2 with Ed25519. The runbook marks those commands and requires the spare-token dress rehearsal for that reason.
+- **The file-key rehearsal adds about twenty seconds to `pytest`**, because each `opaas` command starts its own process, as it does at the ceremony.
+
+---
+
 ## D66 — The delegation walk and the revocation list, as built
 
 **Status:** applied (phase 10, steps 2 and 4) · **Implements:** [D65](#d65--an-offline-root-on-two-tokens-delegates-to-an-issuing-key-issuances-stay-on-the-published-hash-chain) · **Affects:** [`credential/delegation.py`](../src/opaas/core/credential/delegation.py), [`credential/revocation.py`](../src/opaas/core/credential/revocation.py), [`credential/signers.py`](../src/opaas/core/credential/signers.py), [`credential/proof.py`](../src/opaas/core/credential/proof.py), [`credential/trust.py`](../src/opaas/core/credential/trust.py), [`credential/vc.py`](../src/opaas/core/credential/vc.py), [`web/assets/verify.js`](../src/opaas/web/assets/verify.js), `delegate`, `revoke`, `sign`, `verify`, `trust`, `publish`
@@ -96,13 +123,13 @@ The first step that fails ends the walk, so the credential's own signature is ch
 - **Revocation is as fresh as the verifier's copy.** Offline means nobody is told. A verifier who never runs `trust --add` with a new list never learns of a revocation. The delegation's end date is the only bound that does not depend on them.
 - **A credential signed inside its delegation outlives it.** The window is checked at `proof.created` (D65), so a credential signed on the delegation's last day verifies for its full 90 days. A short delegation shortens how long a stolen issuing key can sign, not how long what it signed stays valid.
 - **Revocation fails closed on a bad list.** A corrupted or foreign file in `revocations/` makes every credential of that issuer fail until it is removed.
-- **The token code is untested against hardware.** `Pkcs11Signer` is written against python-pkcs11's documented API and tested against a stand-in. The first run on a real token is at the ceremony, which is why `delegate` re-verifies what the token signed.
+- **The token code is untested against hardware.** `Pkcs11Signer` is written against python-pkcs11's documented API and tested against a stand-in. The first run on a real token is at the ceremony, which is why `delegate` re-verifies what the token signed. (D67: run against SoftHSM2, it could not have opened a YubiKey key; now fixed, and the ceremony begins with a dress rehearsal on a spare token.)
 
 ---
 
 ## D65 — An offline root on two tokens delegates to an issuing key; issuances stay on the published hash chain
 
-**Status:** accepted; steps 2 and 4 implemented in [D66](#d66--the-delegation-walk-and-the-revocation-list-as-built), step 3 (the ceremony and the bundled anchor) pending · **Settles:** the three open decisions of [`key-custody.md`](key-custody.md) · **Revises:** the wording of [D4](#d4--verify-never-takes-the-key-from-the-credential) · **Keeps:** [D21](#d21--the-log-is-a-hash-chain-and-it-is-not-called-certificate-transparency) · **Would affect:** [`credential/keys.py`](../src/opaas/core/credential/keys.py), [`credential/trust.py`](../src/opaas/core/credential/trust.py), [`credential/vc.py`](../src/opaas/core/credential/vc.py), [`web/assets/verify.js`](../src/opaas/web/assets/verify.js), `keygen`, `sign`, `verify`
+**Status:** accepted; steps 2 and 4 implemented in [D66](#d66--the-delegation-walk-and-the-revocation-list-as-built), step 3 prepared and rehearsed in [D67](#d67--the-ceremonys-token-profile-and-how-the-signer-finds-the-tokens-key), the ceremony and the bundled anchor pending · **Settles:** the three open decisions of [`key-custody.md`](key-custody.md) · **Revises:** the wording of [D4](#d4--verify-never-takes-the-key-from-the-credential) · **Keeps:** [D21](#d21--the-log-is-a-hash-chain-and-it-is-not-called-certificate-transparency) · **Would affect:** [`credential/keys.py`](../src/opaas/core/credential/keys.py), [`credential/trust.py`](../src/opaas/core/credential/trust.py), [`credential/vc.py`](../src/opaas/core/credential/vc.py), [`web/assets/verify.js`](../src/opaas/web/assets/verify.js), `keygen`, `sign`, `verify`
 
 Phase 10 of the work plan cannot ship a bundled anchor until it is settled what that anchor is. Key custody left three questions open. Each is decided here, before any production key exists, because the anchor that ships in the package is very hard to take back once it is out.
 

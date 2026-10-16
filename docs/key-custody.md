@@ -2,7 +2,7 @@
 
 The root Ed25519 private key is the system's only secret. Every credential is signed with it; with the public one, published in the DID document, anyone verifies a credential **without depending on onpremIALabs infrastructure**. If the key is lost, no new credentials can be issued and nothing can be re-certified; if it leaks, anyone can issue certificates that look legitimate.
 
-> **What applies today, and what is decided.** The sections from *Generation* to *Rotation and revocation* describe how the tool works now: one key, in an encrypted file, signing every credential. [D65](decisions.md#d65--an-offline-root-on-two-tokens-delegates-to-an-issuing-key-issuances-stay-on-the-published-hash-chain) settles how the production root will be held, and that is different. The root stays offline on two hardware tokens and signs only delegations to an issuing key; the issuing key is the one that signs credentials. The decision is under [*Decided custody*](#decided-custody-d65) below. The tooling it needs exists ([D66](decisions.md#d66--the-delegation-walk-and-the-revocation-list-as-built)): `opaas delegate`, `sign --delegation`, `opaas revoke` and the walk in `verify`. What remains is the ceremony itself (phase 10, step 3 of the [work plan](workplan.md#phase-10-production-root-of-trust)), and until it is run no production key exists.
+> **What applies today, and what is decided.** The sections from *Generation* to *Rotation and revocation* describe how the tool works now: one key, in an encrypted file, signing every credential. [D65](decisions.md#d65--an-offline-root-on-two-tokens-delegates-to-an-issuing-key-issuances-stay-on-the-published-hash-chain) settles how the production root will be held, and that is different. The root stays offline on two hardware tokens and signs only delegations to an issuing key; the issuing key is the one that signs credentials. The decision is under [*Decided custody*](#decided-custody-d65) below. The tooling it needs exists ([D66](decisions.md#d66--the-delegation-walk-and-the-revocation-list-as-built)): `opaas delegate`, `sign --delegation`, `opaas revoke` and the walk in `verify`. What remains is the ceremony itself (phase 10, step 3 of the [work plan](workplan.md#phase-10-production-root-of-trust)), written out step by step in [the ceremony runbook](ceremony.md). Until it is run, no production key exists.
 
 ## Generation
 
@@ -48,7 +48,7 @@ The key is never distributed inside the credential: a credential that carries it
 
 ## The ceremony, rehearsed
 
-The full chain — `keygen` → `sign` → `trust --add` → `verify` with no key flags — has been exercised end to end with a throwaway key, so the production ceremony is not the first time it runs. What it produced, in order:
+**The single-key chain (before D65).** `keygen` → `sign` → `trust --add` → `verify` with no key flags was exercised end to end with a throwaway key:
 
 | step | result |
 |---|---|
@@ -58,7 +58,35 @@ The full chain — `keygen` → `sign` → `trust --add` → `verify` with no ke
 | `trust --add` | prints the fingerprint, then pins |
 | `verify` again | six checks pass: structure, cryptosuite, signature, validity, report hash, log inclusion |
 
-The throwaway key was discarded. Nothing about the rehearsal is committed: bundling a test anchor would make `verify` accept credentials signed with a key that is not the production one, which is worse than having no anchor at all.
+**The D65 ceremony.** [`scripts/rehearse_ceremony.py`](../scripts/rehearse_ceremony.py) runs every `opaas` command of [the runbook](ceremony.md), in its order, as separate processes, with `did:web:rehearsal.example` and throwaway keys. `tests/test_ceremony_rehearsal.py` runs it on every `pytest`. With `SOFTHSM2_MODULE` set, the two root keys are generated inside two SoftHSM2 tokens and every root signature goes through PKCS#11. Without it, `--files` uses two encrypted key files in place of the tokens. Rehearsed on 2026-10-16 (Windows 11, Python 3.12.10, python-pkcs11 0.10.0):
+
+| step | result (`--files`) |
+|---|---|
+| `root-document` from A and B | `#key-1`, `#key-2`; fingerprints, multibase and the file's SHA-256 printed |
+| `keygen` for the issuing key | encrypted PKCS#8 (`ENCRYPTED PRIVATE KEY`) |
+| `delegate` from A | signed under `#key-1`, 180 days, re-verified before writing |
+| `sign --delegation --log` | credential issued under the root's DID; `log-verify` adds up |
+| `verify` with no anchor | refuses (exit 2) |
+| `trust --add root/did.json`, `verify` | eleven checks pass: structure, cryptosuite, anchor, delegation, delegation-validity, revocation, delegated-key, signature, validity, report, log |
+| `delegate` from B | signed under `#key-2`: the backup token signs |
+| `revoke` signed by B, `trust --add`, `verify` | `revocation` fails with `REVOKED`; exit 1 |
+| afterwards | no unencrypted private key on disk; `core/credential/anchors/` still holds no JSON |
+
+**What could not be rehearsed here, and what turned up in the attempt.** The only SoftHSM2 build for Windows (2.5.0, portable) loads and initialises tokens, but offers neither `CKM_EC_EDWARDS_KEY_PAIR_GEN` nor `CKM_EDDSA`. The script stops at that check with exit 3 and does not fake the rest. No WSL distribution or container runtime was available to run a Linux SoftHSM. Against that module, with a P-256 key in place of the Ed25519 one, two problems the stand-in could not show were found and fixed (D67):
+
+- **The two halves of a key need not share a label.** With the halves labelled the way `ykcs11` labels them, the public half was not found by the private key's label (`NoSuchKey`), and was found by its `CKA_ID`. The signer now pairs them by `CKA_ID`.
+- **A failed open left the session logged in**, so the next attempt in the same process got `UserAlreadyLoggedIn` instead of `PinIncorrect`. It now logs out on every failure.
+
+The same run confirmed that a key generated `SENSITIVE` and not `EXTRACTABLE` refuses to give up `CKA_VALUE` (`AttributeSensitive`). The script checks the same on each SoftHSM root key.
+
+Three parts of the ceremony have therefore never run: `ykman`, `ykcs11`, and an Ed25519 signature made inside a token. The runbook marks each command that depends on them **[unverified]** or **[stand-in]**, and runs all of them once with a spare token, in a dress rehearsal before the real ceremony. On a machine with a SoftHSM2 that has Ed25519 (Linux packages built with OpenSSL 1.1.1 or later):
+
+```bash
+SOFTHSM2_MODULE=/usr/lib/softhsm/libsofthsm2.so uv run python scripts/rehearse_ceremony.py
+SOFTHSM2_MODULE=/usr/lib/softhsm/libsofthsm2.so uv run pytest tests/test_ceremony_rehearsal.py
+```
+
+Every throwaway key was discarded with its working directory. Nothing from any rehearsal is committed: bundling a test anchor would make `verify` accept credentials signed with a key that is not the production one, which is worse than having no anchor at all.
 
 ## Rotation and revocation
 
@@ -102,14 +130,14 @@ The root signs from its token through PKCS#11 (`uv sync --extra token`), on the 
 # On the offline machine, with token A (or B): delegate to the issuing key.
 opaas delegate --issuing-key issuing/opaas-root-ed25519.pub.pem \
   --root-did-document root/did.json \
-  --pkcs11-module /usr/lib/libykcs11.so --key-label "root key-1" \
+  --pkcs11-module /usr/lib/libykcs11.so --key-label "Private key for PIV Authentication" \
   --id did:web:onpremialabs.com#issuing-2026-10 --valid-days 180 --out delegation.json
 
 # On the signing machine: every credential carries the delegation.
 opaas sign --input report.json --key issuing/opaas-root-ed25519.pem --delegation delegation.json
 ```
 
-`root/did.json` lists both token keys as `#key-1` and `#key-2` (`credential.build_root_did_document` assembles it from the two public keys). The issuing key is generated with `opaas keygen` as any other key, and its own `did.json` is not used: with `--delegation`, the credential is issued under the root's name. `delegate` refuses a root key its document does not publish and a window of 90 days or less, and re-verifies what the token signed. `sign` refuses a delegation that has expired, has not started, or names another key.
+`root/did.json` lists both token keys as `#key-1` and `#key-2`. `opaas root-document --public-key A.pub.pem --public-key B.pub.pem --did did:web:onpremialabs.com` assembles it from the two public keys and prints their fingerprints. The issuing key is generated with `opaas keygen` as any other key, and its own `did.json` is not used: with `--delegation`, the credential is issued under the root's name. `delegate` refuses a root key its document does not publish and a window of 90 days or less, and re-verifies what the token signed. `sign` refuses a delegation that has expired, has not started, or names another key.
 
 ### Rotation and revocation under D65, step by step
 

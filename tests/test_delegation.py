@@ -5,6 +5,7 @@ held inside and only `sign` crossing. No test touches a token, a PKCS#11
 module or the network.
 """
 
+import hashlib
 import json
 import sys
 import types
@@ -29,6 +30,7 @@ from opaas.core.credential import (
     build_revocation_list,
     build_root_did_document,
     find_revocation_lists,
+    fingerprint,
     identity_for_signing,
     public_key_multibase,
     resolve_trust,
@@ -396,8 +398,14 @@ def test_a_root_document_refuses_one_key_on_two_tokens(chain):
 # ------------------------------------------------------------- PKCS#11 signer
 
 
-def _fake_pkcs11(monkeypatch, private_key, *, der=True):
-    """A stand-in for python-pkcs11 exposing only what Pkcs11Signer calls."""
+def _fake_pkcs11(monkeypatch, private_key, *, der=True, public_label="root-a",
+                 key_id=b"\x01", always_authenticate=False):
+    """A stand-in for python-pkcs11 exposing only what Pkcs11Signer calls.
+
+    `public_label` and `key_id` model how a token names the two halves:
+    SoftHSM keeps one label for both, ykcs11 gives each its own and pairs
+    them by CKA_ID.
+    """
     raw = private_key.public_key().public_bytes(
         serialization.Encoding.Raw, serialization.PublicFormat.Raw
     )
@@ -405,7 +413,9 @@ def _fake_pkcs11(monkeypatch, private_key, *, der=True):
     module = types.ModuleType("pkcs11")
     module.KeyType = types.SimpleNamespace(EC_EDWARDS="ec-edwards")
     module.ObjectClass = types.SimpleNamespace(PRIVATE_KEY="private", PUBLIC_KEY="public")
-    module.Attribute = types.SimpleNamespace(EC_POINT="ec-point")
+    module.Attribute = types.SimpleNamespace(
+        EC_POINT="ec-point", ID="id", ALWAYS_AUTHENTICATE="always-authenticate"
+    )
     module.Mechanism = types.SimpleNamespace(EDDSA="eddsa")
     opened = {}
 
@@ -414,16 +424,28 @@ def _fake_pkcs11(monkeypatch, private_key, *, der=True):
             self.object_class = object_class
 
         def __getitem__(self, attribute):
-            assert attribute == "ec-point"
-            return point
+            values = {"id": key_id}
+            if self.object_class == "private":
+                values["always-authenticate"] = always_authenticate
+            else:
+                values["ec-point"] = point
+            if attribute not in values:
+                raise KeyError(attribute)  # the binding raises AttributeTypeInvalid
+            return values[attribute]
 
         def sign(self, data, mechanism):
             assert mechanism == "eddsa"
             return private_key.sign(data)
 
     class Session:
-        def get_key(self, object_class, key_type, label):
-            assert key_type == "ec-edwards" and label == "root-a"
+        def get_key(self, object_class, key_type, label=None, id=None):
+            assert key_type == "ec-edwards"
+            if object_class == "private":
+                assert label == "root-a"
+            elif id is not None:
+                assert id == key_id
+            else:
+                assert label == public_label, f"no public key labelled {label!r}"
             return Key(object_class)
 
         def close(self):
@@ -464,6 +486,38 @@ def test_a_pkcs11_token_signs_a_delegation_that_verifies(chain, monkeypatch, der
     root = TrustRoot(keys=[(root_document["verificationMethod"][0]["id"], signer.public_key())],
                      origin="token", issuer=ROOT_DID)
     assert verify_credential(chain.credential(delegation), root, now=NOW).valid
+
+
+def test_the_tokens_public_half_is_found_by_its_id_whatever_its_label(monkeypatch):
+    """ykcs11 labels the halves "Private key for …" and "Public key for …" (D67)."""
+    token_key = Ed25519PrivateKey.generate()
+    _fake_pkcs11(monkeypatch, token_key, public_label="Public key for PIV Authentication")
+    signer = Pkcs11Signer(module="libykcs11.so", key_label="root-a", pin="123456",
+                          token_label="root A").open()
+    assert public_key_multibase(signer.public_key()) == public_key_multibase(
+        token_key.public_key()
+    )
+
+
+def test_a_token_without_key_ids_falls_back_on_the_label(monkeypatch):
+    token_key = Ed25519PrivateKey.generate()
+    _fake_pkcs11(monkeypatch, token_key, key_id=b"")
+    signer = Pkcs11Signer(module="softhsm2.so", key_label="root-a", pin="123456",
+                          token_label="root A").open()
+    assert public_key_multibase(signer.public_key()) == public_key_multibase(
+        token_key.public_key()
+    )
+
+
+def test_a_key_that_wants_the_pin_at_every_signature_is_refused_when_opened(monkeypatch):
+    """Found before the ceremony signs anything, not as a token error halfway (D67)."""
+    opened = _fake_pkcs11(monkeypatch, Ed25519PrivateKey.generate(), always_authenticate=True)
+    with pytest.raises(SignerError, match="PIN policy ONCE"):
+        Pkcs11Signer(module="libykcs11.so", key_label="root-a", pin="123456",
+                     token_label="root A").open()
+    # Left logged in, the session would answer the next attempt with
+    # UserAlreadyLoggedIn and hide whether that PIN was right.
+    assert opened.get("closed")
 
 
 def test_without_the_token_extra_the_signer_says_how_to_get_it(monkeypatch):
@@ -615,3 +669,81 @@ def test_revoke_will_not_extend_a_list_the_root_did_not_sign(tmp_path):
         "--reason", "lost token", "--list", str(tmp_path / "forged.json"),
     ])
     assert result.exit_code == 2
+
+
+def _token_publics(tmp_path):
+    """Two root keys as files; at the ceremony each private half stays on its token."""
+    keys = [Ed25519PrivateKey.generate(), Ed25519PrivateKey.generate()]
+    publics = []
+    for letter, key in zip("ab", keys, strict=True):
+        publics.append(_write_pem(tmp_path / f"token-{letter}.pub.pem", key, public=True))
+        _write_pem(tmp_path / f"token-{letter}.pem", key)
+    return keys, publics
+
+
+def test_root_document_lists_the_token_keys_in_the_order_given(tmp_path):
+    keys, publics = _token_publics(tmp_path)
+    out = tmp_path / "root" / "did.json"
+    result = runner.invoke(app, [
+        "root-document", "--public-key", str(publics[0]), "--public-key", str(publics[1]),
+        "--did", ROOT_DID, "--out", str(out),
+    ])
+    assert result.exit_code == 0, result.output
+    document = json.loads(out.read_text(encoding="utf-8"))
+    assert document == build_root_did_document(ROOT_DID, [key.public_key() for key in keys])
+    assert [m["id"] for m in document["verificationMethod"]] == [
+        f"{ROOT_DID}#key-1", f"{ROOT_DID}#key-2"
+    ]
+    # What the ceremony writes down and checks over a second channel.
+    text = " ".join(result.output.split())
+    for key in keys:
+        assert fingerprint(key.public_key()) in text
+        assert public_key_multibase(key.public_key()) in text
+    assert hashlib.sha256(out.read_bytes()).hexdigest() in text
+
+
+def test_root_document_refuses_one_key_twice_and_keeps_a_published_document(tmp_path):
+    _, publics = _token_publics(tmp_path)
+    out = tmp_path / "did.json"
+    twice = runner.invoke(app, [
+        "root-document", "--public-key", str(publics[0]), "--public-key", str(publics[0]),
+        "--did", ROOT_DID, "--out", str(out),
+    ])
+    assert twice.exit_code == 2
+    assert not out.exists()
+
+    out.write_text("{}", encoding="utf-8")
+    kept = runner.invoke(app, [
+        "root-document", "--public-key", str(publics[0]), "--public-key", str(publics[1]),
+        "--did", ROOT_DID, "--out", str(out),
+    ])
+    assert kept.exit_code == 2
+    assert out.read_text(encoding="utf-8") == "{}"
+
+
+def test_root_document_needs_a_did_named_by_whoever_runs_it(tmp_path):
+    _, publics = _token_publics(tmp_path)
+    result = runner.invoke(app, ["root-document", "--public-key", str(publics[0]),
+                                 "--out", str(tmp_path / "did.json")])
+    assert result.exit_code == 2
+    assert not (tmp_path / "did.json").exists()
+
+
+def test_either_token_delegates_under_the_document_root_document_wrote(tmp_path, monkeypatch):
+    """The ceremony's order: document from both tokens, then a delegation from token B."""
+    monkeypatch.setenv("OPAAS_ANCHOR_DIR", str(tmp_path / "anchors"))
+    _, publics = _token_publics(tmp_path)
+    files = _ceremony(tmp_path)
+    runner.invoke(app, [
+        "root-document", "--public-key", str(publics[0]), "--public-key", str(publics[1]),
+        "--did", ROOT_DID, "--out", str(files["root_did"]), "--overwrite",
+    ])
+    files["root_pem"] = tmp_path / "token-b.pem"
+    delegated = _delegate(files, tmp_path)
+    assert delegated.exit_code == 0, delegated.output
+    assert f"{ROOT_DID}#key-2" in delegated.output
+
+    assert _sign(files, tmp_path).exit_code == 0
+    runner.invoke(app, ["trust", "--add", str(files["root_did"]), "--yes"])
+    verified = runner.invoke(app, ["verify", "--credential", str(tmp_path / "credential.json")])
+    assert verified.exit_code == 0, verified.output

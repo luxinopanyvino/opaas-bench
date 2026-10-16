@@ -2567,6 +2567,7 @@ app.add_typer(_card_cli.app, name="card")
 app.add_typer(_evidence_cli.app, name="evidence")
 app.add_typer(_audit_cli.app, name="audit")
 # What the offline root signs (D65): top-level, beside keygen, sign and trust.
+app.command("root-document")(_root_cli.root_document)
 app.command("delegate")(_root_cli.delegate)
 app.command("revoke")(_root_cli.revoke)
 

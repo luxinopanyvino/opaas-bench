@@ -16,6 +16,7 @@ never needs it. The token must support Ed25519 (`CKK_EC_EDWARDS`,
 
 from __future__ import annotations
 
+import contextlib
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -72,13 +73,24 @@ class Pkcs11Signer:
             self._private = self._session.get_key(
                 object_class=ObjectClass.PRIVATE_KEY, key_type=edwards, label=self.key_label
             )
-            public = self._session.get_key(
-                object_class=ObjectClass.PUBLIC_KEY, key_type=edwards, label=self.key_label
+            if _attribute(self._private, getattr(Attribute, "ALWAYS_AUTHENTICATE", None)):
+                raise SignerError(
+                    f"The key {self.key_label!r} asks for the PIN again at every signature "
+                    "(CKA_ALWAYS_AUTHENTICATE; on a YubiKey, PIN policy ALWAYS or slot 9c), "
+                    "which this signer cannot answer. Generate the root key with PIN policy "
+                    "ONCE, as docs/ceremony.md does (D67)."
+                )
+            public = _public_half(
+                self._session, self._private, edwards, self.key_label, ObjectClass, Attribute
             )
             self._public = _ed25519_from_ec_point(bytes(public[Attribute.EC_POINT]))
         except SignerError:
+            self.close()
             raise
         except Exception as exc:  # the binding raises its own hierarchy, and many kinds
+            # A session left logged in answers the next attempt in this process
+            # with UserAlreadyLoggedIn, hiding whether that PIN was right.
+            self.close()
             raise SignerError(
                 f"Could not open the Ed25519 key {self.key_label!r} on the token "
                 f"({type(exc).__name__}: {exc}). Check the module path, the PIN and that the "
@@ -107,8 +119,41 @@ class Pkcs11Signer:
 
     def close(self) -> None:
         if self._session is not None:
-            self._session.close()
+            with contextlib.suppress(Exception):
+                self._session.close()
             self._session = None
+        self._private = None
+
+
+def _attribute(key: Any, attribute: Any) -> Any:
+    """The attribute's value, or None when the token does not have it."""
+    if attribute is None:
+        return None
+    try:
+        return key[attribute]
+    except Exception:  # AttributeTypeInvalid, AttributeSensitive, …: the binding's own
+        return None
+
+
+def _public_half(
+    session: Any, private: Any, key_type: Any, label: str, object_class: Any, attribute: Any
+) -> Any:
+    """The public key paired with `private`: by CKA_ID first, by label second (D67).
+
+    PKCS#11 pairs the two halves of a key by CKA_ID; the label is a name and
+    nothing obliges a token to give both halves the same one. Yubico's ykcs11
+    does not: "Private key for PIV Authentication" and "Public key for PIV
+    Authentication". SoftHSM keeps whatever label the key was generated with.
+    """
+    key_id = _attribute(private, attribute.ID)
+    if key_id:
+        try:
+            return session.get_key(
+                object_class=object_class.PUBLIC_KEY, key_type=key_type, id=bytes(key_id)
+            )
+        except Exception:  # NoSuchKey, MultipleObjectsReturned: fall back on the label
+            pass
+    return session.get_key(object_class=object_class.PUBLIC_KEY, key_type=key_type, label=label)
 
 
 def _ed25519_from_ec_point(point: bytes) -> Ed25519PublicKey:
